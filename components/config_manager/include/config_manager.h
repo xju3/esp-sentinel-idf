@@ -29,7 +29,7 @@ typedef struct {
 typedef struct {
     char ssid[CONFIG_MAX_WIFI_SSID_LEN];
     char pass[CONFIG_MAX_WIFI_PASS_LEN];
-} wifi_config_t;
+} user_wifi_config_t;
 
 typedef struct {
     char http[CONFIG_MAX_HOST_HTTP_LEN];
@@ -44,7 +44,7 @@ typedef struct {
     int16_t years;
     freq_config_t detect;
     freq_config_t report;
-    wifi_config_t wifi;
+    user_wifi_config_t wifi;
     host_config_t host;
     bool is_configured;
 } user_config_t;

@@ -8,8 +8,8 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "logger.h"
 
-static const char *TAG = "fs_utils";
 static bool s_storage_mounted = false;
 static bool s_user_mounted = false;
 
@@ -27,15 +27,15 @@ static esp_err_t mount_spiffs(const char *label, const char *base_path, int max_
         return ESP_OK; // already mounted
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount SPIFFS '%s' at '%s': %s", label, base_path, esp_err_to_name(err));
+        LOG_ERRORF("Failed to mount SPIFFS '%s' at '%s': %s", label, base_path, esp_err_to_name(err));
         return err;
     }
 
     size_t total = 0;
     size_t used = 0;
     if (esp_spiffs_info(label, &total, &used) == ESP_OK) {
-        ESP_LOGI(TAG, "SPIFFS '%s' mounted at '%s' (used %u / total %u)",
-                 label, base_path, (unsigned)used, (unsigned)total);
+        LOG_INFOF("SPIFFS '%s' mounted at '%s' (used %u / total %u)",
+                  label, base_path, (unsigned)used, (unsigned)total);
     }
     return ESP_OK;
 }
@@ -115,13 +115,13 @@ esp_err_t fsu_write_file(const char *path, const char *data, size_t len)
 
     FILE *f = fopen(path, "wb");
     if (!f) {
-        ESP_LOGE(TAG, "Failed to open %s for writing", path);
+        LOG_ERRORF("Failed to open %s for writing", path);
         return ESP_FAIL;
     }
     size_t written = fwrite(data, 1, len, f);
     fclose(f);
     if (written != len) {
-        ESP_LOGE(TAG, "Write failed (%u/%u)", (unsigned)written, (unsigned)len);
+        LOG_ERRORF("Write failed (%u/%u)", (unsigned)written, (unsigned)len);
         return ESP_FAIL;
     }
     return ESP_OK;

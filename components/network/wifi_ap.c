@@ -1,18 +1,18 @@
 #include "esp_wifi.h"
 #include "esp_mac.h"
 #include "esp_event.h"
-#include "esp_log.h"
 #include "esp_system.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_netif.h"
 #include "nvs_flash.h"
 #include "network_manager.h" // 你自己的头文件
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "logger.h"
 
-static const char *TAG = "WIFI_AP";
 static TaskHandle_t s_dns_task_handle = NULL;
 
 // AP 参数定义
@@ -45,19 +45,19 @@ static void dns_server_task(void *pvParameters)
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        LOG_ERRORF("Unable to create socket: errno %d", errno);
         vTaskDelete(NULL);
         return;
     }
 
     if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
-        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+        LOG_ERRORF("Socket unable to bind: errno %d", errno);
         close(sock);
         vTaskDelete(NULL);
         return;
     }
 
-    ESP_LOGI(TAG, "DNS Server started for Captive Portal");
+    LOG_INFO("DNS Server started for Captive Portal");
 
     while (1) {
         struct sockaddr_in source_addr;
@@ -65,7 +65,7 @@ static void dns_server_task(void *pvParameters)
 
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
         if (len < 0) {
-            ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+            LOG_ERRORF("recvfrom failed: errno %d", errno);
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -111,6 +111,7 @@ void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_ap();
+    esp_netif_create_default_wifi_sta();
 
     // 2. 初始化 Wi-Fi 驱动
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -139,12 +140,12 @@ void wifi_init_softap(void) {
     }
 
     // 4. 启动 Wi-Fi
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "SoftAP 启动成功! SSID:%s password:%s",
-             (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
+    LOG_INFOF("SoftAP 启动成功! SSID:%s password:%s",
+              (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
 
     // 启动 Captive Portal DNS 服务
     captive_dns_start();

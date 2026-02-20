@@ -596,6 +596,12 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
+# App Config
+#
+CONFIG_DEV_MODE=y
+# end of App Config
+
+#
 # Compiler options
 #
 CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
@@ -2300,6 +2306,14 @@ CONFIG_WIFI_PROV_AUTOSTOP_TIMEOUT=30
 CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # CONFIG_WIFI_PROV_STA_FAST_SCAN is not set
 # end of Wi-Fi Provisioning Manager
+
+#
+# Logger
+#
+CONFIG_LOGGER_ENABLE=y
+CONFIG_LOGGER_LEVEL=0
+CONFIG_LOGGER_TAG="APP"
+# end of Logger
 # end of Component config
 
 # CONFIG_IDF_EXPERIMENTAL_FEATURES is not set

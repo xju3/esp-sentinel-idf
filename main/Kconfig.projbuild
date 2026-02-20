@@ -1,0 +1,10 @@
+menu "App Config"
+
+config DEV_MODE
+    bool "Enable developer mode"
+    default y
+    help
+      When enabled, the firmware will keep the web server running even after
+      Wi-Fi is configured, and may enable other dev-only features.
+
+endmenu

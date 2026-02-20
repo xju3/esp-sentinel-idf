@@ -5,13 +5,9 @@
 #include <sys/stat.h>
 
 #include "esp_http_server.h"
-#include "esp_log.h"
 #include "esp_spiffs.h"
-
-static const char *TAG = "web_server";
-
-void captive_dns_start(void);
-void captive_dns_stop(void);
+#include "api_handlers.h"
+#include "logger.h"
 
 static httpd_handle_t s_server = NULL;
 
@@ -35,7 +31,7 @@ static esp_err_t ensure_spiffs_mounted(void)
         return ESP_OK; // already mounted
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount SPIFFS: %s", esp_err_to_name(err));
+        LOG_ERRORF("Failed to mount SPIFFS: %s", esp_err_to_name(err));
         return err;
     }
     return ESP_OK;
@@ -141,9 +137,33 @@ esp_err_t web_server_start(void)
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     if (httpd_start(&s_server, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start HTTP server");
+        LOG_ERROR("Failed to start HTTP server");
         return ESP_FAIL;
     }
+
+    // API endpoints
+    httpd_uri_t api_config = {
+        .uri = "/api/config",
+        .method = HTTP_GET,
+        .handler = api_get_config_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t api_save = {
+        .uri = "/api/save",
+        .method = HTTP_POST,
+        .handler = api_save_config_handler,
+        .user_ctx = NULL,
+    };
+    httpd_uri_t api_wifi = {
+        .uri = "/api/wifi-list",
+        .method = HTTP_GET,
+        .handler = api_wifi_list_handler,
+        .user_ctx = NULL,
+    };
+
+    httpd_register_uri_handler(s_server, &api_config);
+    httpd_register_uri_handler(s_server, &api_save);
+    httpd_register_uri_handler(s_server, &api_wifi);
 
     httpd_uri_t catch_all = {
         .uri = "/*",
@@ -153,9 +173,7 @@ esp_err_t web_server_start(void)
     };
     httpd_register_uri_handler(s_server, &catch_all);
 
-    captive_dns_start();
-
-    ESP_LOGI(TAG, "Web server started");
+    LOG_INFO("Web server started");
     return ESP_OK;
 }
 
@@ -166,5 +184,4 @@ void web_server_stop(void)
     }
     httpd_stop(s_server);
     s_server = NULL;
-    captive_dns_stop();
 }
