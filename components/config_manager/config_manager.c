@@ -12,6 +12,8 @@
 
 #define CONFIG_LOG_CHUNK 512
 
+user_config_t g_user_config;
+
 // 安全拷贝字符串，保证结尾有 '\0' 且不溢出。
 static void safe_copy(char *dst, size_t dst_size, const char *src)
 {
@@ -207,10 +209,12 @@ esp_err_t config_manager_load(user_config_t *out_cfg)
             LOG_WARN("User config parse failed; using defaults");
             (void)config_manager_log_default_json();
             out_cfg->is_configured = false;
+            g_user_config = *out_cfg;
             return ESP_OK;
         }
         // 仅在用户配置解析成功时打印当前用户配置
         (void)log_config_json(CONFIG_USER_PATH, "User");
+        g_user_config = *out_cfg;
         return ESP_OK; // 用户配置成功覆盖
     }
 
@@ -218,6 +222,7 @@ esp_err_t config_manager_load(user_config_t *out_cfg)
     LOG_INFO("User config not found; using defaults");
     (void)config_manager_log_default_json();
     out_cfg->is_configured = false;
+    g_user_config = *out_cfg;
     return ESP_OK;
 }
 

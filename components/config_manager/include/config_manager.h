@@ -49,6 +49,9 @@ typedef struct {
     bool is_configured;
 } user_config_t;
 
+// 全局配置实例（加载后可被各模块直接使用）
+extern user_config_t g_user_config;
+
 esp_err_t config_manager_init(void);
 
 // Load default config, then override with user config if present.

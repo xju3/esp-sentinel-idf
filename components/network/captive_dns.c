@@ -1,9 +1,12 @@
 #include <string.h>
 #include <stdint.h>
 
+#include "esp_log.h"
 #include "lwip/udp.h"
 #include "lwip/ip4_addr.h"
-#include "logger.h"
+
+// 目前不参与构建Captive Portal, 暂留此文件.
+static const char *TAG = "captive_dns";
 
 static struct udp_pcb *s_dns_pcb = NULL;
 static ip4_addr_t s_dns_ip;
@@ -117,19 +120,19 @@ void captive_dns_start(void)
 
     s_dns_pcb = udp_new();
     if (!s_dns_pcb) {
-        LOG_ERROR("udp_new failed");
+        ESP_LOGE(TAG, "udp_new failed");
         return;
     }
 
     if (udp_bind(s_dns_pcb, IP_ADDR_ANY, 53) != ERR_OK) {
-        LOG_ERROR("udp_bind failed");
+        ESP_LOGE(TAG, "udp_bind failed");
         udp_remove(s_dns_pcb);
         s_dns_pcb = NULL;
         return;
     }
 
     udp_recv(s_dns_pcb, dns_recv, NULL);
-    LOG_INFO("Captive DNS started (192.168.4.1)");
+    ESP_LOGI(TAG, "Captive DNS started (192.168.4.1)");
 }
 
 void captive_dns_stop(void)
@@ -139,5 +142,5 @@ void captive_dns_stop(void)
     }
     udp_remove(s_dns_pcb);
     s_dns_pcb = NULL;
-    LOG_INFO("Captive DNS stopped");
+    ESP_LOGI(TAG, "Captive DNS stopped");
 }
