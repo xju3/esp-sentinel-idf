@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Sentinel 设备配置</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="pragma" content="no-cache">
+  <meta http-equiv="cache-control" content="no-cache">
+  <link rel="stylesheet" href="style.css">
+  <script src="locales.js"></script>
+</head>
+<body>
+  <!-- 遮罩层 -->
+  <div class="mask-overlay" id="processing-mask">
+    <div class="mask-content">
+      <div class="mask-spinner"></div>
+      <div class="mask-message" id="mask-message">正在处理中...</div>
+      <div class="mask-details" id="mask-details">请稍候</div>
+    </div>
+  </div>
+  
+  <div class="container">
+    <h1 data-i18n="title">Sentinel 设备配置</h1>
+    <p class="subtitle" data-i18n="subtitle">请填写设备信息并设置监测参数</p>
+    
+   
+    
+    <form id="device-form">
+      <div class="section">
+        <h2 class="section-title" data-i18n="basicInfo">设备信息</h2>
+        <div class="form-row">
+          <div class="form-col">
+            <div class="form-group">
+              <label for="model-type" data-i18n="modelType">机型 *</label>
+              <select id="model-type" name="model-type" required>
+                <option value="" data-i18n="selectModel">请选择机型</option>
+                <option value="A" data-i18n="modelA">A型 - 标准工业型</option>
+                <option value="B" data-i18n="modelB">B型 - 高温防爆型</option>
+                <option value="C" data-i18n="modelC">C型 - 精密测量型</option>
+                <option value="D" data-i18n="modelD">D型 - 移动便携型</option>
+              </select>
+            </div>
+          </div>
+        <div class="form-row">
+          <div class="form-col">
+            <div class="form-group">
+              <label for="device-id" data-i18n="deviceId">设备编号 *</label>
+              <input type="text" id="device-id" name="device-id" required placeholder="例如: SN-2025-001" data-i18n-placeholder="deviceIdPlaceholder">
+            </div>
+          </div>
+          <div class="form-col">
+            <div class="form-group">
+              <label for="device-name" data-i18n="deviceName">设备名称 *</label>
+              <input type="text" id="device-name" name="device-name" required placeholder="例如: 主电机监测器" data-i18n-placeholder="deviceNamePlaceholder">
+            </div>
+          </div>
+        </div>
+        
+        
+          <div class="form-col">
+            <div class="form-group">
+              <label for="years-used" data-i18n="yearsUsed">已用年限 (年)</label>
+              <input type="number" id="years-used" name="years-used" min="0" max="50" step="0.5" placeholder="例如: 3.5" data-i18n-placeholder="yearsUsedPlaceholder">
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2 class="section-title" data-i18n="frequencySettings">监测频率设置</h2>
+        
+        <!-- 检测频率设置 -->
+        <div class="form-group">
+          <label data-i18n="detectFrequencyUnit">检测频率时间单位</label>
+          <div class="radio-group">
+            <div class="radio-option">
+              <input type="radio" id="detect-type-1" name="detect-type" value="1" checked>
+              <label for="detect-type-1" class="radio-label" data-i18n="secondsOption">秒</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="detect-type-2" name="detect-type" value="2">
+              <label for="detect-type-2" class="radio-label" data-i18n="minutesOption">分钟</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="detect-type-3" name="detect-type" value="3">
+              <label for="detect-type-3" class="radio-label" data-i18n="hoursOption">小时</label>
+            </div>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-col">
+            <div class="form-group">
+              <div class="slider-container">
+                <div class="slider-header">
+                  <label data-i18n="detectFrequency">检测频率</label>
+                  <span class="slider-value" id="detection-value">1</span>
+                </div>
+                <div class="slider-track-container">
+                  <div class="slider-track"></div>
+                  <div class="slider-ticks" id="detection-ticks">
+                    <!-- 刻度线将由JavaScript生成 -->
+                  </div>
+                  <input type="range" id="detection-freq" name="detection-freq" class="slider" min="0" max="10" step="1" value="0">
+                </div>
+                <div class="slider-number-labels" id="detection-numbers">
+                  <!-- 数字标签将由JavaScript生成 -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 上报频率设置 -->
+        <div class="form-group">
+          <label data-i18n="reportFrequencyUnit">上报频率时间单位</label>
+          <div class="radio-group">
+            <div class="radio-option">
+              <input type="radio" id="report-type-1" name="report-type" value="1">
+              <label for="report-type-1" class="radio-label" data-i18n="secondsOption">秒 (1-60秒，每5秒间隔)</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="report-type-2" name="report-type" value="2">
+              <label for="report-type-2" class="radio-label" data-i18n="minutesOption">分钟 (1-60分钟，每5分钟间隔)</label>
+            </div>
+            <div class="radio-option">
+              <input type="radio" id="report-type-3" name="report-type" value="3" checked>
+              <label for="report-type-3" class="radio-label" data-i18n="hoursOption">小时 (每半小时间隔)</label>
+            </div>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <div class="form-col">
+            <div class="form-group">
+              <div class="slider-container">
+                <div class="slider-header">
+                  <label data-i18n="reportFrequency">上报频率</label>
+                  <span class="slider-value" id="reporting-value">5</span>
+                </div>
+                <div class="slider-track-container">
+                  <div class="slider-track"></div>
+                  <div class="slider-ticks" id="reporting-ticks">
+                    <!-- 刻度线将由JavaScript生成 -->
+                  </div>
+                  <input type="range" id="reporting-freq" name="reporting-freq" class="slider" min="0" max="10" step="1" value="4">
+                </div>
+                <div class="slider-number-labels" id="reporting-numbers">
+                  <!-- 数字标签将由JavaScript生成 -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2 class="section-title" data-i18n="serverConfig">服务器配置</h2>
+        <div class="form-row">
+          <div class="form-col">
+            <div class="form-group">
+              <label for="host-http" data-i18n="httpServerAddress">HTTP 服务器地址 *</label>
+              <input type="text" id="host-http" name="host-http" required placeholder="例如: http://example.com/api" data-i18n-placeholder="httpServerPlaceholder">
+              <small style="color: #7f8c8d; display: block; margin-top: 5px;" data-i18n="httpServerNote">HTTP API 服务器地址</small>
+            </div>
+          </div>
+          <div class="form-col">
+            <div class="form-group">
+              <label for="host-mqtt" data-i18n="mqttServerAddress">MQTT 服务器地址 *</label>
+              <input type="text" id="host-mqtt" name="host-mqtt" required placeholder="例如: mqtt://example.com:1883" data-i18n-placeholder="mqttServerPlaceholder">
+              <small style="color: #7f8c8d; display: block; margin-top: 5px;" data-i18n="mqttServerNote">MQTT 消息服务器地址</small>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2 class="section-title" data-i18n="communicationMethod">通讯方式</h2>
+        <div class="form-group">
+          <div class="comm-type-group">
+            <div class="comm-type-option" id="comm-4g-option">
+              <input type="radio" id="comm-type-1" name="comm-type" value="1" checked>
+              <label for="comm-type-1" class="comm-type-label" data-i18n="comm4G">4G</label>
+            </div>
+            <div class="comm-type-option" id="comm-wifi-option">
+              <input type="radio" id="comm-type-2" name="comm-type" value="2">
+              <label for="comm-type-2" class="comm-type-label" data-i18n="commWiFi">WiFi</label>
+            </div>
+          </div>
+        </div>
+        
+        <!-- WiFi配置容器（仅在选择WiFi时显示） -->
+        <div class="wifi-config-container" id="wifi-config-container">
+          <div class="form-group">
+            <label for="wifi-select" data-i18n="wifiNetwork">WiFi 网络</label>
+            <select id="wifi-select" name="wifi-select">
+              <option value="" data-i18n="scanningNetworks">正在扫描可用网络...</option>
+            </select>
+            <button type="button" id="refresh-wifi" style="margin-top: 10px; padding: 8px 15px; background: #ecf0f1; border: 1px solid #bdc3c7; border-radius: 5px; cursor: pointer;" data-i18n="refreshNetworks">刷新网络列表</button>
+          </div>
+          
+          <div class="form-group wifi-password" id="wifi-password-container">
+            <label for="wifi-password" data-i18n="wifiPassword">WiFi 密码 *</label>
+            <input type="password" id="wifi-password" name="wifi-password" placeholder="请输入WiFi密码" data-i18n-placeholder="wifiPasswordPlaceholder">
+          </div>
+          
+          <div class="form-group">
+            <label for="connection-status" data-i18n="connectionStatus">连接状态</label>
+            <div id="connection-status" style="padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;" data-i18n="notConnected">
+              未连接
+            </div>
+          </div>
+          
+        </div>
+      </div>
+      <button type="submit" class="submit-btn" data-i18n="submitConfig">提交配置</button>
+    </form>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
+             

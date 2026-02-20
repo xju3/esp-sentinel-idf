@@ -2,15 +2,33 @@
 #include "esp_mac.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_random.h"
 #include "nvs_flash.h"
 #include "network_manager.h" // 你自己的头文件
+#include <string.h>
 
 static const char *TAG = "WIFI_AP";
 
 // AP 参数定义
-#define SENTINEL_WIFI_SSID      "Sentinel_Config"
 #define SENTINEL_WIFI_PASS      "12345678"
 #define SENTINEL_MAX_CONN       4
+#define DEFAULT_SSID_PREFIX     "AP_SENTINEL_CONFIG_"
+
+static void build_ap_ssid(char *out, size_t out_len)
+{
+    if (!out || out_len == 0) {
+        return;
+    }
+#if defined(DEVICE_ID)
+    if (DEVICE_ID[0] != '\0') {
+        snprintf(out, out_len, "%s", DEVICE_ID);
+        return;
+    }
+#endif
+    uint32_t rnd = esp_random() % 1000;
+    snprintf(out, out_len, "%s%03u", DEFAULT_SSID_PREFIX, (unsigned)rnd);
+}
 
 void wifi_init_softap(void) {
     // 1. 初始化底层 TCP/IP 堆栈
@@ -25,8 +43,6 @@ void wifi_init_softap(void) {
     // 3. 配置 AP 参数
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = SENTINEL_WIFI_SSID,
-            .ssid_len = strlen(SENTINEL_WIFI_SSID),
             .channel = 1,
             .password = SENTINEL_WIFI_PASS,
             .max_connection = SENTINEL_MAX_CONN,
@@ -36,6 +52,11 @@ void wifi_init_softap(void) {
             },
         },
     };
+
+    char ssid_buf[33] = {0};
+    build_ap_ssid(ssid_buf, sizeof(ssid_buf));
+    strncpy((char *)wifi_config.ap.ssid, ssid_buf, sizeof(wifi_config.ap.ssid));
+    wifi_config.ap.ssid_len = strlen((const char *)wifi_config.ap.ssid);
 
     if (strlen(SENTINEL_WIFI_PASS) == 0) {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
@@ -47,5 +68,5 @@ void wifi_init_softap(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "SoftAP 启动成功! SSID:%s password:%s",
-             SENTINEL_WIFI_SSID, SENTINEL_WIFI_PASS);
+             (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
 }

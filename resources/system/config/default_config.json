@@ -1,0 +1,24 @@
+{
+    "deviceId": "",
+    "deviceName": "",
+    "modelType": "A",
+    "years": 1,
+    "host": {
+        "http": "http://example.com/api",
+        "mqtt": "mqtt://example.com:1883"
+    },
+    "detect": {
+        "type": 3,
+        "value": 3
+    },
+    "report": {
+        "type": 2,
+        "value": 50
+    },
+    "configured": false,
+    "comm_type": 1,
+    "wifi": {
+        "ssid": "",
+        "pass": ""
+    }
+}

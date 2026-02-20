@@ -4,5 +4,9 @@ cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(sentinel)
-# （下面是你之前加的打包 www 文件夹的代码）
-spiffs_create_partition_image(storage www FLASH_IN_PROJECT)
+
+# 将 resources/system 目录打包进 10MB 的 system 分区 (存放 www 和 config)
+spiffs_create_partition_image(system resources/system FLASH_IN_PROJECT)
+
+# 将 resources/user 目录打包进 64KB 的 user 分区 (初始的用户配置文件)
+spiffs_create_partition_image(user resources/user FLASH_IN_PROJECT)
