@@ -3,12 +3,17 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_log.h"
 #include "esp_random.h"
 #include "nvs_flash.h"
 #include "network_manager.h" // 你自己的头文件
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "lwip/sockets.h"
 
 static const char *TAG = "WIFI_AP";
+static TaskHandle_t s_dns_task_handle = NULL;
 
 // AP 参数定义
 #define SENTINEL_WIFI_PASS      "12345678"
@@ -28,6 +33,77 @@ static void build_ap_ssid(char *out, size_t out_len)
 #endif
     uint32_t rnd = esp_random() % 1000;
     snprintf(out, out_len, "%s%03u", DEFAULT_SSID_PREFIX, (unsigned)rnd);
+}
+
+static void dns_server_task(void *pvParameters)
+{
+    char rx_buffer[512];
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(53);
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
+        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "DNS Server started for Captive Portal");
+
+    while (1) {
+        struct sockaddr_in source_addr;
+        socklen_t socklen = sizeof(source_addr);
+
+        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
+        if (len < 0) {
+            ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        if (len > 12 && (len + 16 <= sizeof(rx_buffer))) {
+            // DNS Header: ID(2), Flags(2), QDCOUNT(2), ANCOUNT(2), NSCOUNT(2), ARCOUNT(2)
+            rx_buffer[2] = 0x81; // QR=1, Opcode=0, AA=1, TC=0, RD=1
+            rx_buffer[3] = 0x80; // RA=1, Z=0, RCODE=0
+            rx_buffer[6] = 0x00; rx_buffer[7] = 0x01; // ANCOUNT = 1
+            rx_buffer[8] = 0x00; rx_buffer[9] = 0x00; // NSCOUNT = 0
+            rx_buffer[10] = 0x00; rx_buffer[11] = 0x00; // ARCOUNT = 0
+
+            int ptr = len;
+            // Answer: Name(ptr to header), Type(A), Class(IN), TTL, Len, IP
+            // 192.168.4.1 is the default SoftAP IP
+            uint8_t answer[] = {0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04, 192, 168, 4, 1};
+            memcpy(rx_buffer + ptr, answer, sizeof(answer));
+            sendto(sock, rx_buffer, ptr + sizeof(answer), 0, (struct sockaddr *)&source_addr, socklen);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    close(sock);
+    s_dns_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+void captive_dns_start(void)
+{
+    if (s_dns_task_handle) return;
+    xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &s_dns_task_handle);
+}
+
+void captive_dns_stop(void)
+{
+    if (s_dns_task_handle) {
+        vTaskDelete(s_dns_task_handle);
+        s_dns_task_handle = NULL;
+    }
 }
 
 void wifi_init_softap(void) {
@@ -69,4 +145,7 @@ void wifi_init_softap(void) {
 
     ESP_LOGI(TAG, "SoftAP 启动成功! SSID:%s password:%s",
              (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
+
+    // 启动 Captive Portal DNS 服务
+    captive_dns_start();
 }

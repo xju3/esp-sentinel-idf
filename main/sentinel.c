@@ -1,7 +1,15 @@
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_log.h"
+#include "lwip/sockets.h"
+
 #include "nvs_flash.h"
 #include "network_manager.h"
 #include "config_manager.h"
 #include "web_server.h"
+
+static const char *TAG = "sentinel";
 
 void app_main(void) {
     // 1. 初始化 NVS (Wi-Fi 驱动必须用到)
