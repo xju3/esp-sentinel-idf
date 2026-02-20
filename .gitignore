@@ -30,9 +30,8 @@ sdkconfig.local
 # VS Code / 编辑器相关
 # =========================
 # 忽略 VS Code 自动生成的本地路径配置（因为换台电脑路径就变了）
-.vscode/c_cpp_properties.json
 # 如果你不想把 VS Code 的任何配置传到 Git，可以直接取消下一行的注释
-# .vscode/
+.vscode/
 
 # 忽略其他编辑器的临时文件
 *.swp
