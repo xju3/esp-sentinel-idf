@@ -5,53 +5,139 @@
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include <sys/param.h> // for MIN
+#include <sys/param.h>
 
-#define PIN_TX 18
-#define PIN_RX 17
-#define PIN_PWR 14
+// ============== 引脚定义 ==============
+#define PIN_TX 18       // ESP32-S3 TX -> 转接板 TX
+#define PIN_RX 17       // ESP32-S3 RX -> 转接板 RX
+#define PIN_PWK 14      // ESP32-S3 GPIO14 -> 转接板 PWK (PWRKEY)
+#define PIN_PEN 13      // ESP32-S3 GPIO13 -> 转接板 PEN (Power Enable)
 
 #define UART_PORT_NUM UART_NUM_1
-#define UART_BAUD_RATE 115200
 #define BUF_SIZE (1024)
 
 static const char *TAG = "ppp_4g";
 
-// Check if URC content implies the modem is ready for AT commands
-static bool urc_indicates_ready(const uint8_t *data, int len) {
-    // Look for common banners: "RDY", "ATREADY", "+CPIN: READY"
-    if (len <= 0) return false;
-    const char *p = (const char *)data;
-    if (strstr(p, "RDY") || strstr(p, "ATREADY") || strstr(p, "+CPIN: READY")) return true;
-    return false;
+// 初始化状态
+typedef enum {
+    INIT_STAGE_START = 0,
+    INIT_STAGE_POWER_ENABLE,
+    INIT_STAGE_POWER_ON,
+    INIT_STAGE_BAUD_DETECT,
+    INIT_STAGE_AT_SYNC,
+    INIT_STAGE_DISABLE_ECHO,
+    INIT_STAGE_CHECK_SIM,
+    INIT_STAGE_CHECK_NETWORK,
+    INIT_STAGE_COMPLETE,
+    INIT_STAGE_FAILED
+} init_stage_t;
+
+static void log_stage(init_stage_t stage) {
+    switch(stage) {
+        case INIT_STAGE_START:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 0: Initialization Started");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_POWER_ENABLE:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 1: Enabling Power (PEN Pin)");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_POWER_ON:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 2: Power On Module (PWK Pin)");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_BAUD_DETECT:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 3: Detecting Baud Rate");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_AT_SYNC:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 4: AT Command Synchronization");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_DISABLE_ECHO:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 5: Disabling Echo");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_CHECK_SIM:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 6: Checking SIM Card");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_CHECK_NETWORK:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  Stage 7: Checking Network Status");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_COMPLETE:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "  ✓ Initialization Complete!");
+            ESP_LOGI(TAG, "========================================");
+            break;
+        case INIT_STAGE_FAILED:
+            ESP_LOGE(TAG, "========================================");
+            ESP_LOGE(TAG, "  ✗ Initialization Failed!");
+            ESP_LOGE(TAG, "========================================");
+            break;
+    }
 }
 
-// Drain any pending UART bytes (e.g., URC/banners) and log them; report if they show readiness
-static bool uart_drain_with_log(void) {
+// 清空 UART 缓冲区并记录
+static void uart_drain_with_log(void) {
     uint8_t tmp[BUF_SIZE];
-    bool ready = false;
+    int total = 0;
     while (1) {
-        int len = uart_read_bytes(UART_PORT_NUM, tmp, BUF_SIZE, pdMS_TO_TICKS(20));
+        int len = uart_read_bytes(UART_PORT_NUM, tmp, BUF_SIZE, pdMS_TO_TICKS(50));
         if (len <= 0) break;
+        total += len;
+        ESP_LOGI(TAG, "Drained %d bytes:", len);
         ESP_LOG_BUFFER_HEXDUMP(TAG, tmp, len, ESP_LOG_INFO);
-        if (!ready && urc_indicates_ready(tmp, len)) ready = true;
+    }
+    if (total > 0) {
+        ESP_LOGI(TAG, "Total drained: %d bytes", total);
     }
     uart_flush_input(UART_PORT_NUM);
-    return ready;
 }
 
+// 电源使能
+static void ppp_4g_power_enable(void) {
+    ESP_LOGI(TAG, "→ Setting PEN pin HIGH (Enable power regulator)");
+    gpio_set_level(PIN_PEN, 1);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "✓ Power regulator enabled");
+}
+
+// 开机操作
 static void ppp_4g_power_on(void) {
-    ESP_LOGI(TAG, "PWRKEY low pulse start");
-    gpio_set_level(PIN_PWR, 0);
-    vTaskDelay(pdMS_TO_TICKS(1500)); // some modules need >1s low
-    ESP_LOGI(TAG, "PWRKEY releasing (set high)");
-    gpio_set_level(PIN_PWR, 1);
-    vTaskDelay(pdMS_TO_TICKS(8000)); // allow full boot/URC flush
+    ESP_LOGI(TAG, "→ Toggling PWK pin to power on module");
+    ESP_LOGI(TAG, "  - Setting PWK LOW");
+    gpio_set_level(PIN_PWK, 0);
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    
+    ESP_LOGI(TAG, "  - Setting PWK HIGH (Release)");
+    gpio_set_level(PIN_PWK, 1);
+    
+    ESP_LOGI(TAG, "→ Waiting for module boot (10 seconds)...");
+    for (int i = 10; i > 0; i--) {
+        ESP_LOGI(TAG, "  %d...", i);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    ESP_LOGI(TAG, "✓ Boot wait complete");
 }
 
-static esp_err_t send_at_command(const char *command, const char *expected_response, char *response_buffer, size_t buffer_size, int timeout_ms) {
-    // Clear stale bytes before issuing a new command to avoid mixing responses
+// 发送 AT 命令
+static esp_err_t send_at_command(const char *command, const char *expected_response, 
+                                  char *response_buffer, size_t buffer_size, int timeout_ms) {
+    // 清空缓冲区
     uart_drain_with_log();
+    
+    // 发送命令
+    ESP_LOGI(TAG, "→ Sending: %s", command);
     uart_write_bytes(UART_PORT_NUM, command, strlen(command));
     uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
 
@@ -60,163 +146,367 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
     int remaining = buffer_size - 1;
 
     int loops = timeout_ms / 100;
-    // Read in chunks to allow early exit and avoid blocking for full timeout
     for (int i = 0; i < loops; i++) {
-        int len = uart_read_bytes(UART_PORT_NUM, (uint8_t *)response_buffer + total_len, remaining, pdMS_TO_TICKS(100));
+        int len = uart_read_bytes(UART_PORT_NUM, (uint8_t *)response_buffer + total_len, 
+                                  remaining, pdMS_TO_TICKS(100));
         if (len > 0) {
             total_len += len;
             remaining -= len;
             response_buffer[total_len] = 0;
-            // Log raw bytes to diagnose baud/echo issues without consuming elsewhere
-            ESP_LOG_BUFFER_HEXDUMP(TAG, (const uint8_t *)response_buffer + total_len - len, len, ESP_LOG_INFO);
+            
+            // 打印接收到的数据
+            ESP_LOGI(TAG, "← Received %d bytes:", len);
+            ESP_LOG_BUFFER_HEXDUMP(TAG, (const uint8_t *)response_buffer + total_len - len, 
+                                   len, ESP_LOG_INFO);
+            
+            // 检查是否包含期望的响应
             if (strstr(response_buffer, expected_response) != NULL) {
-                ESP_LOGI(TAG, "Response: %s", response_buffer);
+                ESP_LOGI(TAG, "✓ Got expected response: %s", expected_response);
+                ESP_LOGI(TAG, "  Full response: %s", response_buffer);
                 return ESP_OK;
             }
         }
         if (remaining <= 0) break;
     }
-    ESP_LOGW(TAG, "AT Command Timeout/Fail. Got: %s", response_buffer);
+    
+    ESP_LOGW(TAG, "✗ Timeout waiting for: %s", expected_response);
+    ESP_LOGW(TAG, "  Got: %s", response_buffer);
+    return ESP_FAIL;
+}
+
+// 尝试不同波特率
+static esp_err_t detect_baudrate(uint32_t *detected_baud) {
+    uint32_t baud_rates[] = {115200, 9600, 57600, 38400, 19200};
+    int num_rates = sizeof(baud_rates) / sizeof(baud_rates[0]);
+    char response_buffer[256];
+    
+    for (int i = 0; i < num_rates; i++) {
+        ESP_LOGI(TAG, "→ Trying baud rate: %d", baud_rates[i]);
+        uart_set_baudrate(UART_PORT_NUM, baud_rates[i]);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // 尝试 3 次
+        for (int retry = 0; retry < 3; retry++) {
+            if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK) {
+                *detected_baud = baud_rates[i];
+                ESP_LOGI(TAG, "✓ Baud rate detected: %d", baud_rates[i]);
+                return ESP_OK;
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        
+        ESP_LOGW(TAG, "✗ No response at %d baud", baud_rates[i]);
+    }
+    
+    ESP_LOGE(TAG, "✗ Failed to detect baud rate");
     return ESP_FAIL;
 }
 
 esp_err_t ppp_4g_init(void) {
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << PIN_PWR),
+    init_stage_t stage = INIT_STAGE_START;
+    log_stage(stage);
+    
+    // ============== GPIO 配置 ==============
+    ESP_LOGI(TAG, "→ Configuring GPIO pins");
+    
+    // 配置 PWK 引脚
+    gpio_config_t pwk_conf = {
+        .pin_bit_mask = (1ULL << PIN_PWK),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE
     };
-    gpio_config(&io_conf);
-    // PWRKEY idle is high; set a known level before any toggle to avoid holding it low
-    gpio_set_level(PIN_PWR, 1);
-
+    gpio_config(&pwk_conf);
+    gpio_set_level(PIN_PWK, 1);  // PWK 初始状态为高
+    ESP_LOGI(TAG, "  ✓ PWK pin configured (GPIO%d)", PIN_PWK);
+    
+    // 配置 PEN 引脚
+    gpio_config_t pen_conf = {
+        .pin_bit_mask = (1ULL << PIN_PEN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE
+    };
+    gpio_config(&pen_conf);
+    gpio_set_level(PIN_PEN, 0);  // PEN 初始状态为低
+    ESP_LOGI(TAG, "  ✓ PEN pin configured (GPIO%d)", PIN_PEN);
+    
+    // ============== UART 配置 ==============
+    ESP_LOGI(TAG, "→ Configuring UART");
     uart_config_t uart_config = {
-        .baud_rate = UART_BAUD_RATE,
+        .baud_rate = 115200,  // 默认波特率，后续会尝试其他值
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_APB,
     };
-
-    // No event queue/task to avoid consuming RX data that AT parser needs
+    
     ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, PIN_TX, PIN_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    char response_buffer[256];
-
-    // 1. Power‑up the modem unless we actually receive a proper OK
-    bool modem_ready = false;
-    for (int i = 0; i < 5; i++) {
+    ESP_LOGI(TAG, "  ✓ UART%d configured: TX=GPIO%d, RX=GPIO%d, Baud=%d", 
+             UART_PORT_NUM, PIN_TX, PIN_RX, uart_config.baud_rate);
+    
+    char response_buffer[512];
+    
+    // ============== Stage 1: 使能电源 ==============
+    stage = INIT_STAGE_POWER_ENABLE;
+    log_stage(stage);
+    ppp_4g_power_enable();
+    
+    // ============== Stage 2: 检查模组是否已开机 ==============
+    stage = INIT_STAGE_POWER_ON;
+    log_stage(stage);
+    
+    ESP_LOGI(TAG, "→ Checking if module is already powered on...");
+    bool module_on = false;
+    uint32_t current_baud = 115200;
+    
+    // 先尝试当前波特率
+    for (int i = 0; i < 3; i++) {
         if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK) {
-            modem_ready = true;
+            module_on = true;
+            ESP_LOGI(TAG, "✓ Module already powered on and responding");
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
-
-    if (!modem_ready) {
-        ESP_LOGI(TAG, "Modem not responding, toggling power...");
+    
+    if (!module_on) {
+        ESP_LOGI(TAG, "✗ Module not responding, will toggle power");
         ppp_4g_power_on();
-
-        // 等待模组完全启动并打印完 URC (如 RDY, SMS DONE)，避免干扰后续 AT 指令
-        vTaskDelay(pdMS_TO_TICKS(6000));
+        
+        // 开机后清空 URC 消息
+        ESP_LOGI(TAG, "→ Draining boot messages (URC)...");
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        uart_drain_with_log();
     }
-
-    // 无论是否刚开机，都循环等待直到模组能稳定响应 AT OK 或出现 READY URC
-    // Wait for startup (A7670C can take a few seconds to be ready for AT)
-    int retries = 20;
-    ESP_LOGI(TAG, "Waiting for modem to sync (AT command)...");
-    while (retries-- > 0) {
-        // If URC already tells us it's ready, skip sending AT
-        if (uart_drain_with_log()) {
-            ESP_LOGI(TAG, "Modem indicated ready via URC");
+    
+    // ============== Stage 3: 波特率检测 ==============
+    stage = INIT_STAGE_BAUD_DETECT;
+    log_stage(stage);
+    
+    if (detect_baudrate(&current_baud) != ESP_OK) {
+        stage = INIT_STAGE_FAILED;
+        log_stage(stage);
+        return ESP_FAIL;
+    }
+    
+    // ============== Stage 4: AT 同步 ==============
+    stage = INIT_STAGE_AT_SYNC;
+    log_stage(stage);
+    
+    ESP_LOGI(TAG, "→ Synchronizing with module (sending AT)...");
+    int sync_retries = 10;
+    while (sync_retries-- > 0) {
+        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+            ESP_LOGI(TAG, "✓ AT sync successful");
             break;
         }
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1500) == ESP_OK) break;
+        ESP_LOGW(TAG, "  Retry %d/10...", 10 - sync_retries);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
-    if (retries <= 0) {
-        ESP_LOGE(TAG, "Modem not responding to AT (Sync failed)");
+    
+    if (sync_retries <= 0) {
+        ESP_LOGE(TAG, "✗ AT sync failed after 10 retries");
+        stage = INIT_STAGE_FAILED;
+        log_stage(stage);
         return ESP_FAIL;
     }
-
-    // Disable echo to simplify parsing and avoid confusing partial matches
-    if (send_at_command("ATE0", "OK", response_buffer, sizeof(response_buffer), 1000) != ESP_OK) {
-        ESP_LOGW(TAG, "ATE0 failed; continuing but responses may include echo");
+    
+    // ============== Stage 5: 关闭回显 ==============
+    stage = INIT_STAGE_DISABLE_ECHO;
+    log_stage(stage);
+    
+    if (send_at_command("ATE0", "OK", response_buffer, sizeof(response_buffer), 2000) != ESP_OK) {
+        ESP_LOGW(TAG, "✗ Failed to disable echo, continuing anyway");
+    } else {
+        ESP_LOGI(TAG, "✓ Echo disabled");
     }
-
-    ESP_LOGI(TAG, "Module synchronized, checking SIM status...");
+    
+    // ============== Stage 6: 检查 SIM 卡 ==============
+    stage = INIT_STAGE_CHECK_SIM;
+    log_stage(stage);
+    
+    ESP_LOGI(TAG, "→ Checking SIM card status...");
     vTaskDelay(pdMS_TO_TICKS(1000));
-
-    // Check SIM Card Status
-    if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer, sizeof(response_buffer), 5000) != ESP_OK) {
-        ESP_LOGE(TAG, "SIM Card not detected or PIN required");
+    
+    int sim_retries = 10;
+    while (sim_retries-- > 0) {
+        if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer, 
+                           sizeof(response_buffer), 3000) == ESP_OK) {
+            ESP_LOGI(TAG, "✓ SIM Card Ready");
+            break;
+        }
+        ESP_LOGW(TAG, "  SIM not ready, retry %d/10...", 10 - sim_retries);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    
+    if (sim_retries <= 0) {
+        ESP_LOGE(TAG, "✗ SIM Card not detected or not ready");
+        ESP_LOGE(TAG, "  Please check:");
+        ESP_LOGE(TAG, "  1. SIM card is properly inserted");
+        ESP_LOGE(TAG, "  2. SIM card is activated and has credit");
+        ESP_LOGE(TAG, "  3. SIM card supports 4G/LTE");
+        stage = INIT_STAGE_FAILED;
+        log_stage(stage);
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "SIM Card Ready");
-
-    /*
-    // Get operator name
-    if (send_at_command("AT+COPS?", "+COPS:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+    
+    // 读取 SIM 卡 ICCID
+    ESP_LOGI(TAG, "→ Reading SIM card ICCID...");
+    if (send_at_command("AT+CCID", "+CCID:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+        char *iccid_start = strstr(response_buffer, "+CCID:");
+        if (iccid_start != NULL) {
+            // 跳过 "+CCID: "
+            iccid_start += 7;
+            // 去掉换行
+            char *newline = strstr(iccid_start, "\r");
+            if (newline) *newline = '\0';
+            ESP_LOGI(TAG, "✓ SIM ICCID: %s", iccid_start);
+        }
+    }
+    
+    // ============== Stage 7: 检查网络状态 ==============
+    stage = INIT_STAGE_CHECK_NETWORK;
+    log_stage(stage);
+    
+    // 获取运营商信息
+    ESP_LOGI(TAG, "→ Getting operator information...");
+    if (send_at_command("AT+COPS?", "+COPS:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK) {
         char *start = strstr(response_buffer, "\"");
         if (start != NULL) {
             start++;
             char *end = strstr(start, "\"");
             if (end != NULL) {
                 *end = '\0';
-                ESP_LOGI(TAG, "Operator: %s", start);
+                ESP_LOGI(TAG, "✓ Operator: %s", start);
             }
         }
     }
-
-    // Get signal strength
-    if (send_at_command("AT+CSQ", "+CSQ:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
-        int rssi, ber;
-        if (sscanf(response_buffer, "%*s %d,%d", &rssi, &ber) == 2) {
-            ESP_LOGI(TAG, "Signal Strength: %d, BER: %d", rssi, ber);
-        }
-    }
-
-    // Check network registration
-    if (send_at_command("AT+CREG?", "+CREG:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
-        int n, stat;
-        if (sscanf(response_buffer, "%*s %d,%d", &n, &stat) == 2) {
-            ESP_LOGI(TAG, "Network Registration Status: %d", stat);
-            if (stat == 1 || stat == 5) {
-                ESP_LOGI(TAG, "Registered to the network");
-            } else {
-                ESP_LOGW(TAG, "Not registered to the network");
-            }
-        }
-    }
-
-    // Check Internet Connection via Ping
-    ESP_LOGI(TAG, "Checking Internet Connection...");
-    // 1. Configure APN (CMNET is default for China Mobile, adjust if needed)
-    // Note: We ignore errors here as it might be already configured
-    send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 2000);
     
-    // 2. Activate PDP Context (1,1 = Context ID 1, State Active)
-    send_at_command("AT+CGACT=1,1", "OK", response_buffer, sizeof(response_buffer), 10000);
-
-    // 3. Ping 114.114.114.114 (Reliable public DNS in China)
-    // AT+CPING="IP",1 (Ping once)
-    // Success response contains "+CPING: 1" (Reply received)
-    if (send_at_command("AT+CPING=\"114.114.114.114\",1", "+CPING: 1", response_buffer, sizeof(response_buffer), 10000) == ESP_OK) {
-        ESP_LOGI(TAG, "Internet Access: SUCCESS (Ping 114.114.114.114 OK)");
-    } else {
-        ESP_LOGW(TAG, "Internet Access: FAILED (Ping timeout or error)");
+    // 获取信号强度
+    ESP_LOGI(TAG, "→ Getting signal strength...");
+    int rssi = 99, ber = 99;
+    if (send_at_command("AT+CSQ", "+CSQ:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+        char *csq_start = strstr(response_buffer, "+CSQ:");
+        if (csq_start != NULL) {
+            if (sscanf(csq_start, "+CSQ: %d,%d", &rssi, &ber) == 2) {
+                ESP_LOGI(TAG, "✓ Signal Strength: RSSI=%d, BER=%d", rssi, ber);
+                if (rssi == 99) {
+                    ESP_LOGE(TAG, "  ✗ No signal detected - CHECK ANTENNA!");
+                    ESP_LOGE(TAG, "  ✗ A7670C MUST have antenna connected to register network");
+                } else if (rssi < 10) {
+                    ESP_LOGW(TAG, "  Warning: Weak signal (RSSI=%d)", rssi);
+                } else {
+                    ESP_LOGI(TAG, "  Signal quality: Good (RSSI=%d)", rssi);
+                }
+            }
+        }
     }
-    */
-
+    
+    // 如果信号为 99（无信号），说明天线未连接
+    if (rssi == 99) {
+        ESP_LOGE(TAG, "");
+        ESP_LOGE(TAG, "================================================");
+        ESP_LOGE(TAG, "  CRITICAL: NO ANTENNA DETECTED!");
+        ESP_LOGE(TAG, "================================================");
+        ESP_LOGE(TAG, "  The A7670C module REQUIRES an antenna");
+        ESP_LOGE(TAG, "  to register to the cellular network.");
+        ESP_LOGE(TAG, "  ");
+        ESP_LOGE(TAG, "  Please check:");
+        ESP_LOGE(TAG, "  1. Antenna is connected to the module");
+        ESP_LOGE(TAG, "  2. Antenna connector is properly seated");
+        ESP_LOGE(TAG, "  3. Antenna supports 4G LTE bands");
+        ESP_LOGE(TAG, "================================================");
+        ESP_LOGE(TAG, "");
+    }
+    
+    // 启用网络注册 URC
+    ESP_LOGI(TAG, "→ Enabling network registration notifications...");
+    send_at_command("AT+CREG=1", "OK", response_buffer, sizeof(response_buffer), 2000);
+    
+    // 检查当前网络模式
+    ESP_LOGI(TAG, "→ Checking network mode...");
+    if (send_at_command("AT+CNMP?", "+CNMP:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+        ESP_LOGI(TAG, "  Current mode: %s", response_buffer);
+    }
+    
+    // 设置为自动模式（2=自动，支持 2G/3G/4G）
+    ESP_LOGI(TAG, "→ Setting network mode to AUTO...");
+    send_at_command("AT+CNMP=2", "OK", response_buffer, sizeof(response_buffer), 2000);
+    
+    // 手动触发网络搜索
+    ESP_LOGI(TAG, "→ Manually triggering network search...");
+    send_at_command("AT+COPS=0", "OK", response_buffer, sizeof(response_buffer), 30000);
+    
+    // 检查网络注册状态
+    ESP_LOGI(TAG, "→ Checking network registration...");
+    int reg_retries = 30;  // 最多等待 60 秒
+    while (reg_retries-- > 0) {
+        if (send_at_command("AT+CREG?", "+CREG:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+            int n = 0, stat = 0;
+            char *creg_start = strstr(response_buffer, "+CREG:");
+            if (creg_start != NULL) {
+                if (sscanf(creg_start, "+CREG: %d,%d", &n, &stat) == 2) {
+                    ESP_LOGI(TAG, "  Network registration status: %d", stat);
+                    if (stat == 1) {
+                        ESP_LOGI(TAG, "✓ Registered to home network");
+                        break;
+                    } else if (stat == 5) {
+                        ESP_LOGI(TAG, "✓ Registered to roaming network");
+                        break;
+                    } else if (stat == 2) {
+                        ESP_LOGI(TAG, "  Searching for network...");
+                    } else {
+                        ESP_LOGW(TAG, "  Not registered (status=%d)", stat);
+                    }
+                }
+            }
+        }
+        
+        if (reg_retries > 0) {
+            ESP_LOGI(TAG, "  Waiting for network registration (%d seconds left)...", reg_retries * 2);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+    }
+    
+    if (reg_retries <= 0) {
+        ESP_LOGW(TAG, "✗ Network registration timeout");
+        ESP_LOGW(TAG, "  Note: Module may still work for some operations");
+    }
+    
+    // ============== 初始化完成 ==============
+    stage = INIT_STAGE_COMPLETE;
+    log_stage(stage);
+    
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "Module Information:");
+    ESP_LOGI(TAG, "  - Baud Rate: %d", current_baud);
+    ESP_LOGI(TAG, "  - UART: UART%d (TX=GPIO%d, RX=GPIO%d)", UART_PORT_NUM, PIN_TX, PIN_RX);
+    ESP_LOGI(TAG, "  - Control: PWK=GPIO%d, PEN=GPIO%d", PIN_PWK, PIN_PEN);
+    ESP_LOGI(TAG, "");
+    
     return ESP_OK;
 }
 
 esp_err_t ppp_4g_deinit(void) {
+    ESP_LOGI(TAG, "→ Shutting down 4G module...");
+    
+    // 可选：发送关机命令
+    char response_buffer[128];
+    send_at_command("AT+CPOF", "OK", response_buffer, sizeof(response_buffer), 5000);
+    
+    // 关闭电源使能
+    gpio_set_level(PIN_PEN, 0);
+    ESP_LOGI(TAG, "  ✓ Power disabled");
+    
+    // 删除 UART 驱动
     ESP_ERROR_CHECK(uart_driver_delete(UART_PORT_NUM));
+    ESP_LOGI(TAG, "✓ 4G module shutdown complete");
+    
     return ESP_OK;
 }
