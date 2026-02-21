@@ -6,6 +6,9 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include <sys/param.h>
+#include <stdbool.h>
+
+#define PPP_VERBOSE 0  // 设为 1 可开启调试日志
 
 // ============== 引脚定义 ==============
 #define PIN_TX 18       // ESP32-S3 TX -> 转接板 TX
@@ -95,10 +98,12 @@ static void uart_drain_with_log(void) {
         int len = uart_read_bytes(UART_PORT_NUM, tmp, BUF_SIZE, pdMS_TO_TICKS(50));
         if (len <= 0) break;
         total += len;
-        ESP_LOGI(TAG, "Drained %d bytes:", len);
-        ESP_LOG_BUFFER_HEXDUMP(TAG, tmp, len, ESP_LOG_INFO);
+        if (PPP_VERBOSE) {
+            ESP_LOGI(TAG, "Drained %d bytes:", len);
+            ESP_LOG_BUFFER_HEXDUMP(TAG, tmp, len, ESP_LOG_INFO);
+        }
     }
-    if (total > 0) {
+    if (PPP_VERBOSE && total > 0) {
         ESP_LOGI(TAG, "Total drained: %d bytes", total);
     }
     uart_flush_input(UART_PORT_NUM);
@@ -137,7 +142,9 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
     uart_drain_with_log();
     
     // 发送命令
-    ESP_LOGI(TAG, "→ Sending: %s", command);
+    if (PPP_VERBOSE) {
+        ESP_LOGI(TAG, "→ Sending: %s", command);
+    }
     uart_write_bytes(UART_PORT_NUM, command, strlen(command));
     uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
 
@@ -155,23 +162,100 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
             response_buffer[total_len] = 0;
             
             // 打印接收到的数据
-            ESP_LOGI(TAG, "← Received %d bytes:", len);
-            ESP_LOG_BUFFER_HEXDUMP(TAG, (const uint8_t *)response_buffer + total_len - len, 
-                                   len, ESP_LOG_INFO);
+            if (PPP_VERBOSE) {
+                ESP_LOGI(TAG, "← Received %d bytes:", len);
+                ESP_LOG_BUFFER_HEXDUMP(TAG, (const uint8_t *)response_buffer + total_len - len, 
+                                       len, ESP_LOG_INFO);
+            }
             
             // 检查是否包含期望的响应
             if (strstr(response_buffer, expected_response) != NULL) {
-                ESP_LOGI(TAG, "✓ Got expected response: %s", expected_response);
-                ESP_LOGI(TAG, "  Full response: %s", response_buffer);
+                if (PPP_VERBOSE) {
+                    ESP_LOGI(TAG, "✓ Got expected response: %s", expected_response);
+                    ESP_LOGI(TAG, "  Full response: %s", response_buffer);
+                }
                 return ESP_OK;
             }
         }
         if (remaining <= 0) break;
     }
-    
-    ESP_LOGW(TAG, "✗ Timeout waiting for: %s", expected_response);
-    ESP_LOGW(TAG, "  Got: %s", response_buffer);
+    if (PPP_VERBOSE) {
+        ESP_LOGW(TAG, "✗ Timeout waiting for: %s", expected_response);
+        ESP_LOGW(TAG, "  Got: %s", response_buffer);
+    }
     return ESP_FAIL;
+}
+
+static const char *cnmp_mode_to_str(int mode) {
+    switch (mode) {
+        case 2:  return "AUTO (2G/3G/4G)";
+        case 13: return "GSM only";
+        case 14: return "WCDMA only";
+        case 38: return "LTE only";
+        default: return "Unknown";
+    }
+}
+
+// 在成功注册网络后打印一次 4G 运行信息
+static void log_4g_runtime_info(void) {
+    char response_buffer[512];
+
+    const char *operator = "?";
+    int rssi = 99, ber = 99, dbm = -999;
+    int mode = -1, attached = -1;
+    char cell_info[128] = {0};
+    char phone_number[64] = {0};
+
+    if (send_at_command("AT+COPS?", "+COPS:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK) {
+        char *name_start = strstr(response_buffer, "\"");
+        if (name_start) {
+            name_start++;
+            char *name_end = strstr(name_start, "\"");
+            if (name_end) *name_end = '\0';
+            operator = name_start;
+        }
+    }
+
+    if (send_at_command("AT+CSQ", "+CSQ:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+        char *csq_start = strstr(response_buffer, "+CSQ:");
+        if (csq_start && sscanf(csq_start, "+CSQ: %d,%d", &rssi, &ber) == 2) {
+            if (rssi >= 0 && rssi <= 31) dbm = -113 + 2 * rssi;
+        }
+    }
+
+    if (send_at_command("AT+CNMP?", "+CNMP:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+        sscanf(response_buffer, "%*[^:]: %d", &mode);
+    }
+
+    if (send_at_command("AT+CPSI?", "+CPSI:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK) {
+        strncpy(cell_info, response_buffer, sizeof(cell_info) - 1);
+    }
+
+    if (send_at_command("AT+CGATT?", "+CGATT:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
+        sscanf(response_buffer, "%*[^:]: %d", &attached);
+    }
+
+    // SIM 号码 (部分运营商可能未写入或被禁用)
+    if (send_at_command("AT+CNUM", "+CNUM:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK) {
+        // +CNUM: "Voice","13800138000",129,7,4
+        char num[64] = {0};
+        if (sscanf(response_buffer, "%*[^,],\"%63[^\"]", num) == 1) {
+            strncpy(phone_number, num, sizeof(phone_number) - 1);
+        }
+    }
+
+    ESP_LOGI(TAG, "4G: operator=%s, rssi=%d (%d dBm), ber=%d, mode=%s(%d), attached=%s", 
+             operator, rssi, dbm, ber, cnmp_mode_to_str(mode), mode,
+             attached == 1 ? "yes" : (attached == 0 ? "no" : "?") );
+
+    if (cell_info[0]) {
+        ESP_LOGI(TAG, "4G cell: %s", cell_info);
+    }
+    if (phone_number[0]) {
+        ESP_LOGI(TAG, "SIM MSISDN: %s", phone_number);
+    } else {
+        ESP_LOGI(TAG, "SIM MSISDN: unavailable");
+    }
 }
 
 // 尝试不同波特率
@@ -446,23 +530,21 @@ esp_err_t ppp_4g_init(void) {
     // 检查网络注册状态
     ESP_LOGI(TAG, "→ Checking network registration...");
     int reg_retries = 30;  // 最多等待 60 秒
+    bool registered_success = false;
     while (reg_retries-- > 0) {
         if (send_at_command("AT+CREG?", "+CREG:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK) {
             int n = 0, stat = 0;
             char *creg_start = strstr(response_buffer, "+CREG:");
             if (creg_start != NULL) {
                 if (sscanf(creg_start, "+CREG: %d,%d", &n, &stat) == 2) {
-                    ESP_LOGI(TAG, "  Network registration status: %d", stat);
                     if (stat == 1) {
                         ESP_LOGI(TAG, "✓ Registered to home network");
+                        registered_success = true;
                         break;
                     } else if (stat == 5) {
                         ESP_LOGI(TAG, "✓ Registered to roaming network");
+                        registered_success = true;
                         break;
-                    } else if (stat == 2) {
-                        ESP_LOGI(TAG, "  Searching for network...");
-                    } else {
-                        ESP_LOGW(TAG, "  Not registered (status=%d)", stat);
                     }
                 }
             }
@@ -477,6 +559,9 @@ esp_err_t ppp_4g_init(void) {
     if (reg_retries <= 0) {
         ESP_LOGW(TAG, "✗ Network registration timeout");
         ESP_LOGW(TAG, "  Note: Module may still work for some operations");
+    } else if (registered_success) {
+        // 注册成功后打印详细的 4G 运行信息
+        log_4g_runtime_info();
     }
     
     // ============== 初始化完成 ==============
