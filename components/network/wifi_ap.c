@@ -16,17 +16,19 @@
 static TaskHandle_t s_dns_task_handle = NULL;
 
 // AP 参数定义
-#define SENTINEL_WIFI_PASS      "12345678"
-#define SENTINEL_MAX_CONN       4
-#define DEFAULT_SSID_PREFIX     "AP_SENTINEL_CONFIG_"
+#define SENTINEL_WIFI_PASS "12345678"
+#define SENTINEL_MAX_CONN 4
+#define DEFAULT_SSID_PREFIX "AP_SENTINEL_CONFIG_"
 
 static void build_ap_ssid(char *out, size_t out_len)
 {
-    if (!out || out_len == 0) {
+    if (!out || out_len == 0)
+    {
         return;
     }
 #if defined(DEVICE_ID)
-    if (DEVICE_ID[0] != '\0') {
+    if (DEVICE_ID[0] != '\0')
+    {
         snprintf(out, out_len, "%s", DEVICE_ID);
         return;
     }
@@ -44,13 +46,15 @@ static void dns_server_task(void *pvParameters)
     dest_addr.sin_port = htons(53);
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
+    if (sock < 0)
+    {
         LOG_ERRORF("Unable to create socket: errno %d", errno);
         vTaskDelete(NULL);
         return;
     }
 
-    if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
+    if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0)
+    {
         LOG_ERRORF("Socket unable to bind: errno %d", errno);
         close(sock);
         vTaskDelete(NULL);
@@ -59,24 +63,30 @@ static void dns_server_task(void *pvParameters)
 
     LOG_INFO("DNS Server started for Captive Portal");
 
-    while (1) {
+    while (1)
+    {
         struct sockaddr_in source_addr;
         socklen_t socklen = sizeof(source_addr);
 
         int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
-        if (len < 0) {
+        if (len < 0)
+        {
             LOG_ERRORF("recvfrom failed: errno %d", errno);
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
-        if (len > 12 && (len + 16 <= sizeof(rx_buffer))) {
+        if (len > 12 && (len + 16 <= sizeof(rx_buffer)))
+        {
             // DNS Header: ID(2), Flags(2), QDCOUNT(2), ANCOUNT(2), NSCOUNT(2), ARCOUNT(2)
             rx_buffer[2] = 0x81; // QR=1, Opcode=0, AA=1, TC=0, RD=1
             rx_buffer[3] = 0x80; // RA=1, Z=0, RCODE=0
-            rx_buffer[6] = 0x00; rx_buffer[7] = 0x01; // ANCOUNT = 1
-            rx_buffer[8] = 0x00; rx_buffer[9] = 0x00; // NSCOUNT = 0
-            rx_buffer[10] = 0x00; rx_buffer[11] = 0x00; // ARCOUNT = 0
+            rx_buffer[6] = 0x00;
+            rx_buffer[7] = 0x01; // ANCOUNT = 1
+            rx_buffer[8] = 0x00;
+            rx_buffer[9] = 0x00; // NSCOUNT = 0
+            rx_buffer[10] = 0x00;
+            rx_buffer[11] = 0x00; // ARCOUNT = 0
 
             int ptr = len;
             // Answer: Name(ptr to header), Type(A), Class(IN), TTL, Len, IP
@@ -94,19 +104,22 @@ static void dns_server_task(void *pvParameters)
 
 void captive_dns_start(void)
 {
-    if (s_dns_task_handle) return;
+    if (s_dns_task_handle)
+        return;
     xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &s_dns_task_handle);
 }
 
 void captive_dns_stop(void)
 {
-    if (s_dns_task_handle) {
+    if (s_dns_task_handle)
+    {
         vTaskDelete(s_dns_task_handle);
         s_dns_task_handle = NULL;
     }
 }
 
-void wifi_init_softap(void) {
+void wifi_init_softap(void)
+{
     // 1. 初始化底层 TCP/IP 堆栈
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -135,7 +148,8 @@ void wifi_init_softap(void) {
     strncpy((char *)wifi_config.ap.ssid, ssid_buf, sizeof(wifi_config.ap.ssid));
     wifi_config.ap.ssid_len = strlen((const char *)wifi_config.ap.ssid);
 
-    if (strlen(SENTINEL_WIFI_PASS) == 0) {
+    if (strlen(SENTINEL_WIFI_PASS) == 0)
+    {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 

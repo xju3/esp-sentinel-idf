@@ -830,7 +830,7 @@ function setupCommTypeChangeListener() {
           wifiConfigContainer.classList.add('show');
           // 总是重新加载WiFi列表，确保获取最新的可用网络
           loadWifiList();
-        } else { // 4G (value === '1') 或其他
+        } else { // 4G
           console.log('切换到其他方式（如4G），隐藏WiFi配置容器');
           wifiConfigContainer.classList.remove('show');
         }

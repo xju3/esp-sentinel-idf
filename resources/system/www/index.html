@@ -33,14 +33,9 @@
         <div class="form-row">
           <div class="form-col">
             <div class="form-group">
-              <label for="model-type" data-i18n="modelType">机型 *</label>
-              <select id="model-type" name="model-type" required>
-                <option value="" data-i18n="selectModel">请选择机型</option>
-                <option value="A" data-i18n="modelA">A型 - 标准工业型</option>
-                <option value="B" data-i18n="modelB">B型 - 高温防爆型</option>
-                <option value="C" data-i18n="modelC">C型 - 精密测量型</option>
-                <option value="D" data-i18n="modelD">D型 - 移动便携型</option>
-              </select>
+              <label for="device-rpm" data-i18n="deviceRpm">设备转速 (RPM) *</label>
+              <input type="number" id="device-rpm" name="rpm" required placeholder="例如: 1500" data-i18n-placeholder="deviceRpmPlaceholder" min="0" step="1">
+              <small style="color: #7f8c8d; display: block; margin-top: 5px;" data-i18n="deviceRpmNote">若不确定，请参考设备铭牌</small>
             </div>
           </div>
         <div class="form-row">

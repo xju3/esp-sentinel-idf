@@ -12,9 +12,11 @@
 #include "sdkconfig.h"
 #include "icm4288p_baseline.h"
 
+extern esp_err_t ppp_4g_init(void);
+
 void app_main(void) {
     // 初始化 NVS (Wi-Fi 驱动必须用到)
-    LOG_INFO("Starting device...");
+    LOG_INFO("starting device...");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -24,6 +26,16 @@ void app_main(void) {
 
     // 加载配置
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
+    
+    
+    // 初始化 4G 模组
+    LOG_INFO("Initializing 4G Module...");
+    if (ppp_4g_init() == ESP_OK) {
+        LOG_INFO("4G Module initialized.");
+    } else {
+        LOG_ERROR("4G Module initialization failed.");
+    }
+
     
     // 若未配置，启动 AP + Captive Portal
     if (!g_user_config.is_configured) {
@@ -45,7 +57,6 @@ void app_main(void) {
                   g_icm_baseline.y.val, g_icm_baseline.y.offset,
                   g_icm_baseline.z.val, g_icm_baseline.z.offset);
     }
-
 
     // 已配置：按用户 Wi-Fi 信息连接 STA
     ESP_ERROR_CHECK(wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass));
