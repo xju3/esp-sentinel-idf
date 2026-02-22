@@ -384,6 +384,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const commTypeGroup = document.getElementById('comm-type');
   const refreshWifiBtn = document.getElementById('refresh-wifi');
   const wifiSelect = document.getElementById('wifi-select');
+  
+  // 添加扫描状态标志，防止重复扫描
+  let isScanning = false;
 
   // 监听通讯方式切换 (通过pill-group通用逻辑 + 额外的WiFi处理)
   if (commTypeGroup) {
@@ -391,13 +394,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (e.target.classList.contains('pill')) {
         const isWifi = e.target.dataset.value === '2';
         if (wifiBox) wifiBox.style.display = isWifi ? 'block' : 'none';
-        if (isWifi) simulateWifiScan();
+        if (isWifi && !isScanning) {
+          simulateWifiScan();
+        }
       }
     });
   }
 
   // 7.1 WiFi 扫描完整流程
   async function scanWifiNetworks() {
+    // 防止重复扫描
+    if (isScanning) {
+      console.log('Scan already in progress, skipping...');
+      return false;
+    }
+    
+    isScanning = true;
     const processingMask = document.getElementById('processing-mask');
     const maskText = processingMask?.querySelector('.font-medium');
     const maskSubtext = processingMask?.querySelector('.text-slate-400');
@@ -496,6 +508,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         processingMask.classList.remove('flex');
       }
 
+      isScanning = false; // 重置扫描状态
       return true; // 成功
 
     } catch (error) {
@@ -520,6 +533,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         wifiSelect.disabled = true;
       }
 
+      isScanning = false; // 重置扫描状态
       return false; // 失败
     }
   }

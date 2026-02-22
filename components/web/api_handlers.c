@@ -208,7 +208,8 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
     esp_err_t ret = send_json_string(req, json);
     free(json);
     
-    // 成功获取结果后，重置扫描完成标志，为下一次扫描做准备
+    // 成功获取结果后，清除扫描缓存，重置扫描完成标志
+    esp_wifi_clear_ap_list();
     s_scan_done = false;
     
     return ret;
