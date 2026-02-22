@@ -178,7 +178,13 @@
         <div id="wifi-password-container" class="hidden">
           <input type="password" id="wifi-password" class="input-field" placeholder="输入 WiFi 密码">
         </div>
-        </div>
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-sm font-semibold text-slate-900 mb-2">服务器地址</label>
+        <input type="url" id="server-host" class="input-field" placeholder="https://sentinel-cloud.com" value="https://sentinel-cloud.com">
+        <p class="text-xs text-slate-400 mt-2">数据上报的目标服务器地址</p>
+      </div>
       </div>
       <div class="panel-buttons">
         <div class="flex justify-between">
@@ -251,7 +257,7 @@
           </div>
         </div>
 
-        <!-- 通讯配置部分 -->
+          <!-- 通讯配置部分 -->
         <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
           <h3 class="font-semibold text-slate-900 mb-3">通讯配置</h3>
           <div class="text-sm">
@@ -260,6 +266,10 @@
             <div id="preview-wifi-container" class="hidden mt-3">
               <p class="text-slate-500">WiFi 网络</p>
               <p class="font-medium text-slate-900" id="preview-wifi-ssid">-</p>
+            </div>
+            <div class="mt-3">
+              <p class="text-slate-500">服务器地址</p>
+              <p class="font-medium text-slate-900" id="preview-server-host">https://sentinel-cloud.com</p>
             </div>
           </div>
         </div>

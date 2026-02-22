@@ -126,6 +126,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
     }
+
+    // 服务器地址
+    if (config.host !== undefined) {
+      const serverHostInput = document.getElementById('server-host');
+      if (serverHostInput) serverHostInput.value = config.host || 'https://sentinel-cloud.com';
+    }
   }
 
   // 加载配置数据
@@ -228,6 +234,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const wifiSsid = document.getElementById('wifi-select').value || '-';
       document.getElementById('preview-wifi-ssid').textContent = wifiSsid;
     }
+
+    // 服务器地址
+    const serverHost = document.getElementById('server-host').value || 'https://sentinel-cloud.com';
+    document.getElementById('preview-server-host').textContent = serverHost;
   }
 
   // 绑定下一步按钮
@@ -645,6 +655,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const commTypeBtn = document.querySelector('#comm-type .pill.active');
         const commType = commTypeBtn?.dataset.value || 1;
 
+        const serverHost = document.getElementById('server-host')?.value || 'https://sentinel-cloud.com';
+
         const config = {
           iso: {
             standard: isoStandard,
@@ -655,7 +667,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           deviceName: deviceName,
           rpm: parseInt(rpm) || 1480,
           years: parseFloat(years) || 0,
-          host: "https://sentinel-cloud.com",
+          host: serverHost,
           detect_interval: parseInt(detectInterval) || 30,
           report_cycle: parseInt(reportCycle) || 6,
           comm_type: parseInt(commType) || 1,
