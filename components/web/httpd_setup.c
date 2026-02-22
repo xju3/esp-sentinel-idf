@@ -13,7 +13,7 @@
 
 static httpd_handle_t s_server = NULL;
 static bool s_server_was_running_before_scan = false;
-static bool s_scan_in_progress = false;
+// static bool s_scan_in_progress = false;
 
 static bool file_exists(const char *path)
 {

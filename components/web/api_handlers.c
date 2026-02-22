@@ -116,6 +116,9 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
 
 esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 {
+    // 重置扫描完成标志，开始新的扫描
+    s_scan_done = false;
+    
     esp_err_t err = scan_wifi();
     if (err != ESP_OK && err != ESP_ERR_WIFI_STATE)
     {
@@ -204,5 +207,9 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
     LOG_DEBUGF("%s", json);
     esp_err_t ret = send_json_string(req, json);
     free(json);
+    
+    // 成功获取结果后，重置扫描完成标志，为下一次扫描做准备
+    s_scan_done = false;
+    
     return ret;
 }
