@@ -1,18 +1,16 @@
-#include <string.h>
-#include <stdint.h>
-
+#include <sys/param.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_log.h"
-#include "lwip/udp.h"
-#include "lwip/ip4_addr.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
+#include "logger.h"
 
-// 目前不参与构建Captive Portal, 暂留此文件.
 static const char *TAG = "captive_dns";
+static int s_dns_socket = -1;
+static TaskHandle_t s_dns_task_handle = NULL;
 
-static struct udp_pcb *s_dns_pcb = NULL;
-static ip4_addr_t s_dns_ip;
-
-#pragma pack(push, 1)
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint16_t id;
     uint16_t flags;
     uint16_t qdcount;
@@ -20,127 +18,126 @@ typedef struct {
     uint16_t nscount;
     uint16_t arcount;
 } dns_hdr_t;
-#pragma pack(pop)
 
-static void dns_send_response(struct udp_pcb *pcb, const ip_addr_t *addr, uint16_t port,
-                              const uint8_t *req, size_t req_len)
+static void dns_server_task(void *pvParameters)
 {
-    if (req_len < sizeof(dns_hdr_t)) {
+    uint8_t rx_buffer[512];
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(53);
+
+    s_dns_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (s_dns_socket < 0) {
+        ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+        vTaskDelete(NULL);
         return;
     }
 
-    const dns_hdr_t *hdr = (const dns_hdr_t *)req;
-    if (hdr->qdcount == 0) {
+    int err = bind(s_dns_socket, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    if (err < 0) {
+        ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+        close(s_dns_socket);
+        s_dns_socket = -1;
+        vTaskDelete(NULL);
         return;
     }
 
-    // Find end of QNAME
-    size_t offset = sizeof(dns_hdr_t);
-    while (offset < req_len && req[offset] != 0) {
-        offset += (size_t)req[offset] + 1;
-    }
-    if (offset + 5 > req_len) {
-        return;
-    }
-    offset += 1; // null terminator
-    const size_t qname_len = offset - sizeof(dns_hdr_t);
+    ESP_LOGI(TAG, "Captive DNS Server started on port 53");
 
-    // QTYPE + QCLASS
-    const size_t question_len = qname_len + 4;
-    if (sizeof(dns_hdr_t) + question_len > req_len) {
-        return;
-    }
+    struct sockaddr_in source_addr;
+    socklen_t socklen = sizeof(source_addr);
 
-    uint8_t buf[512];
-    size_t pos = 0;
+    while (1) {
+        int len = recvfrom(s_dns_socket, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
 
-    dns_hdr_t resp = {
-        .id = hdr->id,
-        .flags = htons(0x8180),
-        .qdcount = htons(1),
-        .ancount = htons(1),
-        .nscount = 0,
-        .arcount = 0,
-    };
+        if (len < 0) {
+            ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+            break;
+        }
 
-    memcpy(buf + pos, &resp, sizeof(resp));
-    pos += sizeof(resp);
+        if (len < sizeof(dns_hdr_t)) {
+            continue;
+        }
 
-    memcpy(buf + pos, req + sizeof(dns_hdr_t), question_len);
-    pos += question_len;
+        dns_hdr_t *hdr = (dns_hdr_t *)rx_buffer;
+        // Only respond to queries (QR=0)
+        if ((hdr->flags & htons(0x8000)) != 0) {
+            continue;
+        }
 
-    // Answer: name pointer to 0x0C
-    buf[pos++] = 0xC0;
-    buf[pos++] = 0x0C;
-    buf[pos++] = 0x00; // TYPE A
-    buf[pos++] = 0x01;
-    buf[pos++] = 0x00; // CLASS IN
-    buf[pos++] = 0x01;
-    buf[pos++] = 0x00; // TTL 0
-    buf[pos++] = 0x00;
-    buf[pos++] = 0x00;
-    buf[pos++] = 0x00;
-    buf[pos++] = 0x00;
-    buf[pos++] = 0x00; // RDLENGTH 4
-    buf[pos++] = 0x04;
+        // Prepare response header
+        hdr->flags = htons(0x8180); // Standard response, No error
+        hdr->ancount = htons(1);    // 1 Answer
+        hdr->nscount = 0;
+        hdr->arcount = 0;
 
-    buf[pos++] = ip4_addr1(&s_dns_ip);
-    buf[pos++] = ip4_addr2(&s_dns_ip);
-    buf[pos++] = ip4_addr3(&s_dns_ip);
-    buf[pos++] = ip4_addr4(&s_dns_ip);
+        // Find end of QNAME
+        int qname_len = 0;
+        uint8_t *p = rx_buffer + sizeof(dns_hdr_t);
+        while ((p - rx_buffer) < len && *p != 0) {
+            p += (*p) + 1;
+        }
+        if ((p - rx_buffer) >= len) continue;
+        p++; // Skip null
+        p += 4; // Skip QTYPE and QCLASS
 
-    struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, pos, PBUF_RAM);
-    if (!p) {
-        return;
-    }
-    memcpy(p->payload, buf, pos);
-    udp_sendto(pcb, p, addr, port);
-    pbuf_free(p);
-}
+        qname_len = p - rx_buffer;
+        if (qname_len > sizeof(rx_buffer) - 16) continue;
 
-static void dns_recv(void *arg, struct udp_pcb *pcb, struct pbuf *p,
-                     const ip_addr_t *addr, u16_t port)
-{
-    (void)arg;
-    if (!p) {
-        return;
+        // Append Answer (A Record pointing to 192.168.4.1)
+        // Name pointer: 0xC00C
+        *p++ = 0xC0;
+        *p++ = 0x0C;
+        // Type A
+        *p++ = 0x00;
+        *p++ = 0x01;
+        // Class IN
+        *p++ = 0x00;
+        *p++ = 0x01;
+        // TTL
+        *p++ = 0x00;
+        *p++ = 0x00;
+        *p++ = 0x00;
+        *p++ = 0x3C;
+        // Data Len
+        *p++ = 0x00;
+        *p++ = 0x04;
+        // IP
+        *p++ = 192;
+        *p++ = 168;
+        *p++ = 4;
+        *p++ = 1;
+
+        int resp_len = p - rx_buffer;
+        sendto(s_dns_socket, rx_buffer, resp_len, 0, (struct sockaddr *)&source_addr, socklen);
     }
 
-    dns_send_response(pcb, addr, port, (const uint8_t *)p->payload, (size_t)p->len);
-    pbuf_free(p);
+    if (s_dns_socket != -1) {
+        close(s_dns_socket);
+        s_dns_socket = -1;
+    }
+    s_dns_task_handle = NULL;
+    vTaskDelete(NULL);
 }
 
 void captive_dns_start(void)
 {
-    if (s_dns_pcb) {
+    if (s_dns_task_handle)  {
+        LOG_ERROR("handler is null.");
         return;
     }
-
-    IP4_ADDR(&s_dns_ip, 192, 168, 4, 1);
-
-    s_dns_pcb = udp_new();
-    if (!s_dns_pcb) {
-        ESP_LOGE(TAG, "udp_new failed");
-        return;
-    }
-
-    if (udp_bind(s_dns_pcb, IP_ADDR_ANY, 53) != ERR_OK) {
-        ESP_LOGE(TAG, "udp_bind failed");
-        udp_remove(s_dns_pcb);
-        s_dns_pcb = NULL;
-        return;
-    }
-
-    udp_recv(s_dns_pcb, dns_recv, NULL);
-    ESP_LOGI(TAG, "Captive DNS started (192.168.4.1)");
+    LOG_DEBUG("starting dns server...");
+    xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &s_dns_task_handle);
 }
 
 void captive_dns_stop(void)
 {
-    if (!s_dns_pcb) {
-        return;
+    if (s_dns_task_handle) {
+        if (s_dns_socket != -1) {
+            shutdown(s_dns_socket, 0);
+            close(s_dns_socket);
+            s_dns_socket = -1;
+        }
     }
-    udp_remove(s_dns_pcb);
-    s_dns_pcb = NULL;
-    ESP_LOGI(TAG, "Captive DNS stopped");
 }

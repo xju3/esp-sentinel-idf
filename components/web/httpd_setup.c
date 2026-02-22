@@ -9,11 +9,8 @@
 #include "api_handlers.h"
 #include "logger.h"
 
-;
-
 static httpd_handle_t s_server = NULL;
 static bool s_server_was_running_before_scan = false;
-// static bool s_scan_in_progress = false;
 
 static bool file_exists(const char *path)
 {
@@ -31,10 +28,12 @@ static esp_err_t ensure_spiffs_mounted(void)
     };
 
     esp_err_t err = esp_vfs_spiffs_register(&conf);
-    if (err == ESP_ERR_INVALID_STATE) {
+    if (err == ESP_ERR_INVALID_STATE)
+    {
         return ESP_OK; // already mounted
     }
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         LOG_ERRORF("Failed to mount SPIFFS: %s", esp_err_to_name(err));
         return err;
     }
@@ -44,20 +43,28 @@ static esp_err_t ensure_spiffs_mounted(void)
 static const char *guess_content_type(const char *path)
 {
     const char *ext = strrchr(path, '.');
-    if (!ext) return "text/plain";
-    if (strcmp(ext, ".html") == 0) return "text/html";
-    if (strcmp(ext, ".css") == 0) return "text/css";
-    if (strcmp(ext, ".js") == 0) return "application/javascript";
-    if (strcmp(ext, ".svg") == 0) return "image/svg+xml";
-    if (strcmp(ext, ".json") == 0) return "application/json";
-    if (strcmp(ext, ".ico") == 0) return "image/x-icon";
+    if (!ext)
+        return "text/plain";
+    if (strcmp(ext, ".html") == 0)
+        return "text/html";
+    if (strcmp(ext, ".css") == 0)
+        return "text/css";
+    if (strcmp(ext, ".js") == 0)
+        return "application/javascript";
+    if (strcmp(ext, ".svg") == 0)
+        return "image/svg+xml";
+    if (strcmp(ext, ".json") == 0)
+        return "application/json";
+    if (strcmp(ext, ".ico") == 0)
+        return "image/x-icon";
     return "text/plain";
 }
 
 static esp_err_t send_file(httpd_req_t *req, const char *path)
 {
     FILE *f = fopen(path, "rb");
-    if (!f) {
+    if (!f)
+    {
         return ESP_FAIL;
     }
 
@@ -65,10 +72,12 @@ static esp_err_t send_file(httpd_req_t *req, const char *path)
 
     char buf[1024];
     size_t read_bytes = 0;
-    while ((read_bytes = fread(buf, 1, sizeof(buf), f)) > 0) {
-        if (httpd_resp_send_chunk(req, buf, read_bytes) != ESP_OK) {
+    while ((read_bytes = fread(buf, 1, sizeof(buf), f)) > 0)
+    {
+        if (httpd_resp_send_chunk(req, buf, read_bytes) != ESP_OK)
+        {
             fclose(f);
-            httpd_resp_sendstr_chunk(req, NULL);
+            // Abort immediately if sending fails (e.g. client disconnected)
             return ESP_FAIL;
         }
     }
@@ -92,7 +101,8 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
         strcmp(uri, "/connecttest.txt") == 0 ||
         strcmp(uri, "/ncsi.txt") == 0 ||
         strcmp(uri, "/hotspot-detect.html") == 0 ||
-        strcmp(uri, "/success.txt") == 0) {
+        strcmp(uri, "/success.txt") == 0)
+    {
         redirect_to_root(req);
         return ESP_OK;
     }
@@ -101,7 +111,8 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
     const char *base = "/system/w";
     char path[256];
 
-    if (strcmp(uri, "/") == 0) {
+    if (strcmp(uri, "/") == 0)
+    {
         snprintf(path, sizeof(path), "%s/index.html", base);
         return send_file(req, path);
     }
@@ -109,15 +120,18 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
     // Strip query string if present
     char uri_copy[128];
     uri_copy[0] = '\0';
-    if (uri) {
+    if (uri)
+    {
         // Avoid -Wformat-truncation by limiting copy length
         snprintf(uri_copy, sizeof(uri_copy), "%.*s", (int)sizeof(uri_copy) - 1, uri);
     }
     char *q = strchr(uri_copy, '?');
-    if (q) *q = '\0';
+    if (q)
+        *q = '\0';
 
     snprintf(path, sizeof(path), "%s%s", base, uri_copy);
-    if (file_exists(path)) {
+    if (file_exists(path))
+    {
         return send_file(req, path);
     }
 
@@ -128,53 +142,52 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
 
 esp_err_t web_server_start(void)
 {
-    if (s_server) {
+    if (s_server)
+    {
         return ESP_OK;
     }
 
     esp_err_t err = ensure_spiffs_mounted();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         return err;
     }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
+    config.lru_purge_enable = true;
 
-    if (httpd_start(&s_server, &config) != ESP_OK) {
+    if (httpd_start(&s_server, &config) != ESP_OK)
+    {
         LOG_ERROR("Failed to start HTTP server");
         return ESP_FAIL;
     }
 
     // API endpoints
-    httpd_uri_t api_config = {
+    httpd_uri_t api_load_config = {
         .uri = "/api/config",
         .method = HTTP_GET,
         .handler = api_get_config_handler,
         .user_ctx = NULL,
     };
-    httpd_uri_t api_save = {
+    httpd_uri_t api_save_config = {
         .uri = "/api/save",
         .method = HTTP_POST,
         .handler = api_save_config_handler,
         .user_ctx = NULL,
     };
-    httpd_uri_t api_wifi = {
+    httpd_uri_t api_wifi_list = {
         .uri = "/api/wifi-list",
         .method = HTTP_GET,
         .handler = api_wifi_list_handler,
         .user_ctx = NULL,
     };
-    httpd_uri_t api_wifi_start = {
+    httpd_uri_t api_wifi_scan = {
         .uri = "/api/wifi-scan-start",
         .method = HTTP_GET,
         .handler = api_wifi_scan_start_handler,
         .user_ctx = NULL,
     };
-
-    httpd_register_uri_handler(s_server, &api_config);
-    httpd_register_uri_handler(s_server, &api_save);
-    httpd_register_uri_handler(s_server, &api_wifi);
-    httpd_register_uri_handler(s_server, &api_wifi_start);
 
     httpd_uri_t catch_all = {
         .uri = "/*",
@@ -182,7 +195,19 @@ esp_err_t web_server_start(void)
         .handler = captive_get_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t catch_all_post = {
+        .uri = "/*",
+        .method = HTTP_POST,
+        .handler = captive_get_handler,
+        .user_ctx = NULL,
+    };
+
+    httpd_register_uri_handler(s_server, &api_load_config);
+    httpd_register_uri_handler(s_server, &api_save_config);
+    httpd_register_uri_handler(s_server, &api_wifi_list);
+    httpd_register_uri_handler(s_server, &api_wifi_scan);
     httpd_register_uri_handler(s_server, &catch_all);
+    httpd_register_uri_handler(s_server, &catch_all_post);
 
     LOG_INFO("Web server started");
     return ESP_OK;
@@ -190,7 +215,8 @@ esp_err_t web_server_start(void)
 
 void web_server_stop(void)
 {
-    if (!s_server) {
+    if (!s_server)
+    {
         return;
     }
     httpd_stop(s_server);
@@ -209,7 +235,8 @@ void web_server_mark_scan_start(void)
 
 void web_server_mark_scan_done(void)
 {
-    if (s_server_was_running_before_scan) {
+    if (s_server_was_running_before_scan)
+    {
         web_server_start();
     }
     s_server_was_running_before_scan = false;

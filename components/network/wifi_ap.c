@@ -14,8 +14,10 @@
 #include "logger.h"
 #include "../web/include/web_server.h"
 
+// 声明 captive DNS 函数（在 captive_dns.c 中定义）
+void captive_dns_start(void);
+void captive_dns_stop(void);
 static TaskHandle_t s_dns_task_handle = NULL;
-
 // AP 参数定义
 #define SENTINEL_WIFI_PASS "12345678"
 #define SENTINEL_MAX_CONN 4
@@ -36,87 +38,6 @@ static void build_ap_ssid(char *out, size_t out_len)
 #endif
     uint32_t rnd = esp_random() % 1000;
     snprintf(out, out_len, "%s%03u", DEFAULT_SSID_PREFIX, (unsigned)rnd);
-}
-
-static void dns_server_task(void *pvParameters)
-{
-    char rx_buffer[512];
-    struct sockaddr_in dest_addr;
-    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(53);
-
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0)
-    {
-        LOG_ERRORF("Unable to create socket: errno %d", errno);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    if (bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0)
-    {
-        LOG_ERRORF("Socket unable to bind: errno %d", errno);
-        close(sock);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    LOG_INFO("DNS Server started for Captive Portal");
-
-    while (1)
-    {
-        struct sockaddr_in source_addr;
-        socklen_t socklen = sizeof(source_addr);
-
-        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
-        if (len < 0)
-        {
-            LOG_ERRORF("recvfrom failed: errno %d", errno);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
-        if (len > 12 && (len + 16 <= sizeof(rx_buffer)))
-        {
-            // DNS Header: ID(2), Flags(2), QDCOUNT(2), ANCOUNT(2), NSCOUNT(2), ARCOUNT(2)
-            rx_buffer[2] = 0x81; // QR=1, Opcode=0, AA=1, TC=0, RD=1
-            rx_buffer[3] = 0x80; // RA=1, Z=0, RCODE=0
-            rx_buffer[6] = 0x00;
-            rx_buffer[7] = 0x01; // ANCOUNT = 1
-            rx_buffer[8] = 0x00;
-            rx_buffer[9] = 0x00; // NSCOUNT = 0
-            rx_buffer[10] = 0x00;
-            rx_buffer[11] = 0x00; // ARCOUNT = 0
-
-            int ptr = len;
-            // Answer: Name(ptr to header), Type(A), Class(IN), TTL, Len, IP
-            // 192.168.4.1 is the default SoftAP IP
-            uint8_t answer[] = {0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x04, 192, 168, 4, 1};
-            memcpy(rx_buffer + ptr, answer, sizeof(answer));
-            sendto(sock, rx_buffer, ptr + sizeof(answer), 0, (struct sockaddr *)&source_addr, socklen);
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    close(sock);
-    s_dns_task_handle = NULL;
-    vTaskDelete(NULL);
-}
-
-void captive_dns_start(void)
-{
-    if (s_dns_task_handle)
-        return;
-    xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &s_dns_task_handle);
-}
-
-void captive_dns_stop(void)
-{
-    if (s_dns_task_handle)
-    {
-        vTaskDelete(s_dns_task_handle);
-        s_dns_task_handle = NULL;
-    }
 }
 
 volatile bool s_scan_done = false;
@@ -170,7 +91,6 @@ void wifi_init_softap(void)
     wifi_config_t wifi_config = {
         .ap = {
             .channel = 1,
-            .password = SENTINEL_WIFI_PASS,
             .max_connection = SENTINEL_MAX_CONN,
             .authmode = WIFI_AUTH_WPA2_PSK,
             .pmf_cfg = {
@@ -179,11 +99,16 @@ void wifi_init_softap(void)
         },
     };
 
+    // 设置 SSID
     char ssid_buf[33] = {0};
     build_ap_ssid(ssid_buf, sizeof(ssid_buf));
     strncpy((char *)wifi_config.ap.ssid, ssid_buf, sizeof(wifi_config.ap.ssid));
     wifi_config.ap.ssid_len = strlen((const char *)wifi_config.ap.ssid);
 
+    // 设置密码
+    strncpy((char *)wifi_config.ap.password, SENTINEL_WIFI_PASS, sizeof(wifi_config.ap.password));
+
+    // 如果密码为空，使用开放网络
     if (strlen(SENTINEL_WIFI_PASS) == 0)
     {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
@@ -201,6 +126,17 @@ void wifi_init_softap(void)
     captive_dns_start();
 }
 
+
+
+
+void captive_dns_stop(void)
+{
+    if (s_dns_task_handle)
+    {
+        vTaskDelete(s_dns_task_handle);
+        s_dns_task_handle = NULL;
+    }
+}
 
 
 // 扫描热点.
