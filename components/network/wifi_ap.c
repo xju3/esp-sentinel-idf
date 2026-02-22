@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "logger.h"
+#include "../web/include/web_server.h"
 
 static TaskHandle_t s_dns_task_handle = NULL;
 
@@ -189,8 +190,11 @@ esp_err_t scan_wifi(void) {
         .bssid = NULL,
         .channel = 0,
         .show_hidden = true,
-        .scan_type = WIFI_SCAN_TYPE_PASSIVE,
-        .scan_time.passive = 1600, //TJU: 增加扫描时间, 否则返回的热点数很少
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active = {
+            .min = 100,    // 最小扫描时间 100ms
+            .max = 600     // 最大扫描时间 300ms
+        }
     };
     return  esp_wifi_scan_start(&scan_cfg, false);
 }

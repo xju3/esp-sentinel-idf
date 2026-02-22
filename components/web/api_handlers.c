@@ -14,6 +14,7 @@
 #include "network_manager.h"
 #include "fs_utils.h"
 #include "logger.h"
+#include "web_server.h"
 
 static esp_err_t send_json_string(httpd_req_t *req, const char *json)
 {

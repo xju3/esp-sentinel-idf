@@ -12,6 +12,8 @@
 ;
 
 static httpd_handle_t s_server = NULL;
+static bool s_server_was_running_before_scan = false;
+static bool s_scan_in_progress = false;
 
 static bool file_exists(const char *path)
 {
@@ -193,4 +195,22 @@ void web_server_stop(void)
     }
     httpd_stop(s_server);
     s_server = NULL;
+}
+
+bool web_server_is_running(void)
+{
+    return s_server != NULL;
+}
+
+void web_server_mark_scan_start(void)
+{
+    s_server_was_running_before_scan = web_server_is_running();
+}
+
+void web_server_mark_scan_done(void)
+{
+    if (s_server_was_running_before_scan) {
+        web_server_start();
+    }
+    s_server_was_running_before_scan = false;
 }
