@@ -55,7 +55,7 @@
         </span>
 
         <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">评价标准</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">评价标准</label>
         <div class="flex gap-3 flex-wrap pill-group" id="iso-standard">
           <button data-value="ISO10816" class="pill active">ISO 10816 (通用)</button>
           <button data-value="ISO20816" class="pill">ISO 20816 (高级)</button>
@@ -63,7 +63,7 @@
       </div>
 
       <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">机械类别</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">机械类别</label>
         <div class="relative">
           <button id="iso-category-trigger" class="input-field w-full text-left bg-white hover:border-primary transition-colors flex justify-between items-center px-3 py-2">
             <span id="iso-category-label">请选择设备类型</span>
@@ -131,7 +131,7 @@
         <span class="text-slate-500 text-sm mb-6 block">平衡 AI 诊断准确度与电池寿命。</span>
 
         <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">检测频率</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">检测频率</label>
         <div class="flex gap-3 flex-wrap pill-group" id="detect-frequency">
           <button data-value="10" class="pill">10分钟</button>
           <button data-value="30" class="pill active">30分钟</button>
@@ -141,7 +141,7 @@
       </div>
 
       <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">上报周期</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">上报周期</label>
         <input type="range" id="report-cycle" min="1" max="10" step="1" value="6" class="w-full accent-primary h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
         <div class="text-primary font-bold mt-2"><span id="cycle-val">6</span> 次检测后上报</div>
         <p class="text-xs text-slate-400 mt-2">若本地 AI 检测到异常，将忽略周期立即强制上报。</p>
@@ -162,7 +162,7 @@
         <span class="text-slate-500 text-sm mb-6 block">确保数据通道畅通。</span>
 
         <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">通讯方式</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">通讯方式</label>
         <div class="flex gap-3 pill-group" id="comm-type">
           <button data-value="1" class="pill active">4G (LTE)</button>
           <button data-value="2" class="pill">WiFi</button>
@@ -181,7 +181,7 @@
       </div>
 
       <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">服务器地址</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">服务器地址</label>
         <input type="url" id="server-host" class="input-field" placeholder="https://sentinel-cloud.com" value="https://sentinel-cloud.com">
         <p class="text-xs text-slate-400 mt-2">数据上报的目标服务器地址</p>
       </div>

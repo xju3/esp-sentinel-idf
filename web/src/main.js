@@ -244,9 +244,141 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('[id^="to-"]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const targetId = e.target.id.replace('to-', '');
+      const currentStep = parseInt(targetId) - 1;
+      
+      // 验证当前步骤的必填字段
+      if (!validateStep(currentStep)) {
+        return; // 验证失败，不切换面板
+      }
+      
       updateUI(parseInt(targetId));
     });
   });
+
+  // 步骤验证函数
+  function validateStep(step) {
+    let isValid = true;
+    let errorMessage = '';
+
+    switch (step) {
+      case 1: // 第1步：ISO标准与环境
+        // 验证评价标准
+        const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
+        if (!isoStandardBtn) {
+          isValid = false;
+          errorMessage = '请选择评价标准';
+          break;
+        }
+
+        // 验证机械类别
+        const isoCategory = document.getElementById('iso-category').value;
+        if (!isoCategory) {
+          isValid = false;
+          errorMessage = '请选择机械类别';
+          break;
+        }
+        break;
+
+      case 2: // 第2步：设备信息
+        // 验证额定转速
+        const rpmInput = document.getElementById('device-rpm');
+        if (!rpmInput.value.trim()) {
+          isValid = false;
+          errorMessage = '请输入额定转速';
+          // 高亮显示错误字段
+          rpmInput.classList.add('border-red-500');
+          rpmInput.focus();
+        } else {
+          rpmInput.classList.remove('border-red-500');
+        }
+        break;
+
+      case 3: // 第3步：检测策略
+        // 验证检测频率
+        const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+        if (!detectFreqBtn) {
+          isValid = false;
+          errorMessage = '请选择检测频率';
+          break;
+        }
+
+        // 验证上报周期（range slider总是有值，但需要验证是否在范围内）
+        const reportCycle = document.getElementById('report-cycle').value;
+        if (!reportCycle || reportCycle < 1 || reportCycle > 10) {
+          isValid = false;
+          errorMessage = '上报周期必须在1-10之间';
+          break;
+        }
+        break;
+
+      case 4: // 第4步：通讯配置
+        // 验证通讯方式
+        const commTypeBtn = document.querySelector('#comm-type .pill.active');
+        if (!commTypeBtn) {
+          isValid = false;
+          errorMessage = '请选择通讯方式';
+          break;
+        }
+
+        // 验证服务器地址
+        const serverHost = document.getElementById('server-host').value.trim();
+        if (!serverHost) {
+          isValid = false;
+          errorMessage = '请输入服务器地址';
+          const serverHostInput = document.getElementById('server-host');
+          serverHostInput.classList.add('border-red-500');
+          serverHostInput.focus();
+        } else {
+          // 验证URL格式
+          try {
+            new URL(serverHost);
+            document.getElementById('server-host').classList.remove('border-red-500');
+          } catch (e) {
+            isValid = false;
+            errorMessage = '请输入有效的服务器地址（如 https://example.com）';
+            const serverHostInput = document.getElementById('server-host');
+            serverHostInput.classList.add('border-red-500');
+            serverHostInput.focus();
+          }
+        }
+
+        // 如果是WiFi，验证WiFi配置
+        if (commTypeBtn.dataset.value === '2') {
+          const wifiSelect = document.getElementById('wifi-select');
+          if (!wifiSelect.value) {
+            isValid = false;
+            errorMessage = '请选择WiFi网络';
+            wifiSelect.classList.add('border-red-500');
+            wifiSelect.focus();
+          } else {
+            wifiSelect.classList.remove('border-red-500');
+            
+            // 检查是否需要密码
+            const selectedOption = wifiSelect.options[wifiSelect.selectedIndex];
+            const isEncrypted = selectedOption.dataset.encrypted === '1';
+            if (isEncrypted) {
+              const wifiPassword = document.getElementById('wifi-password').value.trim();
+              if (!wifiPassword) {
+                isValid = false;
+                errorMessage = '此WiFi网络已加密，请输入密码';
+                const wifiPasswordInput = document.getElementById('wifi-password');
+                wifiPasswordInput.classList.add('border-red-500');
+                wifiPasswordInput.focus();
+              } else {
+                document.getElementById('wifi-password').classList.remove('border-red-500');
+              }
+            }
+          }
+        }
+        break;
+    }
+
+    if (!isValid && errorMessage) {
+      alert(errorMessage);
+    }
+
+    return isValid;
+  }
 
   // 绑定上一步按钮
   document.querySelectorAll('[data-back]').forEach(btn => {
@@ -268,6 +400,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (group.id === 'iso-standard') {
           const isAdvanced = e.target.dataset.value === 'ISO20816';
           document.getElementById('foundation-group').style.display = isAdvanced ? 'block' : 'none';
+          
+          // 清空当前选择的机械类别
+          document.getElementById('iso-category').value = '';
+          document.getElementById('iso-category-label').textContent = '请选择设备类型';
           
           // 根据ISO标准更新机械类别选项
           updateIsoCategoryDropdown(isAdvanced);
