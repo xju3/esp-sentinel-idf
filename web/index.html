@@ -171,10 +171,16 @@
         <div class="mb-6">
         <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">检测频率</label>
         <div class="flex gap-3 flex-wrap pill-group" id="detect-frequency">
+          <button data-value="1" class="pill">1分钟</button>
+          <button data-value="5" class="pill">5分钟</button>
           <button data-value="10" class="pill">10分钟</button>
           <button data-value="30" class="pill active">30分钟</button>
           <button data-value="60" class="pill">1小时</button>
+          <button data-value="120" class="pill">2小时</button>
           <button data-value="240" class="pill">4小时</button>
+          <button data-value="480" class="pill">8小时</button>
+          <button data-value="720" class="pill">12小时</button>
+          <button data-value="1440" class="pill">24小时</button>
         </div>
       </div>
 
@@ -220,7 +226,7 @@
 
       <div class="mb-6">
         <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">服务器地址</label>
-        <input type="url" id="server-host" class="input-field" placeholder="https://sentinel-cloud.com" value="https://sentinel-cloud.com">
+        <input type="url" id="server-host" class="input-field" placeholder="sentinel-cloud.com" value="sentinel-cloud.com">
         <p class="text-xs text-slate-400 mt-2">数据上报的目标服务器地址</p>
       </div>
       </div>
