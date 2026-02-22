@@ -122,8 +122,8 @@ void captive_dns_stop(void)
 volatile bool s_scan_done = false;
 volatile bool s_scan_started = false;
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
+static void wifi_event_handler_internal(void *arg, esp_event_base_t event_base,
+                                        int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE)
     {
@@ -131,20 +131,40 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_softap(void)
+// 公共的事件处理函数包装
+void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                        int32_t event_id, void *event_data)
+{
+    wifi_event_handler_internal(arg, event_base, event_id, event_data);
+}
+
+// 公共的 WiFi 初始化函数
+esp_err_t wifi_common_init(bool create_ap, bool create_sta)
 {
     // 1. 初始化底层 TCP/IP 堆栈
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
-    esp_netif_create_default_wifi_sta();
-    // init 里注册一次：
+    
+    if (create_ap) {
+        esp_netif_create_default_wifi_ap();
+    }
+    if (create_sta) {
+        esp_netif_create_default_wifi_sta();
+    }
+    
+    // 注册 WiFi 事件处理，包括扫描完成事件
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
 
     // 2. 初始化 Wi-Fi 驱动
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    return esp_wifi_init(&cfg);
+}
+
+void wifi_init_softap(void)
+{
+    // 使用公共初始化函数
+    ESP_ERROR_CHECK(wifi_common_init(true, true));
 
     // 3. 配置 AP 参数
     wifi_config_t wifi_config = {

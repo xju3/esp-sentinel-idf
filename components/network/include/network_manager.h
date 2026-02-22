@@ -2,6 +2,7 @@
 #define NET_MANAGER_H_
 
 #include "esp_err.h"
+#include "esp_event.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -46,6 +47,21 @@ extern volatile bool s_scan_done;
  * * 当 Wi-Fi 扫描开始时设置为 true
  */
 extern volatile bool s_scan_started;
+
+/**
+ * @brief Wi-Fi 事件处理函数
+ * * 处理 Wi-Fi 事件，包括扫描完成事件
+ */
+void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                        int32_t event_id, void *event_data);
+
+/**
+ * @brief 公共的 WiFi 初始化函数
+ * * @param create_ap 是否创建 AP 网络接口
+ * * @param create_sta 是否创建 STA 网络接口
+ * * @return esp_err_t 返回 ESP_OK 表示初始化成功
+ */
+esp_err_t wifi_common_init(bool create_ap, bool create_sta);
 
 #ifdef __cplusplus
 }
