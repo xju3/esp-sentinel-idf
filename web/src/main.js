@@ -255,6 +255,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
+  // Toast提示函数
+  function showErrorToast(message, title = '错误') {
+    const toast = document.getElementById('error-toast');
+    const errorTitle = document.getElementById('error-title');
+    const errorMessage = document.getElementById('error-message');
+    
+    if (toast && errorTitle && errorMessage) {
+      errorTitle.textContent = title;
+      errorMessage.textContent = message;
+      
+      // 显示Toast
+      toast.classList.remove('hidden');
+      toast.classList.remove('translate-x-full');
+      
+      // 5秒后自动隐藏
+      setTimeout(() => {
+        hideErrorToast();
+      }, 5000);
+    }
+  }
+
+  function hideErrorToast() {
+    const toast = document.getElementById('error-toast');
+    if (toast) {
+      toast.classList.add('translate-x-full');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 300);
+    }
+  }
+
+  // 绑定Toast关闭按钮
+  const closeToastBtn = document.getElementById('close-error-toast');
+  if (closeToastBtn) {
+    closeToastBtn.addEventListener('click', hideErrorToast);
+  }
+
   // 步骤验证函数
   function validateStep(step) {
     let isValid = true;
@@ -374,7 +411,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (!isValid && errorMessage) {
-      alert(errorMessage);
+      showErrorToast(errorMessage);
     }
 
     return isValid;
@@ -746,7 +783,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const wifiPassword = document.getElementById('wifi-password');
         
         if (!wifiSelect?.value) {
-          alert('请选择一个WiFi热点');
+          showErrorToast('请选择一个WiFi热点');
           return;
         }
         
@@ -755,7 +792,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const isEncrypted = selectedOption.dataset.encrypted === '1';
         
         if (isEncrypted && !wifiPassword?.value) {
-          alert('此WiFi网络已加密，请输入密码');
+          showErrorToast('此WiFi网络已加密，请输入密码');
           return;
         }
       }
@@ -829,10 +866,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         const result = await response.json();
         console.log('配置已提交:', result);
-        alert('配置已成功提交！设备将立即重启并开始监测。');
+        showErrorToast('配置已成功提交！设备将立即重启并开始监测。', '成功');
       } catch (error) {
         console.error('Save error:', error);
-        alert('保存失败: ' + error.message);
+        showErrorToast('保存失败: ' + error.message);
       } finally {
         if (mask) {
           mask.classList.add('hidden');
