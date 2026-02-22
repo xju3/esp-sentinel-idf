@@ -96,7 +96,7 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-esp_err_t api_wifi_list_handler(httpd_req_t *req)
+esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 {
     wifi_scan_config_t scan_cfg = {
         .ssid = NULL,
@@ -106,16 +106,21 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
     };
 
-    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);
-    if (err != ESP_OK) {
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, false);
+    if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
         LOG_ERRORF("WiFi scan start failed: %s", esp_err_to_name(err));
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "scan start failed");
     }
 
+    return send_json_string(req, "{\"status\":\"started\"}");
+}
+
+esp_err_t api_wifi_list_handler(httpd_req_t *req)
+{
     uint16_t ap_num = 0;
-    err = esp_wifi_scan_get_ap_num(&ap_num);
+    esp_err_t err = esp_wifi_scan_get_ap_num(&ap_num);
     if (err != ESP_OK) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "scan read failed");
+        return send_json_string(req, "{\"status\":\"processing\"}");
     }
 
     wifi_ap_record_t *ap_records = (wifi_ap_record_t *)calloc(ap_num ? ap_num : 1, sizeof(wifi_ap_record_t));

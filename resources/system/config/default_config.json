@@ -1,24 +1,21 @@
 {
+    "iso": {
+        "standard": "ISO10816",
+        "category": "2",
+        "foundation": "rigid"
+    },
     "deviceId": "",
     "deviceName": "",
-    "rpm": 1500,
-    "years": 1,
-    "host": {
-        "http": "http://example.com/api",
-        "mqtt": "mqtt://example.com:1883"
-    },
-    "detect": {
-        "type": 3,
-        "value": 3
-    },
-    "report": {
-        "type": 2,
-        "value": 50
-    },
-    "configured": false,
+    "rpm": 1480,
+    "years": 0,
+    "host": "https://sentinel-cloud.com",
+    "detect_interval": 30,
+    "report_cycle": 6,
     "comm_type": 1,
+    "ble_enabled": true,
     "wifi": {
         "ssid": "",
         "pass": ""
-    }
+    },
+    "configured": false
 }

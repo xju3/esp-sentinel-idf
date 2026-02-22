@@ -9,6 +9,8 @@
 #include "api_handlers.h"
 #include "logger.h"
 
+;
+
 static httpd_handle_t s_server = NULL;
 
 static bool file_exists(const char *path)
@@ -94,7 +96,7 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
     }
 
     // Root or any path -> try static file, fallback to index.html
-    const char *base = "/system/www";
+    const char *base = "/system/w";
     char path[256];
 
     if (strcmp(uri, "/") == 0) {
@@ -160,10 +162,17 @@ esp_err_t web_server_start(void)
         .handler = api_wifi_list_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t api_wifi_start = {
+        .uri = "/api/wifi-scan-start",
+        .method = HTTP_POST,
+        .handler = api_wifi_scan_start_handler,
+        .user_ctx = NULL,
+    };
 
     httpd_register_uri_handler(s_server, &api_config);
     httpd_register_uri_handler(s_server, &api_save);
     httpd_register_uri_handler(s_server, &api_wifi);
+    httpd_register_uri_handler(s_server, &api_wifi_start);
 
     httpd_uri_t catch_all = {
         .uri = "/*",

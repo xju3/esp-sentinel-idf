@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-sentinel-yellow: #facc15;
+  --color-sentinel-dark: #0a0a0b;
+}
+
+@layer components {
+  .btn {
+    @apply px-6 py-3 rounded-lg font-semibold transition-all duration-200 border-none cursor-pointer text-sm;
+  }
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-hover hover:-translate-y-px shadow-sm;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-900;
+  }
+  .btn-success {
+    @apply bg-emerald-500 text-white hover:bg-emerald-600 shadow-sm;
+  }
+  
+  .pill {
+    @apply bg-white border border-slate-200 px-5 py-2.5 rounded-full cursor-pointer text-sm text-slate-500 transition-all duration-200 hover:border-primary hover:text-primary;
+  }
+  .pill.active {
+    @apply bg-primary text-white border-primary shadow-md shadow-blue-500/30;
+  }
+  
+  .input-field {
+    @apply w-full px-3 h-[42px] border border-slate-200 rounded-lg text-base transition-colors bg-white focus:outline-none focus:border-primary focus:ring-4 focus:ring-blue-500/10;
+  }
+
+  .step-circle {
+    @apply w-8 h-8 bg-white border-2 border-slate-200 rounded-full flex items-center justify-center font-semibold text-sm text-slate-500 mb-2 transition-all duration-300 z-10 relative;
+  }
+  .step.active .step-circle {
+    @apply border-primary bg-primary text-white;
+  }
+  .step-label {
+    @apply text-xs text-slate-500 font-medium transition-colors;
+  }
+  .step.active .step-label {
+    @apply text-primary font-semibold;
+  }
+
+  /* 自定义下拉菜单 */
+  #iso-category-trigger {
+    border: 1px solid rgb(226, 232, 240);
+    height: 42px;
+  }
+  #iso-category-trigger:hover {
+    border-color: rgb(37, 99, 235);
+  }
+
+  .dropdown-item {
+    text-align: left;
+  }
+  .dropdown-item .katex {
+    font-size: 0.875rem;
+  }
+}
+
+/* Panel Transitions */
+.panel {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel.active {
+  display: flex;
+  animation: fadeIn 0.4s ease forwards;
+}
+
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 1rem;
+}
+
+.panel-buttons {
+  border-top: 1px solid rgb(226, 232, 240);
+  padding-top: 1.5rem;
+  padding-bottom: 0;
+  flex-shrink: 0;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

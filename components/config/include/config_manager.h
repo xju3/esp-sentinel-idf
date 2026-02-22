@@ -12,19 +12,29 @@ extern "C" {
 
 #define CONFIG_MAX_DEVICE_ID_LEN   64
 #define CONFIG_MAX_DEVICE_NAME_LEN 64
-#define CONFIG_MAX_DEVICE_TYPE_LEN 16
+#define CONFIG_MAX_DEVICE_TYPE_LEN 32
 #define CONFIG_MAX_WIFI_SSID_LEN   64
 #define CONFIG_MAX_WIFI_PASS_LEN   64
 #define CONFIG_MAX_HOST_HTTP_LEN   128
 #define CONFIG_MAX_HOST_MQTT_LEN   128
+#define CONFIG_MAX_ISO_STD_LEN     16
+#define CONFIG_MAX_ISO_CAT_LEN     32
+#define CONFIG_MAX_ISO_FOUND_LEN   16
 
-#define CONFIG_DEFAULT_PATH "/system/config/default_config.json"
+#define CONFIG_DEFAULT_PATH "/system/c/default_config.json"
 #define CONFIG_USER_PATH    "/user/user_config.json"
 
 typedef struct {
     int16_t type;
     int32_t value;
+    int32_t cycle;   // 上报周期倍数（仅 report 使用；detect 置 1）
 } freq_config_t;
+
+typedef struct {
+    char standard[CONFIG_MAX_ISO_STD_LEN];    // ISO10816 or ISO20816
+    char category[CONFIG_MAX_ISO_CAT_LEN];    // 具体类别（class2, pump, vertical...）
+    char foundation[CONFIG_MAX_ISO_FOUND_LEN];// rigid / flexible
+} iso_config_t;
 
 typedef struct {
     char ssid[CONFIG_MAX_WIFI_SSID_LEN];
@@ -40,8 +50,11 @@ typedef struct {
     char device_id[CONFIG_MAX_DEVICE_ID_LEN];
     char device_name[CONFIG_MAX_DEVICE_NAME_LEN];
     char device_type[CONFIG_MAX_DEVICE_TYPE_LEN];
+    int32_t rpm;
     int8_t comm_type;
     int16_t years;
+    bool ble_enabled;
+    iso_config_t iso;
     freq_config_t detect;
     freq_config_t report;
     user_wifi_config_t wifi;

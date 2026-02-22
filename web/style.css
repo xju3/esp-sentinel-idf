@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+/* 引入本地 KaTeX 样式 */
+@import 'katex/dist/katex.min.css';
+
+/* 自定义 Sentinel 液晶感配色 */
+@theme {
+  --color-sentinel-yellow: #facc15;
+  --color-industrial-bg: #0a0a0b;
+}
+
+body {
+  background-color: var(--color-industrial-bg);
+  color: #cbd5e1; /* slate-300 */
+}
