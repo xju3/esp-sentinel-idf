@@ -118,8 +118,8 @@ void captive_dns_stop(void)
     }
 }
 
-static volatile bool s_scan_done = false;
-static volatile bool s_scan_started = false;
+volatile bool s_scan_done = false;
+volatile bool s_scan_started = false;
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -176,7 +176,6 @@ void wifi_init_softap(void)
     LOG_INFOF("SoftAP 启动成功! SSID:%s password:%s",
               (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
 
-    scan_wifi();
     // 启动 Captive Portal DNS 服务
     captive_dns_start();
 }
@@ -184,7 +183,7 @@ void wifi_init_softap(void)
 
 
 // 扫描热点.
-esp_err_t scan_wifi(esp_err_t) {
+esp_err_t scan_wifi(void) {
     wifi_scan_config_t scan_cfg = {
         .ssid = NULL,
         .bssid = NULL,

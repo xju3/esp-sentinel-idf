@@ -114,8 +114,6 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
 
 esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 {
-   
-
     esp_err_t err = scan_wifi();
     if (err != ESP_OK && err != ESP_ERR_WIFI_STATE)
     {
@@ -128,6 +126,12 @@ esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 
 esp_err_t api_wifi_list_handler(httpd_req_t *req)
 {
+    // 检查扫描是否完成
+    if (!s_scan_done)
+    {
+        return send_json_string(req, "{\"status\":\"processing\"}");
+    }
+
     uint16_t ap_num = 0;
     esp_err_t err = esp_wifi_scan_get_ap_num(&ap_num);
     if (err != ESP_OK)

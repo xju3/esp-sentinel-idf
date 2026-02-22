@@ -2,6 +2,7 @@
 #define NET_MANAGER_H_
 
 #include "esp_err.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +19,7 @@ void wifi_init_softap(void);
 /**
  * 扫描网络
  */
-esp_err_t scan_wifi(esp_err_t);
+esp_err_t scan_wifi(void);
 
 /**
  * @brief 初始化并连接到指定的 Wi-Fi 路由器 (STA 模式)
@@ -33,6 +34,18 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass);
  * * 用于在没有 Wi-Fi 环境时，通过蜂窝网络上报数据。
  */
 void ppp_init_4g(void);
+
+/**
+ * @brief Wi-Fi 扫描完成标志
+ * * 当 Wi-Fi 扫描完成时设置为 true
+ */
+extern volatile bool s_scan_done;
+
+/**
+ * @brief Wi-Fi 扫描开始标志
+ * * 当 Wi-Fi 扫描开始时设置为 true
+ */
+extern volatile bool s_scan_started;
 
 #ifdef __cplusplus
 }
