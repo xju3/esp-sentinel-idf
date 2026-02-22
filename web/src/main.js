@@ -409,7 +409,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         processingMask.classList.add('flex');
       }
       if (maskText) maskText.textContent = '正在扫描WiFi热点...';
-      if (maskSubtext) maskSubtext.textContent = '请稍候';
+      if (maskSubtext) maskSubtext.innerHTML = '<div class="flex items-center gap-2"><div class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div><span>请稍候</span></div>';
 
       // 1. 启动WiFi扫描
       console.log('Starting WiFi scan...');
@@ -438,17 +438,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 检查是否处理完成
         if (data.status === 'processing') {
           if (attempts < maxAttempts) {
-            // 等待1秒后重试
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // 等待2秒后重试（增加延迟）
+            await new Promise(resolve => setTimeout(resolve, 2000));
             continue;
           }
-        } else if (data.networks) {
+        } else if (data.networks && Array.isArray(data.networks)) {
           wifiData = data.networks;
-          break;
-        } else if (typeof data === 'string' && data === 'processing') {
-          if (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            continue;
+          if (wifiData.length > 0) {
+            break;
           }
         }
       }
@@ -457,10 +454,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error('WiFi scan timeout or no data received');
       }
 
-      // 3. 过滤信号弱的热点 (rssi < -75)
-      const filteredNetworks = wifiData.filter(network => {
+      // 3. 过滤信号弱的热点 (rssi < -75)，但如果没有强信号的则显示所有
+      let filteredNetworks = wifiData.filter(network => {
         return network.rssi >= -75;
       });
+
+      if (filteredNetworks.length === 0) {
+        // 如果没有强信号网络，显示所有扫到的网络
+        filteredNetworks = wifiData;
+      }
 
       if (filteredNetworks.length === 0) {
         throw new Error('No available WiFi networks found');
@@ -572,7 +574,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 8. 确认配置按钮
   const submitBtn = document.getElementById('submit-config');
   if (submitBtn) {
-    submitBtn.addEventListener('click', () => {
+    submitBtn.addEventListener('click', async () => {
       // 验证WiFi配置
       const commTypeBtn = document.querySelector('#comm-type .pill.active');
       const commType = commTypeBtn?.dataset.value;
@@ -603,17 +605,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         mask.classList.add('flex');
       }
       
-      // 模拟配置提交
-      setTimeout(() => {
-        // 这里可以调用API提交配置
-        console.log('配置已提交');
-        alert('配置已成功提交！设备将立即开始监测。');
+      // 调用API提交配置
+      try {
+        const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
+        const isoStandard = isoStandardBtn?.dataset.value || '';
+        const isoCategory = document.getElementById('iso-category')?.value || '';
+        const isoFoundation = document.getElementById('iso-foundation')?.value || '';
+        const deviceId = document.getElementById('device-id')?.value || '';
+        const deviceName = document.getElementById('device-name')?.value || '';
+        const modelType = document.getElementById('model-type')?.value || '';
+        const wifiSSID = document.getElementById('wifi-select')?.value || '';
+        const wifiPassword = document.getElementById('wifi-password')?.value || '';
+        const reportType = document.getElementById('report-type')?.value || '1';
+        const reportValue = document.getElementById('report-value')?.value || '2';
+        const reportCycle = document.getElementById('report-cycle')?.value || '1';
+        const detectType = document.getElementById('detect-type')?.value || '1';
+        const detectValue = document.getElementById('detect-value')?.value || '100';
+
+        const config = {
+          iso: { standard: isoStandard, category: isoCategory, foundation: isoFoundation },
+          device_id: deviceId,
+          device_name: deviceName,
+          model_type: modelType,
+          wifi: { ssid: wifiSSID, pass: wifiPassword },
+          report: { type: parseInt(reportType), value: parseInt(reportValue), cycle: parseInt(reportCycle) },
+          detect: { type: parseInt(detectType), value: parseInt(detectValue), cycle: 1 }
+        };
+
+        console.log('Sending config:', config);
         
+        const response = await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        
+        if (!response.ok) {
+          throw new Error(`保存失败: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('配置已提交:', result);
+        alert('配置已成功提交！设备将立即重启并开始监测。');
+      } catch (error) {
+        console.error('Save error:', error);
+        alert('保存失败: ' + error.message);
+      } finally {
         if (mask) {
           mask.classList.add('hidden');
           mask.classList.remove('flex');
         }
-      }, 1500);
+      }
     });
   }
 });

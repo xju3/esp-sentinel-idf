@@ -134,8 +134,8 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "scan list failed");
     }
 
-    cJSON *root = cJSON_CreateArray();
-    if (!root) {
+    cJSON *networks = cJSON_CreateArray();
+    if (!networks) {
         free(ap_records);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
     }
@@ -145,9 +145,18 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
         cJSON_AddStringToObject(obj, "ssid", (const char *)ap_records[i].ssid);
         cJSON_AddNumberToObject(obj, "rssi", ap_records[i].rssi);
         cJSON_AddNumberToObject(obj, "enc", ap_records[i].authmode == WIFI_AUTH_OPEN ? 0 : 1);
-        cJSON_AddItemToArray(root, obj);
+        cJSON_AddItemToArray(networks, obj);
     }
 
+    // 返回对象格式而不是直接数组，便于前端处理
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        cJSON_Delete(networks);
+        free(ap_records);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
+    }
+    cJSON_AddItemToObject(root, "networks", networks);
+    
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     free(ap_records);
