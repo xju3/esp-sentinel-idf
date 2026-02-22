@@ -107,22 +107,92 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (config.comm_type === 2 && config.wifi?.ssid) {
           // 延迟以允许WiFi选择框初始化
           setTimeout(() => {
-            scanWifiNetworks().then(() => {
-              const wifiSelect = document.getElementById('wifi-select');
-              if (wifiSelect) {
-                wifiSelect.value = config.wifi.ssid;
-                
-                // 触发change事件以更新密码框显示
-                wifiSelect.dispatchEvent(new Event('change'));
-                
-                // 如果有密码，填充到密码框
-                if (config.wifi.pass) {
-                  const wifiPassword = document.getElementById('wifi-password');
-                  if (wifiPassword) wifiPassword.value = config.wifi.pass;
+            // 保存要设置的SSID和密码
+            const savedSsid = config.wifi.ssid;
+            const savedPass = config.wifi.pass;
+            
+            // 先检查WiFi选择框是否已经初始化
+            const wifiSelect = document.getElementById('wifi-select');
+            if (wifiSelect && wifiSelect.options.length > 1) {
+              // 如果已经初始化，直接设置值
+              setWifiSelection(savedSsid, savedPass);
+            } else {
+              // 否则启动扫描
+              scanWifiNetworks().then((success) => {
+                if (success) {
+                  // 等待一小段时间确保DOM已更新
+                  setTimeout(() => {
+                    setWifiSelection(savedSsid, savedPass);
+                  }, 100);
                 }
-              }
-            });
+              });
+            }
           }, 100);
+        }
+      }
+    }
+    
+    // 辅助函数：设置WiFi选择
+    function setWifiSelection(ssid, password) {
+      const wifiSelect = document.getElementById('wifi-select');
+      if (!wifiSelect) return;
+      
+      // 尝试找到匹配的选项
+      let found = false;
+      for (let i = 0; i < wifiSelect.options.length; i++) {
+        const option = wifiSelect.options[i];
+        // 比较SSID（去除信号强度信息）
+        const optionText = option.textContent;
+        const ssidMatch = optionText.match(/^([^(]+)/);
+        if (ssidMatch && ssidMatch[1].trim() === ssid) {
+          wifiSelect.selectedIndex = i;
+          found = true;
+          break;
+        }
+        // 或者直接比较value
+        if (option.value === ssid) {
+          wifiSelect.selectedIndex = i;
+          found = true;
+          break;
+        }
+      }
+      
+      if (found) {
+        // 触发change事件以更新密码框显示
+        wifiSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        // 如果有密码，填充到密码框
+        if (password) {
+          const wifiPassword = document.getElementById('wifi-password');
+          if (wifiPassword) {
+            wifiPassword.value = password;
+            // 确保密码框显示
+            const pwdContainer = document.getElementById('wifi-password-container');
+            if (pwdContainer && wifiSelect.options[wifiSelect.selectedIndex]?.dataset.encrypted === '1') {
+              pwdContainer.style.display = 'block';
+            }
+          }
+        }
+      } else {
+        console.warn('Saved WiFi network not found in scan results:', ssid);
+        // 如果没有找到，但SSID不为空，可以尝试手动添加一个选项
+        if (ssid && ssid.trim() !== '') {
+          const option = document.createElement('option');
+          option.value = ssid;
+          option.textContent = `${ssid} (未扫描到)`;
+          option.dataset.encrypted = '1'; // 假设需要密码
+          wifiSelect.appendChild(option);
+          wifiSelect.selectedIndex = wifiSelect.options.length - 1;
+          wifiSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          
+          if (password) {
+            const wifiPassword = document.getElementById('wifi-password');
+            if (wifiPassword) {
+              wifiPassword.value = password;
+              const pwdContainer = document.getElementById('wifi-password-container');
+              if (pwdContainer) pwdContainer.style.display = 'block';
+            }
+          }
         }
       }
     }
