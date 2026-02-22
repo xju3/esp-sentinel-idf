@@ -440,7 +440,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (data.status === 'processing') {
           if (attempts < maxAttempts) {
             // 等待2秒后重试（增加延迟）
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 3000));
             continue;
           }
         } else if (data.networks && Array.isArray(data.networks)) {

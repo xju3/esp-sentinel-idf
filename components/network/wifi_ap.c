@@ -190,7 +190,7 @@ esp_err_t scan_wifi(void) {
         .channel = 0,
         .show_hidden = true,
         .scan_type = WIFI_SCAN_TYPE_PASSIVE,
-        .scan_time.passive = 1500, //TJU: 增加扫描时间, 否则返回的热点数很少
+        .scan_time.passive = 1600, //TJU: 增加扫描时间, 否则返回的热点数很少
     };
     return  esp_wifi_scan_start(&scan_cfg, false);
 }

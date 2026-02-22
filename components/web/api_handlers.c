@@ -27,8 +27,10 @@ static esp_err_t send_json_string(httpd_req_t *req, const char *json)
 
 esp_err_t api_get_config_handler(httpd_req_t *req)
 {
+    LOG_DEBUG("load user configuration.");
     if (config_manager_init() != ESP_OK)
     {
+        LOG_ERROR("config_manager_init failed.");
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "init failed");
     }
 
@@ -72,7 +74,7 @@ static void restart_task(void *arg)
 esp_err_t api_save_config_handler(httpd_req_t *req)
 {
     int total = req->content_len;
-    LOG_DEBUGF("saving user configurations, %s bytes", total);
+    LOG_DEBUGF("saving user configurations, %d bytes", total);
     if (total <= 0 || total > 8192)
     {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid length");
@@ -107,10 +109,9 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"status\":\"success\"}", HTTPD_RESP_USE_STRLEN);
 
-    xTaskCreate(restart_task, "restart_task", 2048, NULL, 5, NULL);
+    xTaskCreate(restart_task, "restart_task", 4096, NULL, 5, NULL);
     return ESP_OK;
 }
-
 
 esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 {
@@ -126,38 +127,51 @@ esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 
 esp_err_t api_wifi_list_handler(httpd_req_t *req)
 {
+    bool success = true;
     // 检查扫描是否完成
     if (!s_scan_done)
     {
-        return send_json_string(req, "{\"status\":\"processing\"}");
+        success = false;
+        LOG_DEBUG("still in scan process.");
     }
 
     uint16_t ap_num = 0;
     esp_err_t err = esp_wifi_scan_get_ap_num(&ap_num);
     if (err != ESP_OK)
     {
-        return send_json_string(req, "{\"status\":\"processing\"}");
+        success = false;
+        LOG_ERROR("get ap num failed");
     }
 
     wifi_ap_record_t *ap_records = (wifi_ap_record_t *)calloc(ap_num ? ap_num : 1, sizeof(wifi_ap_record_t));
     if (!ap_records)
     {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
+        success = false;
+        LOG_ERROR("no mem");
     }
 
     err = esp_wifi_scan_get_ap_records(&ap_num, ap_records);
     if (err != ESP_OK)
     {
+        success = false;
         free(ap_records);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "scan list failed");
     }
 
     cJSON *networks = cJSON_CreateArray();
     if (!networks)
     {
+        success = false;
         free(ap_records);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no mem");
     }
+    
+    if (!success)
+    {
+        LOG_ERROR("failed to abtain wifi list.");
+        cJSON_Delete(networks);
+        free(ap_records);
+        return send_json_string(req, "{\"status\":\"processing\"}");
+    }
+
 
     for (uint16_t i = 0; i < ap_num; ++i)
     {
@@ -184,10 +198,9 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
 
     if (!json)
     {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "encode failed");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "processing");
     }
-
-    LOG_DEBUG(json);
+    LOG_DEBUGF("%s", json);
     esp_err_t ret = send_json_string(req, json);
     free(json);
     return ret;
