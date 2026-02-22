@@ -413,7 +413,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // 1. 启动WiFi扫描
       console.log('Starting WiFi scan...');
-      const startResponse = await fetch('/api/wifi-scan-start', { method: 'POST' });
+      const startResponse = await fetch('/api/wifi-scan-start', { method: 'GET' });
+      console.log(startResponse);
       if (!startResponse.ok) {
         throw new Error('Failed to start WiFi scan');
       }
@@ -428,7 +429,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         if (maskSubtext) maskSubtext.textContent = `查询中 (${attempts}/${maxAttempts})...`;
         
-        const response = await fetch('/api/wifi');
+        const response = await fetch('/api/wifi-list');
         if (!response.ok) {
           throw new Error('Failed to fetch WiFi list');
         }

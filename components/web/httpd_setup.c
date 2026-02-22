@@ -164,7 +164,7 @@ esp_err_t web_server_start(void)
     };
     httpd_uri_t api_wifi_start = {
         .uri = "/api/wifi-scan-start",
-        .method = HTTP_POST,
+        .method = HTTP_GET,
         .handler = api_wifi_scan_start_handler,
         .user_ctx = NULL,
     };

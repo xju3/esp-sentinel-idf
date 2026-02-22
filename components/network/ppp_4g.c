@@ -351,9 +351,9 @@ esp_err_t ppp_4g_init(void) {
     
     // 先尝试当前波特率
     for (int i = 0; i < 3; i++) {
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK) {
+        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 500) == ESP_OK) {
             module_on = true;
-            ESP_LOGI(TAG, "✓ Module already powered on and responding");
+            ESP_LOGI(TAG, "✓ 4G Module already powered on and responding");
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -361,11 +361,11 @@ esp_err_t ppp_4g_init(void) {
     
     if (!module_on) {
         ESP_LOGI(TAG, "✗ Module not responding, will toggle power");
-        ppp_4g_power_on();
+         ppp_4g_power_on();
         
         // 开机后清空 URC 消息
         ESP_LOGI(TAG, "→ Draining boot messages (URC)...");
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        vTaskDelay(pdMS_TO_TICKS(1500));
         uart_drain_with_log();
     }
     
@@ -577,6 +577,7 @@ esp_err_t ppp_4g_init(void) {
     
     return ESP_OK;
 }
+
 
 esp_err_t ppp_4g_deinit(void) {
     ESP_LOGI(TAG, "→ Shutting down 4G module...");
