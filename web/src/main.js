@@ -611,26 +611,46 @@ document.addEventListener('DOMContentLoaded', async () => {
         const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
         const isoStandard = isoStandardBtn?.dataset.value || '';
         const isoCategory = document.getElementById('iso-category')?.value || '';
-        const isoFoundation = document.getElementById('iso-foundation')?.value || '';
+        
+        const foundationBtn = document.querySelector('#foundation-select .pill.active');
+        const isoFoundation = foundationBtn?.dataset.value || 'rigid';
+
         const deviceId = document.getElementById('device-id')?.value || '';
         const deviceName = document.getElementById('device-name')?.value || '';
-        const modelType = document.getElementById('model-type')?.value || '';
+        const rpm = document.getElementById('device-rpm')?.value || 1480;
+        const years = document.getElementById('years-used')?.value || 0;
+
         const wifiSSID = document.getElementById('wifi-select')?.value || '';
         const wifiPassword = document.getElementById('wifi-password')?.value || '';
-        const reportType = document.getElementById('report-type')?.value || '1';
-        const reportValue = document.getElementById('report-value')?.value || '2';
-        const reportCycle = document.getElementById('report-cycle')?.value || '1';
-        const detectType = document.getElementById('detect-type')?.value || '1';
-        const detectValue = document.getElementById('detect-value')?.value || '100';
+        
+        const reportCycle = document.getElementById('report-cycle')?.value || 6;
+        
+        const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+        const detectInterval = detectFreqBtn?.dataset.value || 30;
+        
+        const commTypeBtn = document.querySelector('#comm-type .pill.active');
+        const commType = commTypeBtn?.dataset.value || 1;
 
         const config = {
-          iso: { standard: isoStandard, category: isoCategory, foundation: isoFoundation },
-          device_id: deviceId,
-          device_name: deviceName,
-          model_type: modelType,
-          wifi: { ssid: wifiSSID, pass: wifiPassword },
-          report: { type: parseInt(reportType), value: parseInt(reportValue), cycle: parseInt(reportCycle) },
-          detect: { type: parseInt(detectType), value: parseInt(detectValue), cycle: 1 }
+          iso: {
+            standard: isoStandard,
+            category: isoCategory,
+            foundation: isoFoundation
+          },
+          deviceId: deviceId,
+          deviceName: deviceName,
+          rpm: parseInt(rpm) || 1480,
+          years: parseFloat(years) || 0,
+          host: "https://sentinel-cloud.com",
+          detect_interval: parseInt(detectInterval) || 30,
+          report_cycle: parseInt(reportCycle) || 6,
+          comm_type: parseInt(commType) || 1,
+          ble_enabled: true,
+          wifi: {
+            ssid: wifiSSID,
+            pass: wifiPassword
+          },
+          configured: true
         };
 
         console.log('Sending config:', config);

@@ -6,7 +6,7 @@
 #include "esp_random.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
-#include "network_manager.h" // 你自己的头文件
+#include "network_manager.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -118,6 +118,18 @@ void captive_dns_stop(void)
     }
 }
 
+static volatile bool s_scan_done = false;
+static volatile bool s_scan_started = false;
+
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE)
+    {
+        s_scan_done = true;
+    }
+}
+
 void wifi_init_softap(void)
 {
     // 1. 初始化底层 TCP/IP 堆栈
@@ -125,6 +137,9 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_ap();
     esp_netif_create_default_wifi_sta();
+    // init 里注册一次：
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
 
     // 2. 初始化 Wi-Fi 驱动
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -161,6 +176,22 @@ void wifi_init_softap(void)
     LOG_INFOF("SoftAP 启动成功! SSID:%s password:%s",
               (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
 
+    scan_wifi();
     // 启动 Captive Portal DNS 服务
     captive_dns_start();
+}
+
+
+
+// 扫描热点.
+esp_err_t scan_wifi(esp_err_t) {
+    wifi_scan_config_t scan_cfg = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = 0,
+        .show_hidden = true,
+        .scan_type = WIFI_SCAN_TYPE_PASSIVE,
+        .scan_time.passive = 1500, //TJU: 增加扫描时间, 否则返回的热点数很少
+    };
+    return  esp_wifi_scan_start(&scan_cfg, false);
 }

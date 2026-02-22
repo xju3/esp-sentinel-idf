@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 
 #include "config_manager.h"
+#include "network_manager.h"
 #include "fs_utils.h"
 #include "logger.h"
 
@@ -62,6 +63,7 @@ esp_err_t api_get_config_handler(httpd_req_t *req)
 
 static void restart_task(void *arg)
 {
+    LOG_INFO("restarting...");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     vTaskDelete(NULL);
@@ -69,8 +71,8 @@ static void restart_task(void *arg)
 
 esp_err_t api_save_config_handler(httpd_req_t *req)
 {
-    LOG_DEBUG("saving user configurations.");
     int total = req->content_len;
+    LOG_DEBUGF("saving user configurations, %s bytes", total);
     if (total <= 0 || total > 8192)
     {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid length");
@@ -102,7 +104,6 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "save failed");
     }
     LOG_DEBUG("user configurations saved.");
-
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"status\":\"success\"}", HTTPD_RESP_USE_STRLEN);
 
@@ -110,17 +111,12 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+
 esp_err_t api_wifi_scan_start_handler(httpd_req_t *req)
 {
-    wifi_scan_config_t scan_cfg = {
-        .ssid = NULL,
-        .bssid = NULL,
-        .channel = 0,
-        .show_hidden = true,
-        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-    };
+   
 
-    esp_err_t err = esp_wifi_scan_start(&scan_cfg, false);
+    esp_err_t err = scan_wifi();
     if (err != ESP_OK && err != ESP_ERR_WIFI_STATE)
     {
         LOG_ERRORF("WiFi scan start failed: %s", esp_err_to_name(err));

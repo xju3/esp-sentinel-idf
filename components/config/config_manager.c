@@ -268,6 +268,7 @@ esp_err_t config_manager_save_user_json(const char *json)
     if (!json) {
         return ESP_ERR_INVALID_ARG;
     }
+    LOG_DEBUGF("file contents: %s", json);
 
     if (config_manager_init() != ESP_OK) {
         return ESP_FAIL;

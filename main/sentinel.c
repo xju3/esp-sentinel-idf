@@ -27,15 +27,13 @@ void app_main(void) {
     // 加载配置
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
     
-    
     // 初始化 4G 模组
-    LOG_INFO("Initializing 4G Module...");
-    if (ppp_4g_init() == ESP_OK) {
-        LOG_INFO("4G Module initialized.");
-    } else {
-        LOG_ERROR("4G Module initialization failed.");
-    }
-
+    // LOG_INFO("Initializing 4G Module...");
+    // if (ppp_4g_init() == ESP_OK) {
+    //     LOG_INFO("4G Module initialized.");
+    // } else {
+    //     LOG_ERROR("4G Module initialization failed.");
+    // }
     
     // 若未配置，启动 AP + Captive Portal
     if (!g_user_config.is_configured) {

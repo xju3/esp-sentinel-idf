@@ -124,6 +124,41 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
     return send_file(req, path);
 }
 
+static esp_err_t save_config_handler(httpd_req_t *req)
+{
+    char buf[2048];
+    int ret, remaining = req->content_len;
+
+    if (remaining >= sizeof(buf)) {
+        LOG_ERROR("Config too large");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ret = httpd_req_recv(req, buf, remaining);
+    if (ret <= 0) {
+        if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+            httpd_resp_send_408(req);
+        }
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    FILE *f = fopen("/system/config/user_config.json", "w");
+    if (f == NULL) {
+        LOG_ERROR("Failed to open user_config.json");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    fwrite(buf, 1, ret, f);
+    fclose(f);
+    LOG_DEBUG("user configuration file saved.");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, "{\"status\":\"ok\"}", -1);
+    return ESP_OK;
+}
+
 esp_err_t web_server_start(void)
 {
     if (s_server) {
@@ -153,7 +188,7 @@ esp_err_t web_server_start(void)
     httpd_uri_t api_save = {
         .uri = "/api/save",
         .method = HTTP_POST,
-        .handler = api_save_config_handler,
+        .handler = save_config_handler,
         .user_ctx = NULL,
     };
     httpd_uri_t api_wifi = {

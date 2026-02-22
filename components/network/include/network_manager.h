@@ -14,6 +14,12 @@ extern "C" {
  */
 void wifi_init_softap(void);
 
+
+/**
+ * 扫描网络
+ */
+esp_err_t scan_wifi(esp_err_t);
+
 /**
  * @brief 初始化并连接到指定的 Wi-Fi 路由器 (STA 模式)
  * * @param ssid 路由器的 SSID

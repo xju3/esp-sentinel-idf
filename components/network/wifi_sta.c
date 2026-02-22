@@ -26,7 +26,7 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass)
         strlcpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password));
     }
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
