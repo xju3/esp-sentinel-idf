@@ -10,11 +10,49 @@
 </head>
 <body class="bg-slate-100 text-slate-900 min-h-screen flex flex-col items-center py-8 px-4 font-sans leading-relaxed">
 
-  <!-- Mask Overlay -->
-  <div class="fixed inset-0 bg-white/95 z-50 hidden items-center justify-center flex-col" id="processing-mask">
-    <div class="w-10 h-10 border-4 border-slate-200 border-t-primary rounded-full animate-spin mb-4"></div>
-    <div class="font-medium text-slate-700">处理中...</div>
-    <div class="text-sm text-slate-400 mt-1">请稍候</div>
+  <!-- WiFi扫描遮罩 -->
+  <div class="fixed inset-0 bg-white/95 backdrop-blur-sm z-50 hidden items-center justify-center flex-col" id="processing-mask">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 border border-slate-200">
+      <div class="flex flex-col items-center">
+        <!-- 加载动画 -->
+        <div class="relative mb-6">
+          <div class="w-16 h-16 border-4 border-slate-100 rounded-full"></div>
+          <div class="absolute top-0 left-0 w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+            <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+            </svg>
+          </div>
+        </div>
+        
+        <!-- 标题 -->
+        <h3 class="text-lg font-semibold text-slate-900 mb-2" id="mask-title">正在扫描WiFi热点</h3>
+        
+        <!-- 描述 -->
+        <p class="text-sm text-slate-600 text-center mb-4" id="mask-description">正在搜索附近的无线网络，请稍候...</p>
+        
+        <!-- 进度指示器 -->
+        <div class="w-full bg-slate-100 rounded-full h-2 mb-2">
+          <div id="mask-progress" class="bg-primary h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+        
+        <!-- 状态文本 -->
+        <div class="flex items-center justify-between w-full text-xs text-slate-500">
+          <span id="mask-status">初始化...</span>
+          <span id="mask-progress-text">0%</span>
+        </div>
+        
+        <!-- 提示信息 -->
+        <div class="mt-6 p-3 bg-blue-50 rounded-lg border border-blue-100 w-full">
+          <div class="flex items-start">
+            <svg class="w-4 h-4 text-blue-500 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+            </svg>
+            <p class="text-xs text-blue-700">扫描过程可能需要几秒钟，请确保设备在WiFi信号范围内。</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <header class="text-center mb-10">
@@ -53,11 +91,12 @@
       <div class="panel-content">
         <h2 class="text-xl font-bold text-slate-900 mb-1">ISO 标准与环境</h2>
         <span class="text-slate-500 text-sm mb-6 block">
-          基于 <span id="katex-formula" class="mx-1"></span> 算法的振动评判标准。
+          <span id="katex-formula" class="mx-1"></span>
+          <div class="text-xs text-slate-400 mt-1">计算振动信号的均方根值，评估整体振动能量水平</div>
         </span>
 
         <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">评价标准</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">评价标准</label>
         <div class="flex gap-3 flex-wrap pill-group" id="iso-standard">
           <button data-value="ISO10816" class="pill active">ISO 10816 (通用)</button>
           <button data-value="ISO20816" class="pill">ISO 20816 (高级)</button>
@@ -65,7 +104,7 @@
       </div>
 
       <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">机械类别</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">机械类别</label>
         <div class="relative">
           <button id="iso-category-trigger" class="input-field w-full text-left bg-white hover:border-primary transition-colors flex justify-between items-center px-3 py-2">
             <span id="iso-category-label">请选择设备类型</span>
@@ -97,7 +136,10 @@
     <section class="panel" id="panel-2">
       <div class="panel-content">
         <h2 class="text-xl font-bold text-slate-900 mb-1">设备信息维护</h2>
-        <span class="text-slate-500 text-sm mb-6 block">为AI"健康指纹"绑定唯一物理标签。</span>
+        <span class="text-slate-500 text-sm mb-6 block">
+          <span id="fft-formula" class="mx-1"></span>
+          <div class="text-xs text-slate-400 mt-1">将时域振动信号转换为频域，分析频率成分和故障特征</div>
+        </span>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div class="mb-4">
@@ -130,20 +172,29 @@
     <section class="panel" id="panel-3">
       <div class="panel-content">
         <h2 class="text-xl font-bold text-slate-900 mb-1">检测与上报策略</h2>
-        <span class="text-slate-500 text-sm mb-6 block">平衡 AI 诊断准确度与电池寿命。</span>
+        <span class="text-slate-500 text-sm mb-6 block">
+          <span id="hilbert-formula" class="mx-1"></span>
+          <div class="text-xs text-slate-400 mt-1">提取振动信号的包络特征，检测轴承、齿轮等周期性冲击故障</div>
+        </span>
 
         <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">检测频率</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">检测频率</label>
         <div class="flex gap-3 flex-wrap pill-group" id="detect-frequency">
+          <button data-value="1" class="pill">1分钟</button>
+          <button data-value="5" class="pill">5分钟</button>
           <button data-value="10" class="pill">10分钟</button>
           <button data-value="30" class="pill active">30分钟</button>
           <button data-value="60" class="pill">1小时</button>
+          <button data-value="120" class="pill">2小时</button>
           <button data-value="240" class="pill">4小时</button>
+          <button data-value="480" class="pill">8小时</button>
+          <button data-value="720" class="pill">12小时</button>
+          <button data-value="1440" class="pill">24小时</button>
         </div>
       </div>
 
       <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">上报周期</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">上报周期</label>
         <input type="range" id="report-cycle" min="1" max="10" step="1" value="6" class="w-full accent-primary h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
         <div class="text-primary font-bold mt-2"><span id="cycle-val">6</span> 次检测后上报</div>
         <p class="text-xs text-slate-400 mt-2">若本地 AI 检测到异常，将忽略周期立即强制上报。</p>
@@ -161,10 +212,13 @@
     <section class="panel" id="panel-4">
       <div class="panel-content">
         <h2 class="text-xl font-bold text-slate-900 mb-1">通讯配置</h2>
-        <span class="text-slate-500 text-sm mb-6 block">确保数据通道畅通。</span>
+        <span class="text-slate-500 text-sm mb-6 block">
+          <span id="kurtosis-formula" class="mx-1"></span>
+          <div class="text-xs text-slate-400 mt-1">量化振动信号中的冲击强度，评估故障严重程度</div>
+        </span>
 
         <div class="mb-6">
-        <label class="block text-sm font-semibold text-slate-900 mb-2">通讯方式</label>
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">通讯方式</label>
         <div class="flex gap-3 pill-group" id="comm-type">
           <button data-value="1" class="pill active">4G (LTE)</button>
           <button data-value="2" class="pill">WiFi</button>
@@ -180,7 +234,13 @@
         <div id="wifi-password-container" class="hidden">
           <input type="password" id="wifi-password" class="input-field" placeholder="输入 WiFi 密码">
         </div>
-        </div>
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">服务器地址</label>
+        <input type="url" id="server-host" class="input-field" placeholder="sentinel-cloud.com" value="sentinel-cloud.com">
+        <p class="text-xs text-slate-400 mt-2">数据上报的目标服务器地址</p>
+      </div>
       </div>
       <div class="panel-buttons">
         <div class="flex justify-between">
@@ -253,7 +313,7 @@
           </div>
         </div>
 
-        <!-- 通讯配置部分 -->
+          <!-- 通讯配置部分 -->
         <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
           <h3 class="font-semibold text-slate-900 mb-3">通讯配置</h3>
           <div class="text-sm">
@@ -262,6 +322,10 @@
             <div id="preview-wifi-container" class="hidden mt-3">
               <p class="text-slate-500">WiFi 网络</p>
               <p class="font-medium text-slate-900" id="preview-wifi-ssid">-</p>
+            </div>
+            <div class="mt-3">
+              <p class="text-slate-500">服务器地址</p>
+              <p class="font-medium text-slate-900" id="preview-server-host">https://sentinel-cloud.com</p>
             </div>
           </div>
         </div>
@@ -274,5 +338,26 @@
       </div>
     </section>
   </main>
+  <!-- 错误提示Toast -->
+  <div id="error-toast" class="fixed top-4 right-4 bg-red-50 border border-red-200 rounded-lg shadow-lg p-4 max-w-sm hidden z-50 transition-all duration-300 transform translate-x-full">
+    <div class="flex items-start">
+      <div class="flex-shrink-0">
+        <svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+        </svg>
+      </div>
+      <div class="ml-3">
+        <h3 class="text-sm font-medium text-red-800" id="error-title">错误</h3>
+        <div class="mt-1 text-sm text-red-700" id="error-message"></div>
+      </div>
+      <button id="close-error-toast" class="ml-auto -mx-1.5 -my-1.5 bg-red-50 text-red-500 rounded-lg focus:ring-2 focus:ring-red-400 p-1.5 hover:bg-red-100 inline-flex h-8 w-8">
+        <span class="sr-only">关闭</span>
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
 </body>
 </html>
