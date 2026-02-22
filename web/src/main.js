@@ -594,8 +594,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     isScanning = true;
     const processingMask = document.getElementById('processing-mask');
-    const maskText = processingMask?.querySelector('.font-medium');
-    const maskSubtext = processingMask?.querySelector('.text-slate-400');
+    const maskTitle = document.getElementById('mask-title');
+    const maskDescription = document.getElementById('mask-description');
+    const maskStatus = document.getElementById('mask-status');
+    const maskProgress = document.getElementById('mask-progress');
+    const maskProgressText = document.getElementById('mask-progress-text');
     
     try {
       // 显示等待窗口
@@ -603,11 +606,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         processingMask.classList.remove('hidden');
         processingMask.classList.add('flex');
       }
-      if (maskText) maskText.textContent = '正在扫描WiFi热点...';
-      if (maskSubtext) maskSubtext.innerHTML = '<div class="flex items-center gap-2"><div class="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full"></div><span>请稍候</span></div>';
+      
+      // 重置进度
+      if (maskProgress) {
+        maskProgress.style.width = '0%';
+      }
+      if (maskProgressText) {
+        maskProgressText.textContent = '0%';
+      }
+      if (maskStatus) {
+        maskStatus.textContent = '初始化...';
+      }
 
       // 1. 启动WiFi扫描
       console.log('Starting WiFi scan...');
+      updateMaskProgress(10, '正在启动扫描...');
       const startResponse = await fetch('/api/wifi-scan-start', { method: 'GET' });
       console.log(startResponse);
       if (!startResponse.ok) {
@@ -622,7 +635,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       while (attempts < maxAttempts) {
         attempts++;
         
-        if (maskSubtext) maskSubtext.textContent = `查询中 (${attempts}/${maxAttempts})...`;
+        updateMaskProgress(10 + (attempts * 15), `查询中 (${attempts}/${maxAttempts})...`);
         
         const response = await fetch('/api/wifi-list');
         if (!response.ok) {
@@ -641,6 +654,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else if (data.networks && Array.isArray(data.networks)) {
           wifiData = data.networks;
           if (wifiData.length > 0) {
+            updateMaskProgress(90, `发现 ${wifiData.length} 个网络...`);
             break;
           }
         }
@@ -651,6 +665,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       // 3. 过滤信号弱的热点 (rssi < -75)，但如果没有强信号的则显示所有
+      updateMaskProgress(95, '正在处理扫描结果...');
       let filteredNetworks = wifiData.filter(network => {
         return network.rssi >= -75;
       });
@@ -685,11 +700,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         wifiSelect.disabled = false;
       }
 
-      // 隐藏等待窗口
-      if (processingMask) {
-        processingMask.classList.add('hidden');
-        processingMask.classList.remove('flex');
-      }
+      // 完成进度
+      updateMaskProgress(100, '扫描完成！');
+      
+      // 延迟隐藏等待窗口，让用户看到完成状态
+      setTimeout(() => {
+        if (processingMask) {
+          processingMask.classList.add('hidden');
+          processingMask.classList.remove('flex');
+        }
+      }, 1000);
 
       isScanning = false; // 重置扫描状态
       return true; // 成功
@@ -698,8 +718,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.error('WiFi scan error:', error);
       
       // 显示错误信息
-      if (maskText) maskText.textContent = '扫描失败';
-      if (maskSubtext) maskSubtext.textContent = error.message || '请检查网络连接';
+      if (maskTitle) maskTitle.textContent = '扫描失败';
+      if (maskDescription) maskDescription.textContent = error.message || '请检查网络连接';
+      if (maskStatus) maskStatus.textContent = '错误';
+      if (maskProgress) maskProgress.style.width = '100%';
+      if (maskProgressText) maskProgressText.textContent = '100%';
       
       // 3秒后隐藏
       setTimeout(() => {
@@ -718,6 +741,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       isScanning = false; // 重置扫描状态
       return false; // 失败
+    }
+  }
+
+  // 7.1.1 更新遮罩进度
+  function updateMaskProgress(percent, statusText) {
+    const maskProgress = document.getElementById('mask-progress');
+    const maskProgressText = document.getElementById('mask-progress-text');
+    const maskStatus = document.getElementById('mask-status');
+    
+    if (maskProgress) {
+      maskProgress.style.width = `${percent}%`;
+    }
+    if (maskProgressText) {
+      maskProgressText.textContent = `${percent}%`;
+    }
+    if (maskStatus) {
+      maskStatus.textContent = statusText;
     }
   }
 

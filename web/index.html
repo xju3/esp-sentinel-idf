@@ -8,11 +8,49 @@
 </head>
 <body class="bg-slate-100 text-slate-900 min-h-screen flex flex-col items-center py-8 px-4 font-sans leading-relaxed">
 
-  <!-- Mask Overlay -->
-  <div class="fixed inset-0 bg-white/95 z-50 hidden items-center justify-center flex-col" id="processing-mask">
-    <div class="w-10 h-10 border-4 border-slate-200 border-t-primary rounded-full animate-spin mb-4"></div>
-    <div class="font-medium text-slate-700">处理中...</div>
-    <div class="text-sm text-slate-400 mt-1">请稍候</div>
+  <!-- WiFi扫描遮罩 -->
+  <div class="fixed inset-0 bg-white/95 backdrop-blur-sm z-50 hidden items-center justify-center flex-col" id="processing-mask">
+    <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 border border-slate-200">
+      <div class="flex flex-col items-center">
+        <!-- 加载动画 -->
+        <div class="relative mb-6">
+          <div class="w-16 h-16 border-4 border-slate-100 rounded-full"></div>
+          <div class="absolute top-0 left-0 w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+            <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+            </svg>
+          </div>
+        </div>
+        
+        <!-- 标题 -->
+        <h3 class="text-lg font-semibold text-slate-900 mb-2" id="mask-title">正在扫描WiFi热点</h3>
+        
+        <!-- 描述 -->
+        <p class="text-sm text-slate-600 text-center mb-4" id="mask-description">正在搜索附近的无线网络，请稍候...</p>
+        
+        <!-- 进度指示器 -->
+        <div class="w-full bg-slate-100 rounded-full h-2 mb-2">
+          <div id="mask-progress" class="bg-primary h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+        
+        <!-- 状态文本 -->
+        <div class="flex items-center justify-between w-full text-xs text-slate-500">
+          <span id="mask-status">初始化...</span>
+          <span id="mask-progress-text">0%</span>
+        </div>
+        
+        <!-- 提示信息 -->
+        <div class="mt-6 p-3 bg-blue-50 rounded-lg border border-blue-100 w-full">
+          <div class="flex items-start">
+            <svg class="w-4 h-4 text-blue-500 mt-0.5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" />
+            </svg>
+            <p class="text-xs text-blue-700">扫描过程可能需要几秒钟，请确保设备在WiFi信号范围内。</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <header class="text-center mb-10">
