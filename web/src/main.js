@@ -114,27 +114,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 如果是WiFi，需要加载并选择之前的SSID
         if (config.comm_type === 2 && config.wifi?.ssid) {
+          // 保存要设置的SSID和密码到全局变量，供WiFi扫描完成后使用
+          window.savedWifiConfig = {
+            ssid: config.wifi.ssid,
+            password: config.wifi.pass
+          };
+
           // 延迟以允许WiFi选择框初始化
           setTimeout(() => {
-            // 保存要设置的SSID和密码
-            const savedSsid = config.wifi.ssid;
-            const savedPass = config.wifi.pass;
-
             // 先检查WiFi选择框是否已经初始化
             const wifiSelect = document.getElementById('wifi-select');
             if (wifiSelect && wifiSelect.options.length > 1) {
               // 如果已经初始化，直接设置值
-              setWifiSelection(savedSsid, savedPass);
+              setWifiSelection(window.savedWifiConfig.ssid, window.savedWifiConfig.password);
             } else {
-              // 否则启动扫描
-              scanWifiNetworks().then((success) => {
-                if (success) {
-                  // 等待一小段时间确保DOM已更新
-                  setTimeout(() => {
-                    setWifiSelection(savedSsid, savedPass);
-                  }, 100);
-                }
-              });
+              // 否则启动扫描，扫描完成后会自动检查并设置
+              scanWifiNetworks();
             }
           }, 100);
         }
@@ -822,6 +817,78 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 电池效率系数
   const BATTERY_EFFICIENCY = 0.85; // 电池有效转换率
 
+  // 加载电池容量和功耗配置
+  async function loadBatteryConfig(configData) {
+    try {
+      // 使用已经加载的配置数据，避免重复调用API
+      if (configData && configData.battery !== undefined) {
+        batteryCapacity = configData.battery;
+        if (batteryCapacityElement) {
+          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+        }
+      } else {
+        // 如果没有battery字段，使用默认值
+        console.log('配置中没有battery字段，使用默认值9000 mAh');
+        if (batteryCapacityElement) {
+          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+        }
+      }
+
+      // 尝试加载功耗配置（/api/consumption接口可能尚未完成）
+      try {
+        const consumptionResponse = await fetch('/api/consumption');
+        if (consumptionResponse.ok) {
+          const consumption = await consumptionResponse.json();
+          if (consumption.components) {
+            const comp = consumption.components;
+            powerConsumption = {
+              imu_working: comp.imu?.consumption?.working || 1.0,
+              imu_standby: comp.imu?.consumption?.standby || 0.003,
+              cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
+              cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
+              wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
+              wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
+              wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
+            };
+
+            console.log('功耗配置已从API加载:', powerConsumption);
+          }
+        } else {
+          console.log('功耗配置API未就绪，使用默认值');
+          // 使用与consumption.json匹配的默认值
+          powerConsumption = {
+            imu_working: 1.0,
+            imu_standby: 0.003,
+            cellular_working: 500.0,
+            cellular_standby: 2.0,
+            wifi_working_tx: 285.0,
+            wifi_working_rx: 95.0,
+            wifi_standby_deep: 0.01
+          };
+        }
+      } catch (apiError) {
+        console.log('功耗配置API请求失败，使用默认值:', apiError.message);
+        // 使用与consumption.json匹配的默认值
+        powerConsumption = {
+          imu_working: 1.0,
+          imu_standby: 0.003,
+          cellular_working: 500.0,
+          cellular_standby: 2.0,
+          wifi_working_tx: 285.0,
+          wifi_working_rx: 95.0,
+          wifi_standby_deep: 0.01
+        };
+      }
+
+    } catch (error) {
+      console.warn('Failed to load battery config:', error);
+      // 使用默认值
+      if (batteryCapacityElement) {
+        batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+      }
+    }
+  }
+
   // 计算上报频率的函数
   function calculateReportFrequency() {
     const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
@@ -881,193 +948,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const C_eff = C * η; // 有效电量 = 7650 mAh (当C=9000时)
 
     // 耗电电流变量 (单位: mA) - 从powerConsumption对象获取
-    // 硬休眠总电流 = wifi.standby_hardware + imu.standby_hardware + 4g.standby_hardware
-    // 注意：consumption.json中没有standby_hardware，使用standby_deep_sleep代替
-    const I_sleep = powerConsumption.wifi_standby_deep; // 0.01 mA (WiFi深度休眠)
-
-    // 仅采集时电流 = ESP32工作电流 (30mA) + imu.working_typical (1.0)
-    const I_sample = 30 + powerConsumption.imu_working; // 31 mA
-
-    // 联网上报时电流
-    let I_report;
-    if (commType === 1) {
-      // 4G模式: ESP32工作 + imu.working_typical + 4g.working_typical
-      I_report = 30 + powerConsumption.imu_working + powerConsumption.cellular_working; // 531 mA
-    } else {
-      // WiFi模式: ESP32工作 + imu.working_typical + wifi.working_tx
-      I_report = 30 + powerConsumption.imu_working + powerConsumption.wifi_working_tx; // 316 mA
-    }
-
-    // 时间变量 (单位: 秒)
-    const F_d = detectInterval * 60;  // 采集间隔 (秒)
-    const F_r = detectInterval * reportCycle * 60;  // 上报间隔 (秒)
-    const t_s = 2;    // 每次唤醒采集耗时 (秒)
-    const t_r = 20;   // 每次唤醒上报耗时 (秒)
-
-    // 2. 计算公式
-    // 步骤 A：计算一个周期内的总耗能 (Q_cycle，单位：毫安秒 mAs)
-
-    // 采集次数 (N) = F_r / F_d (例如 8小时/1小时 = 8次)
-    const N = Math.floor(F_r / F_d);
-
-    // 采集总耗能 = N × t_s × I_sample
-    const Q_sample = N * t_s * I_sample;
-
-    // 上报总耗能 = 1 × t_r × I_report
-    const Q_report = t_r * I_report;
-
-    // 休眠总耗时 = F_r - (N × t_s) - t_r
-    const sleepSeconds = F_r - (N * t_s) - t_r;
-
-    // 休眠总耗能 = 休眠总耗时 × I_sleep
-    const Q_sleep = sleepSeconds * I_sleep;
-
-    // 单周期总耗能
-    const Q_cycle = Q_sample + Q_report + Q_sleep;
-
-    // 步骤 B：计算平均电流 (I_avg，单位：mA)
-    const I_avg = Q_cycle / F_r;
-
-    // 步骤 C：计算理论可用时间
-    // 可用小时数 = C_eff / I_avg
-    const lifeHours = C_eff / I_avg;
-
-    // 可用天数 = Hours / 24
-    const lifeDays = lifeHours / 24;
-
-    // 3. 更新显示
-    if (batteryLifeElement) {
-      if (lifeDays >= 365) {
-        const months = (lifeDays / 365).toFixed(1);
-        batteryLifeElement.textContent = `${months} 年`;
-      } else if (lifeDays >= 30) {
-        const months = (lifeDays / 30).toFixed(1);
-        batteryLifeElement.textContent = `${months} 个月`;
-      } else if (lifeDays >= 1) {
-        batteryLifeElement.textContent = `${lifeDays.toFixed(1)} 天`;
-      } else {
-        const hours = lifeHours.toFixed(0);
-        batteryLifeElement.textContent = `${hours} 小时`;
-      }
-
-    }
-
-    // 加载电池容量和功耗配置
-    async function loadBatteryConfig(configData) {
-      try {
-        // 使用已经加载的配置数据，避免重复调用API
-        if (configData && configData.battery !== undefined) {
-          batteryCapacity = configData.battery;
-          if (batteryCapacityElement) {
-            batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-          }
-        } else {
-          // 如果没有battery字段，使用默认值
-          console.log('配置中没有battery字段，使用默认值9000 mAh');
-          if (batteryCapacityElement) {
-            batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-          }
-        }
-
-        // 尝试加载功耗配置（/api/consumption接口可能尚未完成）
-        try {
-          const consumptionResponse = await fetch('/api/consumption');
-          if (consumptionResponse.ok) {
-            const consumption = await consumptionResponse.json();
-            if (consumption.components) {
-              const comp = consumption.components;
-              powerConsumption = {
-                imu_working: comp.imu?.consumption?.working || 1.0,
-                imu_standby: comp.imu?.consumption?.standby || 0.003,
-                cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
-                cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
-                wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
-                wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
-                wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
-              };
-
-              console.log('功耗配置已从API加载:', powerConsumption);
-            }
-          } else {
-            console.log('功耗配置API未就绪，使用默认值');
-            // 使用与consumption.json匹配的默认值
-            powerConsumption = {
-              imu_working: 1.0,
-              imu_standby: 0.003,
-              cellular_working: 500.0,
-              cellular_standby: 2.0,
-              wifi_working_tx: 285.0,
-              wifi_working_rx: 95.0,
-              wifi_standby_deep: 0.01
-            };
-          }
-        } catch (apiError) {
-          console.log('功耗配置API请求失败，使用默认值:', apiError.message);
-          // 使用与consumption.json匹配的默认值
-          powerConsumption = {
-            imu_working: 1.0,
-            imu_standby: 0.003,
-            cellular_working: 500.0,
-            cellular_standby: 2.0,
-            wifi_working_tx: 285.0,
-            wifi_working_rx: 95.0,
-            wifi_standby_deep: 0.01
-          };
-        }
-
-      } catch (error) {
-        console.warn('Failed to load battery config:', error);
-        // 使用默认值
-        if (batteryCapacityElement) {
-          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-        }
-      }
-    }
-
-    if (rangeInput && rangeVal && reportFrequency) {
-      // 加载电池配置 - 使用已经加载的configData
-      loadBatteryConfig(configData).then(() => {
-        // 初始计算
-        calculateReportFrequency();
-      });
-
-      // 监听range slider变化
-      rangeInput.addEventListener('input', (e) => {
-        rangeVal.textContent = e.target.value;
-        calculateReportFrequency();
-      });
-
-      // 监听检测频率变化
-      const detectFrequencyGroup = document.getElementById('detect-frequency');
-      if (detectFrequencyGroup) {
-        detectFrequencyGroup.addEventListener('click', (e) => {
-          if (e.target.classList.contains('pill')) {
-            // 等待pill激活
-            setTimeout(() => {
-              calculateReportFrequency();
-            }, 10);
-          }
-        });
-      }
-
-      // 监听通讯方式变化
-      const commTypeGroup = document.getElementById('comm-type');
-      if (commTypeGroup) {
-        commTypeGroup.addEventListener('click', (e) => {
-          if (e.target.classList.contains('pill')) {
-            // 等待pill激活
-            setTimeout(() => {
-              const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
-              if (detectFreqBtn && rangeInput) {
-                const detectInterval = parseInt(detectFreqBtn.dataset.value);
-                const reportCycle = parseInt(rangeInput.value);
-                calculateBatteryLife(detectInterval, reportCycle);
-              }
-            }, 10);
-          }
-        });
-      }
-    }
+    // 硬休眠总电流 = wifi.standby_hardware + imu.standby_hardware + 4g
 
     // 7. WiFi 逻辑
     const wifiBox = document.getElementById('wifi-box');
@@ -1205,6 +1086,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
 
           wifiSelect.disabled = false;
+
+          // 5. 检查扫描结果中是否包含用户配置的热点
+          if (window.savedWifiConfig && window.savedWifiConfig.ssid) {
+            // 延迟一小段时间，确保DOM已更新
+            setTimeout(() => {
+              setWifiSelection(window.savedWifiConfig.ssid, window.savedWifiConfig.password);
+              // 清除保存的配置，避免重复设置
+              window.savedWifiConfig = null;
+            }, 50);
+          }
         }
 
         // 完成进度
@@ -1417,8 +1308,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           showErrorToast('配置已成功提交！设备将立即重启并开始监测。', '成功');
         } catch (error) {
           console.error('Save error:', error);
-          showErrorToast('保存失败: ' + error.message);
-        } finally {
+          showErrorToast('保存失败: ' + error.message);        } finally {
           if (mask) {
             mask.classList.add('hidden');
             mask.classList.remove('flex');
@@ -1426,4 +1316,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       });
     }
-  });
+  }
+});
+Ba
