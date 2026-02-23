@@ -27,6 +27,7 @@ sdkconfig.local
 .Trashes
 
 resources/system/
+managed_components/
 # =========================
 # VS Code / 编辑器相关
 # =========================
