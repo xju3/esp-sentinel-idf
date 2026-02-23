@@ -194,7 +194,10 @@
       <div class="mb-6">
         <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">上报周期</label>
         <input type="range" id="report-cycle" min="1" max="10" step="1" value="6" class="w-full accent-primary h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer">
-        <div class="text-primary font-bold mt-2"><span id="cycle-val">6</span> 次检测后上报</div>
+        <div class="text-primary font-bold mt-2">
+          <span id="cycle-val">6</span> 次检测后上报
+          <span class="text-sm font-normal text-slate-600 ml-2">(约 <span id="report-frequency">3小时</span>)</span>
+        </div>
         <p class="text-xs text-slate-400 mt-2">若本地 AI 检测到异常，将忽略周期立即强制上报。</p>
         </div>
       </div>

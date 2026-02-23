@@ -94,6 +94,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         rangeInput.value = config.report_cycle;
         const cycleVal = document.getElementById('cycle-val');
         if (cycleVal) cycleVal.textContent = config.report_cycle;
+        // 更新上报频率显示
+        setTimeout(() => {
+          calculateReportFrequency();
+        }, 10);
       }
     }
 
@@ -653,10 +657,66 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 6. Range Slider 逻辑
   const rangeInput = document.getElementById('report-cycle');
   const rangeVal = document.getElementById('cycle-val');
-  if (rangeInput && rangeVal) {
+  const reportFrequency = document.getElementById('report-frequency');
+  
+  // 计算上报频率的函数
+  function calculateReportFrequency() {
+    const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+    if (!detectFreqBtn || !rangeInput || !reportFrequency) return;
+    
+    const detectInterval = parseInt(detectFreqBtn.dataset.value); // 分钟
+    const reportCycle = parseInt(rangeInput.value); // 次数
+    
+    // 计算总分钟数
+    const totalMinutes = detectInterval * reportCycle;
+    
+    // 转换为友好的时间显示
+    let frequencyText = '';
+    if (totalMinutes < 60) {
+      frequencyText = `${totalMinutes}分钟`;
+    } else if (totalMinutes < 1440) {
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      if (minutes === 0) {
+        frequencyText = `${hours}小时`;
+      } else {
+        frequencyText = `${hours}小时${minutes}分钟`;
+      }
+    } else {
+      const days = Math.floor(totalMinutes / 1440);
+      const hours = Math.floor((totalMinutes % 1440) / 60);
+      if (hours === 0) {
+        frequencyText = `${days}天`;
+      } else {
+        frequencyText = `${days}天${hours}小时`;
+      }
+    }
+    
+    reportFrequency.textContent = frequencyText;
+  }
+  
+  if (rangeInput && rangeVal && reportFrequency) {
+    // 初始计算
+    calculateReportFrequency();
+    
+    // 监听range slider变化
     rangeInput.addEventListener('input', (e) => {
       rangeVal.textContent = e.target.value;
+      calculateReportFrequency();
     });
+    
+    // 监听检测频率变化
+    const detectFrequencyGroup = document.getElementById('detect-frequency');
+    if (detectFrequencyGroup) {
+      detectFrequencyGroup.addEventListener('click', (e) => {
+        if (e.target.classList.contains('pill')) {
+          // 等待pill激活
+          setTimeout(() => {
+            calculateReportFrequency();
+          }, 10);
+        }
+      });
+    }
   }
 
   // 7. WiFi 逻辑

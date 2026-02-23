@@ -17,7 +17,7 @@
 // 声明 captive DNS 函数（在 captive_dns.c 中定义）
 void captive_dns_start(void);
 void captive_dns_stop(void);
-static TaskHandle_t s_dns_task_handle = NULL;
+
 // AP 参数定义
 #define SENTINEL_WIFI_PASS "12345678"
 #define SENTINEL_MAX_CONN 4
@@ -127,16 +127,6 @@ void wifi_init_softap(void)
 }
 
 
-
-
-void captive_dns_stop(void)
-{
-    if (s_dns_task_handle)
-    {
-        vTaskDelete(s_dns_task_handle);
-        s_dns_task_handle = NULL;
-    }
-}
 
 
 // 扫描热点.

@@ -124,7 +124,7 @@ static void dns_server_task(void *pvParameters)
 void captive_dns_start(void)
 {
     if (s_dns_task_handle)  {
-        LOG_ERROR("handler is null.");
+        LOG_WARN("DNS server already running");
         return;
     }
     LOG_DEBUG("starting dns server...");
@@ -139,5 +139,7 @@ void captive_dns_stop(void)
             close(s_dns_socket);
             s_dns_socket = -1;
         }
+        vTaskDelete(s_dns_task_handle);
+        s_dns_task_handle = NULL;
     }
 }
