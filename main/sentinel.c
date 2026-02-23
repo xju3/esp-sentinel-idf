@@ -14,50 +14,74 @@
 
 extern esp_err_t ppp_4g_init(void);
 
-void app_main(void) {
+void enable_config_service()
+{
+    wifi_init_softap();
+    ESP_ERROR_CHECK(web_server_start());
+}
+
+void app_main(void)
+{
     // 初始化 NVS (Wi-Fi 驱动必须用到)
     LOG_INFO("starting device...");
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-
     // 加载配置
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
-    
-    // 初始化 4G 模组
-    // LOG_INFO("Initializing 4G Module...");
-    // if (ppp_4g_init() == ESP_OK) {
-    //     LOG_INFO("4G Module initialized.");
-    // } else {
-    //     LOG_ERROR("4G Module initialization failed.");
-    // }
-    
     // 若未配置，启动 AP + Captive Portal
-    if (!g_user_config.is_configured) {
-        wifi_init_softap();
-        ESP_ERROR_CHECK(web_server_start());
+    if (!g_user_config.is_configured)
+    {
+        enable_config_service();
         return;
     }
+    bool enable_netwokd_channel = false;
+    if (g_user_config.comm_type == 1)
+    {
+        // 初始化 4G 模组
+        LOG_INFO("Initializing 4G Module...");
+        if (ppp_4g_init() == ESP_OK)
+        {
+            enable_netwokd_channel = true;
+        }
+        else
+        {
+            LOG_ERROR("4G Module initialization failed.");
+        }
+    }
+    else
+    {
+        esp_err_t err = wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass);
+        if (err == ESP_OK)
+        {
+            enable_netwokd_channel = true;
+        }
+    }
 
+    if (!enable_netwokd_channel)
+    {
+        enable_config_service();
+        return;
+    }
 
     // 确保ICM42688P基线存在（按设备ID），结果写入全局 g_icm_baseline
     const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
     esp_err_t bret = icm4288p_ensure_baseline(device_id, &g_icm_baseline);
-    if (bret != ESP_OK) {
-        LOG_WARNF("Baseline ensure failed: %d", bret);
-    } else {
-        LOG_INFOF("Baseline ready for %s | X: val=%.5f off=%.5f, Y: val=%.5f off=%.5f, Z: val=%.5f off=%.5f",
-                  device_id,
+    if (bret == ESP_OK)
+    {
+        LOG_INFOF("Baseline X: val=%.5f off=%.5f, Y: val=%.5f off=%.5f, Z: val=%.5f off=%.5f",
                   g_icm_baseline.x.val, g_icm_baseline.x.offset,
                   g_icm_baseline.y.val, g_icm_baseline.y.offset,
                   g_icm_baseline.z.val, g_icm_baseline.z.offset);
     }
-
-    // 已配置：按用户 Wi-Fi 信息连接 STA
-    ESP_ERROR_CHECK(wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass));
+    else
+    {
+        LOG_WARNF("Baseline ensure failed: %d", bret);
+    }
 
 #ifdef CONFIG_DEV_MODE
     // 开发模式下仍保留 Web 调试入口

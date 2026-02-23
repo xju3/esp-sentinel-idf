@@ -36,13 +36,13 @@ esp_err_t api_get_config_handler(httpd_req_t *req)
     }
 
     const char *path = NULL;
-    if (fsu_is_user_mounted() && fsu_file_exists(PATH_CONFIG_USER))
+    if (fsu_is_user_mounted() && fsu_file_exists(FILE_PATH_CONFIG_USER))
     {
-        path = PATH_CONFIG_USER;
+        path = FILE_PATH_CONFIG_USER;
     }
-    else if (fsu_is_storage_mounted() && fsu_file_exists(PATH_CONFIG_DEFAULT))
+    else if (fsu_is_storage_mounted() && fsu_file_exists(FILE_PATH_CONFIG_DEFAULT))
     {
-        path = PATH_CONFIG_DEFAULT;
+        path = FILE_PATH_CONFIG_DEFAULT;
     }
 
     if (!path)
@@ -225,18 +225,18 @@ esp_err_t api_get_consumption_handler(httpd_req_t *req)
     }
 
     // 检查文件是否存在
-    if (!fsu_file_exists(PATH_HW_CONSUMPTION))
+    if (!fsu_file_exists(FILE_PATH_HW_CONSUMPTION))
     {
-        LOG_ERRORF("Consumption file not found: %s", PATH_HW_CONSUMPTION);
+        LOG_ERRORF("Consumption file not found: %s", FILE_PATH_HW_CONSUMPTION);
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "consumption file not found");
     }
     
     // 读取文件内容
     size_t len = 0;
-    char *json = fsu_read_file_alloc(PATH_HW_CONSUMPTION, &len);
+    char *json = fsu_read_file_alloc(FILE_PATH_HW_CONSUMPTION, &len);
     if (!json)
     {
-        LOG_ERRORF("Failed to read consumption file: %s", PATH_HW_CONSUMPTION);
+        LOG_ERRORF("Failed to read consumption file: %s", FILE_PATH_HW_CONSUMPTION);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "read failed");
     }
     

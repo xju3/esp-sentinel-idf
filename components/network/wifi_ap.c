@@ -84,6 +84,12 @@ esp_err_t wifi_common_init(bool create_ap, bool create_sta)
 
 void wifi_init_softap(void)
 {
+    // 恢复默认状态.
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    
+    // xTaskDelayUntil(10, 100);
+
     // 使用公共初始化函数
     ESP_ERROR_CHECK(wifi_common_init(true, true));
 

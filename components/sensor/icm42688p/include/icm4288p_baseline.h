@@ -6,8 +6,6 @@
 #include "icm4288p.h"
 #include "config_manager.h"
 
-#define ICM4288P_BASELINE_PATH "/user/frequency.json"
-
 typedef struct {
     float val;
     float offset;

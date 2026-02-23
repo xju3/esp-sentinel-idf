@@ -268,7 +268,7 @@ static esp_err_t log_config_json(const char *path, const char *label)
 // 打印默认配置文件内容，便于调试查看实际默认值。
 esp_err_t config_manager_log_default_json(void)
 {
-    return log_config_json(PATH_CONFIG_DEFAULT, "Default");
+    return log_config_json(FILE_PATH_CONFIG_DEFAULT, "Default");
 }
 
 esp_err_t config_manager_load(user_config_t *out_cfg)
@@ -288,17 +288,17 @@ esp_err_t config_manager_load(user_config_t *out_cfg)
     memset(out_cfg, 0, sizeof(*out_cfg));
 
     // 第一步：加载默认配置（system 分区）
-    esp_err_t err = load_and_apply(PATH_CONFIG_DEFAULT, out_cfg);
+    esp_err_t err = load_and_apply(FILE_PATH_CONFIG_DEFAULT, out_cfg);
     if (err != ESP_OK)
     {
-        LOG_ERRORF("Failed to load default config: %s", PATH_CONFIG_DEFAULT);
+        LOG_ERRORF("Failed to load default config: %s", FILE_PATH_CONFIG_DEFAULT);
         return err;
     }
 
     // 第二步：若存在用户配置，则覆盖默认配置
-    if (fsu_is_user_mounted() && fsu_file_exists(PATH_CONFIG_USER))
+    if (fsu_is_user_mounted() && fsu_file_exists(FILE_PATH_CONFIG_USER))
     {
-        err = load_and_apply(PATH_CONFIG_USER, out_cfg);
+        err = load_and_apply(FILE_PATH_CONFIG_USER, out_cfg);
         if (err != ESP_OK)
         {
             LOG_WARN("User config parse failed; using defaults");
@@ -308,7 +308,7 @@ esp_err_t config_manager_load(user_config_t *out_cfg)
             return ESP_OK;
         }
         // 仅在用户配置解析成功时打印当前用户配置
-        (void)log_config_json(PATH_CONFIG_USER, "User");
+        (void)log_config_json(FILE_PATH_CONFIG_USER, "User");
         g_user_config = *out_cfg;
         return ESP_OK; // 用户配置成功覆盖
     }
@@ -341,7 +341,7 @@ esp_err_t config_manager_save_user_json(const char *json)
         return ESP_FAIL;
     }
 
-    return fsu_write_file(PATH_CONFIG_USER, json, strlen(json));
+    return fsu_write_file(FILE_PATH_CONFIG_USER, json, strlen(json));
 }
 
 // 将结构体转 JSON 后写入用户分区。

@@ -75,11 +75,11 @@ static void icm_baseline_timer_cb(void *arg)
 
 static bool load_existing(const char *device_id, icm_freq_profile_t *out)
 {
-    if (!fsu_file_exists(ICM4288P_BASELINE_PATH)) {
+    if (!fsu_file_exists(FILE_PATH_DEVICE_PROFILE)) {
         return false;
     }
     size_t len = 0;
-    char *json = fsu_read_file_alloc(ICM4288P_BASELINE_PATH, &len);
+    char *json = fsu_read_file_alloc(FILE_PATH_DEVICE_PROFILE, &len);
     if (!json) return false;
     cJSON *root = cJSON_Parse(json);
     free(json);
@@ -120,14 +120,15 @@ static bool load_existing(const char *device_id, icm_freq_profile_t *out)
 static void append_entry(const char *device_id, const icm_freq_profile_t *p)
 {
     cJSON *root = NULL;
-    if (fsu_file_exists(ICM4288P_BASELINE_PATH)) {
+    if (fsu_file_exists(FILE_PATH_DEVICE_PROFILE)) {
         size_t len = 0;
-        char *json = fsu_read_file_alloc(ICM4288P_BASELINE_PATH, &len);
+        char *json = fsu_read_file_alloc(FILE_PATH_DEVICE_PROFILE, &len);
         if (json) {
             root = cJSON_Parse(json);
             free(json);
         }
     }
+
     if (!root || !cJSON_IsArray(root)) {
         if (root) cJSON_Delete(root);
         root = cJSON_CreateArray();
@@ -153,11 +154,12 @@ static void append_entry(const char *device_id, const icm_freq_profile_t *p)
 
     char *out = cJSON_PrintUnformatted(root);
     if (out) {
-        fsu_write_file(ICM4288P_BASELINE_PATH, out, strlen(out));
+        fsu_write_file(FILE_PATH_DEVICE_PROFILE, out, strlen(out));
         free(out);
     }
     cJSON_Delete(root);
 }
+
 
 esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *out_profile)
 {
@@ -170,8 +172,7 @@ esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *ou
         return ESP_OK;
     }
 
-    LOG_INFOF("Baseline missing for device %s, sampling...", device_id);
-
+    LOG_INFOF("device profile does not exist (%s), sampling...", device_id);
     esp_err_t err = icm4288p_init();
     if (err != ESP_OK) {
         return err;
@@ -198,8 +199,8 @@ esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *ou
         return ESP_ERR_NO_MEM;
     }
 
+    // create an accuracy timer based on deivce clock.
     esp_timer_handle_t timer = NULL;
-
     esp_timer_create_args_t targs = {
         .callback = icm_baseline_timer_cb,
         .arg = &ctx,
@@ -212,6 +213,7 @@ esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *ou
         vSemaphoreDelete(ctx.done);
         return err;
     }
+
     err = esp_timer_start_periodic(timer, period_us);
     if (err != ESP_OK) {
         esp_timer_delete(timer);
