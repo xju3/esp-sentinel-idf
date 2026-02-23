@@ -96,11 +96,18 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         cfg->rpm = (int32_t)item->valueint;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(root, "years");
+    item = cJSON_GetObjectItemCaseSensitive(root, "months");
     if (cJSON_IsNumber(item))
     {
-        cfg->years = (int16_t)item->valueint;
+        cfg->months = (int16_t)item->valueint;
     }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "battery");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->battery = (int16_t)item->valueint;
+    }
+
 
     item = cJSON_GetObjectItemCaseSensitive(root, "comm_type");
     if (cJSON_IsNumber(item))
@@ -354,7 +361,8 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddStringToObject(root, "deviceId", cfg->device_id);
     cJSON_AddStringToObject(root, "deviceName", cfg->device_name);
     cJSON_AddStringToObject(root, "modelType", cfg->device_type);
-    cJSON_AddNumberToObject(root, "years", cfg->years);
+    cJSON_AddNumberToObject(root, "months", cfg->months);
+    cJSON_AddNumberToObject(root, "battery", cfg->battery);
     cJSON_AddNumberToObject(root, "rpm", cfg->rpm);
     cJSON_AddNumberToObject(root, "comm_type", cfg->comm_type);
     cJSON_AddBoolToObject(root, "ble_enabled", cfg->ble_enabled);

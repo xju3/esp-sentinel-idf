@@ -47,6 +47,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (categoryLabel) categoryLabel.textContent = label;
           }
         }
+        
+        // 检查是否需要显示安装基础选择（特别是Class II的情况）
+        setTimeout(() => {
+          checkFoundationRequirement(config.iso.category);
+        }, 100);
       }
     }
 
@@ -74,9 +79,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (rpmInput) rpmInput.value = config.rpm || '';
     }
 
-    if (config.years !== undefined) {
-      const yearsInput = document.getElementById('years-used');
-      if (yearsInput) yearsInput.value = config.years || '';
+    if (config.months !== undefined) {
+      const monthInput = document.getElementById('months-used');
+      if (monthInput) monthInput.value = config.months || '';
     }
 
     // 检测频率
@@ -307,12 +312,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const deviceId = document.getElementById('device-id').value || '-';
     const deviceName = document.getElementById('device-name').value || '-';
     const deviceRpm = document.getElementById('device-rpm').value || '-';
-    const yearsUsed = document.getElementById('years-used').value || '-';
+    const monthsUsed = document.getElementById('months-used').value || '-';
 
     document.getElementById('preview-device-id').textContent = deviceId;
     document.getElementById('preview-device-name').textContent = deviceName;
     document.getElementById('preview-device-rpm').textContent = deviceRpm;
-    document.getElementById('preview-years-used').textContent = yearsUsed;
+    document.getElementById('preview-months-used').textContent = monthsUsed;
 
     // 检测策略部分
     const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
@@ -321,6 +326,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const reportCycle = document.getElementById('report-cycle').value;
     document.getElementById('preview-report-cycle').textContent = `${reportCycle} 次检测后`;
+
+    // 电池续航预览
+    const batteryLifeElement = document.getElementById('battery-life');
+    if (batteryLifeElement) {
+      const batteryLifeText = batteryLifeElement.textContent || '- 天';
+      document.getElementById('preview-battery-life').textContent = batteryLifeText;
+    }
 
     // 通讯配置部分
     const commTypeBtn = document.querySelector('#comm-type .pill.active');
@@ -337,7 +349,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // 服务器地址
-    const serverHost = document.getElementById('server-host').value || 'https://sentinel-cloud.com';
+    const serverHost = document.getElementById('server-host').value || 'sentinel-cloud.com';
     document.getElementById('preview-server-host').textContent = serverHost;
   }
 
@@ -415,19 +427,71 @@ document.addEventListener('DOMContentLoaded', async () => {
           errorMessage = '请选择机械类别';
           break;
         }
+
+        // 验证安装基础（如果显示则为必选项）
+        const foundationGroup = document.getElementById('foundation-group');
+        if (foundationGroup && foundationGroup.style.display !== 'none') {
+          const foundationBtn = document.querySelector('#foundation-select .pill.active');
+          if (!foundationBtn) {
+            isValid = false;
+            errorMessage = '请选择安装基础';
+            break;
+          }
+        }
         break;
 
       case 2: // 第2步：设备信息
-        // 验证额定转速
+        // 验证额定转速 - 必须大于等于1
         const rpmInput = document.getElementById('device-rpm');
-        if (!rpmInput.value.trim()) {
+        const rpmValue = rpmInput.value.trim();
+        
+        if (rpmValue === '') {
           isValid = false;
           errorMessage = '请输入额定转速';
           // 高亮显示错误字段
           rpmInput.classList.add('border-red-500');
           rpmInput.focus();
         } else {
-          rpmInput.classList.remove('border-red-500');
+          // 检查是否为有效数字
+          const rpmNum = parseFloat(rpmValue);
+          if (isNaN(rpmNum)) {
+            isValid = false;
+            errorMessage = '请输入有效的数字';
+            rpmInput.classList.add('border-red-500');
+            rpmInput.focus();
+          } else if (rpmNum < 1) {
+            isValid = false;
+            errorMessage = '额定转速必须大于等于1';
+            rpmInput.classList.add('border-red-500');
+            rpmInput.focus();
+          } else {
+            rpmInput.classList.remove('border-red-500');
+          }
+        }
+        
+        // 验证已用月数 - 必须大于等于0
+        const monthInput = document.getElementById('months-used');
+        const monthValue = monthInput.value.trim();
+        
+        // 已用月数不是必填项，但如果填写了就需要验证
+        if (monthValue !== '') {
+          const monthNum = parseFloat(monthValue);
+          if (isNaN(monthNum)) {
+            isValid = false;
+            errorMessage = '已用月数必须是有效的数字';
+            monthInput.classList.add('border-red-500');
+            monthInput.focus();
+          } else if (monthNum < 0) {
+            isValid = false;
+            errorMessage = '已用月数必须大于等于0';
+            monthInput.classList.add('border-red-500');
+            monthInput.focus();
+          } else {
+            monthInput.classList.remove('border-red-500');
+          }
+        } else {
+          // 如果未填写，清除可能的错误样式
+          monthInput.classList.remove('border-red-500');
         }
         break;
 
@@ -440,7 +504,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           break;
         }
 
-        // 验证服务器地址
+        // 验证服务器地址 - 只需要域名或IP地址即可
         const serverHost = document.getElementById('server-host').value.trim();
         if (!serverHost) {
           isValid = false;
@@ -449,16 +513,53 @@ document.addEventListener('DOMContentLoaded', async () => {
           serverHostInput.classList.add('border-red-500');
           serverHostInput.focus();
         } else {
-          // 验证URL格式
-          try {
-            new URL(serverHost);
-            document.getElementById('server-host').classList.remove('border-red-500');
-          } catch (e) {
+          // 更宽松的验证：允许域名、IP地址、带端口的域名/IP
+          // 移除可能的协议前缀（http://, https://, mqtt://等）
+          let hostToValidate = serverHost;
+          
+          // 如果包含协议前缀，移除它
+          const protocolRegex = /^(https?|mqtt|ws|wss|ftp):\/\//i;
+          if (protocolRegex.test(hostToValidate)) {
+            hostToValidate = hostToValidate.replace(protocolRegex, '');
+          }
+          
+          // 验证基本格式：域名或IP地址
+          // 域名正则：允许字母、数字、连字符、点号
+          // IP地址正则：IPv4格式
+          const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+          const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
+          
+          // 检查是否包含端口
+          let hostWithoutPort = hostToValidate;
+          let port = '';
+          if (hostToValidate.includes(':')) {
+            const parts = hostToValidate.split(':');
+            hostWithoutPort = parts[0];
+            port = parts[1];
+            
+            // 验证端口号
+            if (port) {
+              const portNum = parseInt(port, 10);
+              if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                isValid = false;
+                errorMessage = '端口号必须在1-65535之间';
+                const serverHostInput = document.getElementById('server-host');
+                serverHostInput.classList.add('border-red-500');
+                serverHostInput.focus();
+                break;
+              }
+            }
+          }
+          
+          // 验证主机部分
+          if (!domainRegex.test(hostWithoutPort) && !ipv4Regex.test(hostWithoutPort)) {
             isValid = false;
-            errorMessage = '请输入有效的服务器地址（如 https://example.com）';
+            errorMessage = '请输入有效的域名或IP地址（如 example.com 或 192.168.1.1）';
             const serverHostInput = document.getElementById('server-host');
             serverHostInput.classList.add('border-red-500');
             serverHostInput.focus();
+          } else {
+            document.getElementById('server-host').classList.remove('border-red-500');
           }
         }
 
@@ -537,7 +638,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 特殊逻辑：基础选择显示/隐藏
         if (group.id === 'iso-standard') {
           const isAdvanced = e.target.dataset.value === 'ISO20816';
-          document.getElementById('foundation-group').style.display = isAdvanced ? 'block' : 'none';
+          const foundationGroup = document.getElementById('foundation-group');
+          
+          // 无论切换到哪个ISO标准，都先隐藏安装基础
+          foundationGroup.style.display = 'none';
+          clearFoundationSelection();
           
           // 清空当前选择的机械类别
           document.getElementById('iso-category').value = '';
@@ -622,8 +727,40 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('iso-category').value = value;
         document.getElementById('iso-category-label').textContent = label;
         dropdown.classList.add('hidden');
+        
+        // 检查是否需要显示安装基础选择
+        checkFoundationRequirement(value);
       });
     });
+  }
+  
+  // 5.1.1 检查是否需要显示安装基础选择
+  function checkFoundationRequirement(categoryValue) {
+    const foundationGroup = document.getElementById('foundation-group');
+    const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
+    
+    if (!foundationGroup || !isoStandardBtn) return;
+    
+    // 只有在ISO 10816标准下才检查
+    if (isoStandardBtn.dataset.value === 'ISO10816') {
+      // Class II (value: '2') 或 Class III/IV (value: '3') 需要选择安装基础
+      if (categoryValue === '2' || categoryValue === '3') {
+        foundationGroup.style.display = 'block';
+      } else {
+        foundationGroup.style.display = 'none';
+        // 清空已选择的安装基础
+        clearFoundationSelection();
+      }
+    } else {
+      // ISO 20816 总是显示安装基础
+      foundationGroup.style.display = 'block';
+    }
+  }
+  
+  // 5.1.2 清空安装基础选择
+  function clearFoundationSelection() {
+    const foundationBtns = document.querySelectorAll('#foundation-select .pill');
+    foundationBtns.forEach(btn => btn.classList.remove('active'));
   }
 
   // 5.2 ISO类别下拉菜单控制
@@ -801,8 +938,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 3. 更新显示
     if (batteryLifeElement) {
       if (lifeDays >= 365) {
-        const years = (lifeDays / 365).toFixed(1);
-        batteryLifeElement.textContent = `${years} 年`;
+        const months = (lifeDays / 365).toFixed(1);
+        batteryLifeElement.textContent = `${months} 年`;
       } else if (lifeDays >= 30) {
         const months = (lifeDays / 30).toFixed(1);
         batteryLifeElement.textContent = `${months} 个月`;
@@ -829,17 +966,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   // 加载电池容量和功耗配置
-  async function loadBatteryConfig() {
+  async function loadBatteryConfig(configData) {
     try {
-      // 加载电池容量
-      const configResponse = await fetch('/api/config');
-      if (configResponse.ok) {
-        const config = await configResponse.json();
-        if (config.capacity !== undefined) {
-          batteryCapacity = config.capacity;
-          if (batteryCapacityElement) {
-            batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-          }
+      // 使用已经加载的配置数据，避免重复调用API
+      if (configData && configData.battery !== undefined) {
+        batteryCapacity = configData.battery;
+        if (batteryCapacityElement) {
+          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+        }
+      } else {
+        // 如果没有battery字段，使用默认值
+        console.log('配置中没有battery字段，使用默认值9000 mAh');
+        if (batteryCapacityElement) {
+          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
         }
       }
       
@@ -899,8 +1038,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   if (rangeInput && rangeVal && reportFrequency) {
-    // 加载电池配置
-    loadBatteryConfig().then(() => {
+    // 加载电池配置 - 使用已经加载的configData
+    loadBatteryConfig(configData).then(() => {
       // 初始计算
       calculateReportFrequency();
     });
@@ -1236,7 +1375,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const deviceId = document.getElementById('device-id')?.value || '';
         const deviceName = document.getElementById('device-name')?.value || '';
         const rpm = document.getElementById('device-rpm')?.value || 1480;
-        const years = document.getElementById('years-used')?.value || 0;
+        const months = document.getElementById('months-used')?.value || 0;
 
         const wifiSSID = document.getElementById('wifi-select')?.value || '';
         const wifiPassword = document.getElementById('wifi-password')?.value || '';
@@ -1249,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const commTypeBtn = document.querySelector('#comm-type .pill.active');
         const commType = commTypeBtn?.dataset.value || 1;
 
-        const serverHost = document.getElementById('server-host')?.value || 'https://sentinel-cloud.com';
+        const serverHost = document.getElementById('server-host')?.value || 'sentinel-cloud.com';
 
         const config = {
           iso: {
@@ -1260,7 +1399,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           deviceId: deviceId,
           deviceName: deviceName,
           rpm: parseInt(rpm) || 1480,
-          years: parseFloat(years) || 0,
+          months: parseInt(months) || 0,
+          battery: batteryCapacity, // 添加电池容量字段
           host: serverHost,
           detect_interval: parseInt(detectInterval) || 30,
           report_cycle: parseInt(reportCycle) || 6,

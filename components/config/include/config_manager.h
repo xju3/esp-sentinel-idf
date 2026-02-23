@@ -52,7 +52,8 @@ typedef struct {
     char device_type[CONFIG_MAX_DEVICE_TYPE_LEN];
     int32_t rpm;
     int8_t comm_type;
-    int16_t years;
+    int16_t months;
+    int16_t battery;
     bool ble_enabled;
     iso_config_t iso;
     freq_config_t detect;
