@@ -44,7 +44,7 @@ void app_main(void)
     bool enable_netwokd_channel = false;
     esp_err_t err = ESP_OK;
     
-    if (g_user_config.comm_type == 1)
+    if (g_user_config.network == 1)
     {
         // 初始化 4G 模组
         LOG_INFO("Initializing 4G Module...");

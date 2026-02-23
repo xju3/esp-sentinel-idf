@@ -29,7 +29,7 @@ static void monitor_task_loop(void *arg) {
     static uint8_t dma_buf[1025] __attribute__((aligned(4))); 
     static icm42688p_sample_t sample_buf[128];
 
-    LOG_INFOF("Monitor task started. Interval: %d min", g_user_config.detect.value);
+    LOG_INFOF("Monitor task started. Interval: %d min", g_user_config.detect);
 
     while (1) {
         // Wait for timer trigger (blocking wait for semaphore)
@@ -111,7 +111,7 @@ esp_err_t task_monitor_start(void) {
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_timer));
 
     // Start periodic timer (interval in minutes from config)
-    int32_t interval_min = g_user_config.detect.value;
+    int32_t interval_min = g_user_config.detect;
     if (interval_min <= 0) interval_min = 1; // Default to 1 min if invalid
     uint64_t interval_us = (uint64_t)interval_min * 60 * 1000000;
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, interval_us));

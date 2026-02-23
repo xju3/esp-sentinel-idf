@@ -84,6 +84,12 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         safe_copy(cfg->device_name, sizeof(cfg->device_name), item->valuestring);
     }
 
+    item = cJSON_GetObjectItemCaseSensitive(root, "host");
+    if (cJSON_IsString(item))
+    {
+        safe_copy(cfg->host, sizeof(cfg->host), item->valuestring);
+    }
+
     item = cJSON_GetObjectItemCaseSensitive(root, "modelType");
     if (cJSON_IsString(item))
     {
@@ -94,6 +100,18 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     if (cJSON_IsNumber(item))
     {
         cfg->rpm = (int32_t)item->valueint;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "detect");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->detect = (int32_t)item->valueint;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "report");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->report = (int32_t)item->valueint;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "months");
@@ -108,17 +126,16 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         cfg->battery = (int16_t)item->valueint;
     }
 
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "comm_type");
+    item = cJSON_GetObjectItemCaseSensitive(root, "network");
     if (cJSON_IsNumber(item))
     {
-        cfg->comm_type = (int8_t)item->valueint;
+        cfg->network = (int8_t)item->valueint;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(root, "ble_enabled");
+    item = cJSON_GetObjectItemCaseSensitive(root, "ble");
     if (cJSON_IsBool(item))
     {
-        cfg->ble_enabled = cJSON_IsTrue(item);
+        cfg->ble = cJSON_IsTrue(item);
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "configured");
@@ -142,82 +159,25 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         }
     }
 
-    const cJSON *host = cJSON_GetObjectItemCaseSensitive(root, "host");
-    if (cJSON_IsObject(host))
-    {
-        const cJSON *http = cJSON_GetObjectItemCaseSensitive(host, "http");
-        if (cJSON_IsString(http))
-        {
-            safe_copy(cfg->host.http, sizeof(cfg->host.http), http->valuestring);
-        }
-        const cJSON *mqtt = cJSON_GetObjectItemCaseSensitive(host, "mqtt");
-        if (cJSON_IsString(mqtt))
-        {
-            safe_copy(cfg->host.mqtt, sizeof(cfg->host.mqtt), mqtt->valuestring);
-        }
-    }
-
     const cJSON *iso = cJSON_GetObjectItemCaseSensitive(root, "iso");
     if (cJSON_IsObject(iso))
     {
-        const cJSON *standard = cJSON_GetObjectItemCaseSensitive(iso, "standard");
-        if (cJSON_IsString(standard))
-        {
-            safe_copy(cfg->iso.standard, sizeof(cfg->iso.standard), standard->valuestring);
-        }
-        const cJSON *category = cJSON_GetObjectItemCaseSensitive(iso, "category");
-        if (cJSON_IsString(category))
-        {
-            safe_copy(cfg->iso.category, sizeof(cfg->iso.category), category->valuestring);
-        }
-        const cJSON *foundation = cJSON_GetObjectItemCaseSensitive(iso, "foundation");
-        if (cJSON_IsString(foundation))
-        {
-            safe_copy(cfg->iso.foundation, sizeof(cfg->iso.foundation), foundation->valuestring);
-        }
-    }
 
-    const cJSON *detect = cJSON_GetObjectItemCaseSensitive(root, "detect");
-    if (cJSON_IsObject(detect))
-    {
-        const cJSON *type = cJSON_GetObjectItemCaseSensitive(detect, "type");
-        if (cJSON_IsNumber(type))
+        item = cJSON_GetObjectItemCaseSensitive(root, "standard");
+        if (cJSON_IsNumber(item))
         {
-            cfg->detect.type = (int16_t)type->valueint;
+            cfg->iso.standard = (int8_t)item->valueint;
         }
-        const cJSON *value = cJSON_GetObjectItemCaseSensitive(detect, "value");
-        if (cJSON_IsNumber(value))
+        item = cJSON_GetObjectItemCaseSensitive(root, "category");
+        if (cJSON_IsNumber(item))
         {
-            cfg->detect.value = (int32_t)value->valueint;
+            cfg->iso.category = (int8_t)item->valueint;
         }
-        const cJSON *cycle = cJSON_GetObjectItemCaseSensitive(detect, "cycle");
-        if (cJSON_IsNumber(cycle))
-        {
-            cfg->detect.cycle = (int32_t)cycle->valueint;
-        }
-        else
-        {
-            cfg->detect.cycle = 1;
-        }
-    }
 
-    const cJSON *report = cJSON_GetObjectItemCaseSensitive(root, "report");
-    if (cJSON_IsObject(report))
-    {
-        const cJSON *type = cJSON_GetObjectItemCaseSensitive(report, "type");
-        if (cJSON_IsNumber(type))
+        item = cJSON_GetObjectItemCaseSensitive(root, "foundation");
+        if (cJSON_IsNumber(item))
         {
-            cfg->report.type = (int16_t)type->valueint;
-        }
-        const cJSON *value = cJSON_GetObjectItemCaseSensitive(report, "value");
-        if (cJSON_IsNumber(value))
-        {
-            cfg->report.value = (int32_t)value->valueint;
-        }
-        const cJSON *cycle = cJSON_GetObjectItemCaseSensitive(report, "cycle");
-        if (cJSON_IsNumber(cycle))
-        {
-            cfg->report.cycle = (int32_t)cycle->valueint;
+            cfg->iso.foundation = (int8_t)item->valueint;
         }
     }
 }
@@ -362,39 +322,25 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddStringToObject(root, "deviceName", cfg->device_name);
     cJSON_AddStringToObject(root, "modelType", cfg->device_type);
     cJSON_AddNumberToObject(root, "months", cfg->months);
+    cJSON_AddStringToObject(root, "host", cfg->host);
+    cJSON_AddNumberToObject(root, "detect", cfg->detect);
+    cJSON_AddNumberToObject(root, "report", cfg->report);
     cJSON_AddNumberToObject(root, "battery", cfg->battery);
     cJSON_AddNumberToObject(root, "rpm", cfg->rpm);
-    cJSON_AddNumberToObject(root, "comm_type", cfg->comm_type);
-    cJSON_AddBoolToObject(root, "ble_enabled", cfg->ble_enabled);
+    cJSON_AddNumberToObject(root, "network", cfg->network);
+    cJSON_AddBoolToObject(root, "ble", cfg->ble);
     cJSON_AddBoolToObject(root, "configured", cfg->is_configured);
 
     cJSON *iso = cJSON_CreateObject();
-    cJSON_AddStringToObject(iso, "standard", cfg->iso.standard);
-    cJSON_AddStringToObject(iso, "category", cfg->iso.category);
-    cJSON_AddStringToObject(iso, "foundation", cfg->iso.foundation);
+    cJSON_AddNumberToObject(iso, "standard", cfg->iso.standard);
+    cJSON_AddNumberToObject(iso, "category", cfg->iso.category);
+    cJSON_AddNumberToObject(iso, "foundation", cfg->iso.foundation);
     cJSON_AddItemToObject(root, "iso", iso);
 
     cJSON *wifi = cJSON_CreateObject();
     cJSON_AddStringToObject(wifi, "ssid", cfg->wifi.ssid);
     cJSON_AddStringToObject(wifi, "pass", cfg->wifi.pass);
     cJSON_AddItemToObject(root, "wifi", wifi);
-
-    cJSON *host = cJSON_CreateObject();
-    cJSON_AddStringToObject(host, "http", cfg->host.http);
-    cJSON_AddStringToObject(host, "mqtt", cfg->host.mqtt);
-    cJSON_AddItemToObject(root, "host", host);
-
-    cJSON *detect = cJSON_CreateObject();
-    cJSON_AddNumberToObject(detect, "type", cfg->detect.type);
-    cJSON_AddNumberToObject(detect, "value", cfg->detect.value);
-    cJSON_AddNumberToObject(detect, "cycle", cfg->detect.cycle);
-    cJSON_AddItemToObject(root, "detect", detect);
-
-    cJSON *report = cJSON_CreateObject();
-    cJSON_AddNumberToObject(report, "type", cfg->report.type);
-    cJSON_AddNumberToObject(report, "value", cfg->report.value);
-    cJSON_AddNumberToObject(report, "cycle", cfg->report.cycle);
-    cJSON_AddItemToObject(root, "report", report);
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

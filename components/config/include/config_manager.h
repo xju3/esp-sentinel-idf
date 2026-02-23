@@ -10,16 +10,16 @@
 extern "C" {
 #endif
 
-#define CONFIG_MAX_DEVICE_ID_LEN   64
-#define CONFIG_MAX_DEVICE_NAME_LEN 64
-#define CONFIG_MAX_DEVICE_TYPE_LEN 32
-#define CONFIG_MAX_WIFI_SSID_LEN   64
-#define CONFIG_MAX_WIFI_PASS_LEN   64
-#define CONFIG_MAX_HOST_HTTP_LEN   128
-#define CONFIG_MAX_HOST_MQTT_LEN   128
-#define CONFIG_MAX_ISO_STD_LEN     16
-#define CONFIG_MAX_ISO_CAT_LEN     32
-#define CONFIG_MAX_ISO_FOUND_LEN   16
+#define LEN_MAX_DEVICE_ID   64
+#define LEN_MAX_DEVICE_NAME 64
+#define LEN_MAX_DEVICE_TYPE 32
+#define LEN_MAX_HOST 32
+#define LEN_MAX_WIFI_SSID   64
+#define LEN_MAX_WIFI_PASS   64
+#define LEN_MAX_HOST_HTTP   128
+#define LEN_MAX_ISO_STD     16
+#define LEN_MAX_ISO_CAT     32
+#define LEN_MAX_ISO_FOUND   16
 
 #define FILE_PATH_CONFIG_DEFAULT "/system/c/default_config.json"
 #define FILE_PATH_HW_CONSUMPTION "/system/c/consumption.json"
@@ -34,35 +34,30 @@ typedef struct {
 } freq_config_t;
 
 typedef struct {
-    char standard[CONFIG_MAX_ISO_STD_LEN];    // ISO10816 or ISO20816
-    char category[CONFIG_MAX_ISO_CAT_LEN];    // 具体类别（class2, pump, vertical...）
-    char foundation[CONFIG_MAX_ISO_FOUND_LEN];// rigid / flexible
+    int8_t standard;    // 1: ISO10816, 2: ISO20816
+    int8_t category;    // 具体类别（class2, pump, vertical...）
+    int8_t foundation;  // 1: rigid, 2: flexible
 } iso_config_t;
 
 typedef struct {
-    char ssid[CONFIG_MAX_WIFI_SSID_LEN];
-    char pass[CONFIG_MAX_WIFI_PASS_LEN];
+    char ssid[LEN_MAX_WIFI_SSID];
+    char pass[LEN_MAX_WIFI_PASS];
 } user_wifi_config_t;
 
 typedef struct {
-    char http[CONFIG_MAX_HOST_HTTP_LEN];
-    char mqtt[CONFIG_MAX_HOST_MQTT_LEN];
-} host_config_t;
-
-typedef struct {
-    char device_id[CONFIG_MAX_DEVICE_ID_LEN];
-    char device_name[CONFIG_MAX_DEVICE_NAME_LEN];
-    char device_type[CONFIG_MAX_DEVICE_TYPE_LEN];
+    char device_id[LEN_MAX_DEVICE_ID];
+    char device_name[LEN_MAX_DEVICE_NAME];
+    char device_type[LEN_MAX_DEVICE_TYPE];
+    char host[LEN_MAX_HOST];
     int32_t rpm;
-    int8_t comm_type;
+    int8_t network;
     int16_t months;
     int16_t battery;
-    bool ble_enabled;
+    bool ble;
     iso_config_t iso;
-    freq_config_t detect;
-    freq_config_t report;
+    int16_t detect;
+    int16_t report;
     user_wifi_config_t wifi;
-    host_config_t host;
     bool is_configured;
 } user_config_t;
 

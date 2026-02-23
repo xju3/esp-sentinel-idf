@@ -1,19 +1,19 @@
 {
     "iso": {
-        "standard": "ISO10816",
-        "category": "2",
-        "foundation": "rigid"
+        "standard": 1,
+        "category": 3,
+        "foundation": 1
     },
     "deviceId": "",
     "deviceName": "",
     "rpm": 1480,
     "months": 0,
     "battery": 19000,
-    "host": "sentinel-cloud.com",
-    "detect_interval": 30,
-    "report_cycle": 6,
+    "host": "192.168.1.5",
+    "detect": 30,
+    "report": 6,
     "comm_type": 1,
-    "ble_enabled": true,
+    "ble": true,
     "wifi": {
         "ssid": "CU_Up3k",
         "pass": "hen6n6c7"

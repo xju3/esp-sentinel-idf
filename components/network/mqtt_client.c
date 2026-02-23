@@ -61,16 +61,16 @@ esp_err_t mqtt_client_init(void)
     }
     
     // 检查 MQTT 服务器地址是否配置
-    if (strlen(g_user_config.host.mqtt) == 0) {
+    if (strlen(g_user_config.host) == 0) {
         LOG_ERROR("MQTT server address not configured");
         return ESP_FAIL;
     }
     
-    LOG_INFOF("Initializing MQTT client to: %s", g_user_config.host.mqtt);
+    LOG_INFOF("Initializing MQTT client to: %s", g_user_config.host);
     
     // 配置 MQTT 客户端
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = g_user_config.host.mqtt,
+        .broker.address.uri = g_user_config.host,
         .broker.address.port = 1883, // 默认 MQTT 端口
         .credentials.client_id = g_user_config.device_id,
         .session.keepalive = 60, // 60秒心跳
