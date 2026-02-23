@@ -843,26 +843,52 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
       
-      // 加载功耗配置
-      const consumptionResponse = await fetch('/api/consumption');
-      if (consumptionResponse.ok) {
-        const consumption = await consumptionResponse.json();
-        if (consumption.components) {
-          const comp = consumption.components;
+      // 尝试加载功耗配置（/api/consumption接口可能尚未完成）
+      try {
+        const consumptionResponse = await fetch('/api/consumption');
+        if (consumptionResponse.ok) {
+          const consumption = await consumptionResponse.json();
+          if (consumption.components) {
+            const comp = consumption.components;
+            powerConsumption = {
+              imu_working: comp.imu?.consumption?.working || 1.0,
+              imu_standby: comp.imu?.consumption?.standby || 0.003,
+              cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
+              cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
+              wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
+              wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
+              wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
+            };
+            
+            console.log('功耗配置已从API加载:', powerConsumption);
+          }
+        } else {
+          console.log('功耗配置API未就绪，使用默认值');
+          // 使用与consumption.json匹配的默认值
           powerConsumption = {
-            imu_working: comp.imu?.consumption?.working || 1.0,
-            imu_standby: comp.imu?.consumption?.standby || 0.003,
-            cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
-            cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
-            wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
-            wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
-            wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
+            imu_working: 1.0,
+            imu_standby: 0.003,
+            cellular_working: 500.0,
+            cellular_standby: 2.0,
+            wifi_working_tx: 285.0,
+            wifi_working_rx: 95.0,
+            wifi_standby_deep: 0.01
           };
-          
-          // 调试信息
-          console.log('功耗配置已加载:', powerConsumption);
         }
+      } catch (apiError) {
+        console.log('功耗配置API请求失败，使用默认值:', apiError.message);
+        // 使用与consumption.json匹配的默认值
+        powerConsumption = {
+          imu_working: 1.0,
+          imu_standby: 0.003,
+          cellular_working: 500.0,
+          cellular_standby: 2.0,
+          wifi_working_tx: 285.0,
+          wifi_working_rx: 95.0,
+          wifi_standby_deep: 0.01
+        };
       }
+      
     } catch (error) {
       console.warn('Failed to load battery config:', error);
       // 使用默认值

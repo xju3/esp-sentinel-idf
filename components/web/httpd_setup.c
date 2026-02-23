@@ -188,6 +188,12 @@ esp_err_t web_server_start(void)
         .handler = api_wifi_scan_start_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t api_consumption = {
+        .uri = "/api/consumption",
+        .method = HTTP_GET,
+        .handler = api_get_consumption_handler,
+        .user_ctx = NULL,
+    };
 
     httpd_uri_t catch_all = {
         .uri = "/*",
@@ -206,6 +212,7 @@ esp_err_t web_server_start(void)
     httpd_register_uri_handler(s_server, &api_save_config);
     httpd_register_uri_handler(s_server, &api_wifi_list);
     httpd_register_uri_handler(s_server, &api_wifi_scan);
+    httpd_register_uri_handler(s_server, &api_consumption);
     httpd_register_uri_handler(s_server, &catch_all);
     httpd_register_uri_handler(s_server, &catch_all_post);
 
