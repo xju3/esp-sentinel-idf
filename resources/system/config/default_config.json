@@ -8,6 +8,7 @@
     "deviceName": "",
     "rpm": 1480,
     "years": 0,
+    "capacity": 9000,
     "host": "https://sentinel-cloud.com",
     "detect_interval": 30,
     "report_cycle": 6,

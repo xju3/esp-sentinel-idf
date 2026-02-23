@@ -1,0 +1,34 @@
+{
+    "unit": "mA",
+    "description": "System components power consumption baseline",
+    "components": {
+        "imu": {
+            "model": "ICM-42688-P",
+            "consumption": {
+                "working": 1.0,
+                "standby": 0.003
+            },
+            "notes": "standby is 3μA"
+        },
+        "cellular": {
+            "model": "A7670C",
+            "consumption": {
+                "working_avg": 500.0,
+                "working_peak": 2000.0,
+                "standby_software": 2.0,
+                "standby_hardware_cut": 0.0
+            },
+            "notes": "working_avg is typical Tx, standby_software refers to CFUN=0 or sleep mode, standby_hardware_cut is MOSFET power gating"
+        },
+        "wifi": {
+            "model": "ESP32-S3_Native",
+            "consumption": {
+                "working_tx": 285.0,
+                "working_rx": 95.0,
+                "standby_modem_sleep": 25.0,
+                "standby_deep_sleep": 0.01
+            },
+            "notes": "working_tx is 802.11b at max power, standby_deep_sleep is for the entire MCU RTC memory retention (10μA)"
+        }
+    }
+}

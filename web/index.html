@@ -87,10 +87,9 @@
     <!-- Panel 1 -->
     <section class="panel active" id="panel-1">
       <div class="panel-content">
-        <h2 class="text-xl font-bold text-slate-900 mb-1">ISO 标准与环境</h2>
+        <h2 class="text-xl font-bold text-slate-900 mb-1">标准与环境</h2>
         <span class="text-slate-500 text-sm mb-6 block">
-          <span id="katex-formula" class="mx-1"></span>
-          <div class="text-xs text-slate-400 mt-1">计算振动信号的均方根值，评估整体振动能量水平</div>
+          <div class="text-xs text-slate-400 mt-1"><strong>均方根值 (RMS)</strong>  <span id="katex-formula" class="mx-1"></span> - 计算振动信号的均方根值，评估整体振动能量水平, 报警从这里开始</div>
         </span>
 
         <div class="mb-6">
@@ -133,10 +132,10 @@
     <!-- Panel 2 -->
     <section class="panel" id="panel-2">
       <div class="panel-content">
-        <h2 class="text-xl font-bold text-slate-900 mb-1">设备信息维护</h2>
+        <h2 class="text-xl font-bold text-slate-900 mb-1">设备特征</h2>
         <span class="text-slate-500 text-sm mb-6 block">
-          <span id="fft-formula" class="mx-1"></span>
-          <div class="text-xs text-slate-400 mt-1">将时域振动信号转换为频域，分析频率成分和故障特征</div>
+          <div class="text-xs text-slate-400 mt-1">
+            <strong>快速傅里叶变换 (FFT)</strong> <span id="fft-formula" class="mx-1"></span> - 将时域振动信号转换为频域，你可以进行频率成分分析和故障特征判断</div>
         </span>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -172,22 +171,22 @@
         <h2 class="text-xl font-bold text-slate-900 mb-1">检测与上报策略</h2>
         <span class="text-slate-500 text-sm mb-6 block">
           <span id="hilbert-formula" class="mx-1"></span>
-          <div class="text-xs text-slate-400 mt-1">提取振动信号的包络特征，检测轴承、齿轮等周期性冲击故障</div>
+          <div class="text-xs text-slate-400 mt-1"><strong>希尔伯特变换 (Hilbert Transform)</strong> - 提取振动信号的包络特征，检测轴承、齿轮等周期性冲击故障</div>
         </span>
 
         <div class="mb-6">
         <label class="block text-sm font-semibold text-slate-900 mb-2 after:content-['*'] after:text-red-500 after:ml-1">检测频率</label>
         <div class="flex gap-3 flex-wrap pill-group" id="detect-frequency">
-          <button data-value="1" class="pill">1分钟</button>
-          <button data-value="5" class="pill">5分钟</button>
-          <button data-value="10" class="pill">10分钟</button>
-          <button data-value="30" class="pill active">30分钟</button>
-          <button data-value="60" class="pill">1小时</button>
-          <button data-value="120" class="pill">2小时</button>
-          <button data-value="240" class="pill">4小时</button>
-          <button data-value="480" class="pill">8小时</button>
-          <button data-value="720" class="pill">12小时</button>
-          <button data-value="1440" class="pill">24小时</button>
+          <button data-value="1" class="pill w-16 text-center">1分钟</button>
+          <button data-value="5" class="pill w-16 text-center">5分钟</button>
+          <button data-value="10" class="pill w-16 text-center">10分钟</button>
+          <button data-value="30" class="pill w-16 text-center active">30分钟</button>
+          <button data-value="60" class="pill w-16 text-center">1小时</button>
+          <button data-value="120" class="pill w-16 text-center">2小时</button>
+          <button data-value="240" class="pill w-16 text-center">4小时</button>
+          <button data-value="480" class="pill w-16 text-center">8小时</button>
+          <button data-value="720" class="pill w-16 text-center">12小时</button>
+          <button data-value="1440" class="pill w-16 text-center">24小时</button>
         </div>
       </div>
 
@@ -215,7 +214,7 @@
         <h2 class="text-xl font-bold text-slate-900 mb-1">通讯配置</h2>
         <span class="text-slate-500 text-sm mb-6 block">
           <span id="kurtosis-formula" class="mx-1"></span>
-          <div class="text-xs text-slate-400 mt-1">量化振动信号中的冲击强度，评估故障严重程度</div>
+          <div class="text-xs text-slate-400 mt-1"><strong>峭度 (Kurtosis)</strong> - 量化振动信号中的冲击强度，评估故障严重程度</div>
         </span>
 
         <div class="mb-6">
