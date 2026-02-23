@@ -1,5 +1,5 @@
 // Minimal SPI driver for ICM-42688-P on ESP-IDF, modeled after Arduino HAL.
-#include "icm4288p.h"
+#include "icm42688p.h"
 #include "logger.h"
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
@@ -28,14 +28,14 @@ static uint32_t s_last_interval_us = 0;
 static esp_err_t icm_spi_init_bus(void)
 {
     spi_bus_config_t bus_cfg = {
-        .mosi_io_num = ICM4288P_SPI_MOSI,
-        .miso_io_num = ICM4288P_SPI_MISO,
-        .sclk_io_num = ICM4288P_SPI_SCK,
+        .mosi_io_num = ICM42688P_SPI_MOSI,
+        .miso_io_num = ICM42688P_SPI_MISO,
+        .sclk_io_num = ICM42688P_SPI_SCK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 4092, // Increased to support FIFO burst reads
     };
-    esp_err_t err = spi_bus_initialize(ICM4288P_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    esp_err_t err = spi_bus_initialize(ICM42688P_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
     if (err == ESP_ERR_INVALID_STATE) {
         // Bus already initialized; accept.
         return ESP_OK;
@@ -48,12 +48,12 @@ static esp_err_t icm_spi_add_device(void)
     spi_device_interface_config_t dev_cfg = {
         .clock_speed_hz = ICM42688P_SPI_HZ,
         .mode = 0,
-        .spics_io_num = ICM4288P_SPI_CS,
+        .spics_io_num = ICM42688P_SPI_CS,
         .queue_size = 2,
         // Use full-duplex; half-duplex forbids simultaneous MOSI/MISO phases we need for burst reads.
         .flags = 0,
     };
-    return spi_bus_add_device(ICM4288P_SPI_HOST, &dev_cfg, &s_icm_dev);
+    return spi_bus_add_device(ICM42688P_SPI_HOST, &dev_cfg, &s_icm_dev);
 }
 
 static esp_err_t icm_write_reg(uint8_t reg, uint8_t val)
@@ -106,7 +106,7 @@ static esp_err_t icm_read_accel_raw(int16_t *ax, int16_t *ay, int16_t *az)
 }
 
 // Cached/raw read with user-specified min interval (us). If interval_us==0, always re-read.
-esp_err_t icm4288p_read_accel_raw_rate(int16_t *ax, int16_t *ay, int16_t *az, uint32_t interval_us)
+esp_err_t icm42688p_read_accel_raw_rate(int16_t *ax, int16_t *ay, int16_t *az, uint32_t interval_us)
 {
     if (!ax || !ay || !az) return ESP_ERR_INVALID_ARG;
 
@@ -128,7 +128,7 @@ esp_err_t icm4288p_read_accel_raw_rate(int16_t *ax, int16_t *ay, int16_t *az, ui
     return ESP_OK;
 }
 
-esp_err_t icm4288p_init(void)
+esp_err_t icm42688p_init(void)
 {
     esp_err_t err = icm_spi_init_bus();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
@@ -179,12 +179,12 @@ esp_err_t icm4288p_init(void)
     return ESP_OK;
 }
 
-esp_err_t icm4288p_who_am_i(uint8_t *out_id)
+esp_err_t icm42688p_who_am_i(uint8_t *out_id)
 {
     return icm_read_reg(ICM42688P_REG_WHO_AM_I, out_id);
 }
 
-esp_err_t icm4288p_read_accel(icm4288p_sample_t *out_sample)
+esp_err_t icm42688p_read_accel(icm42688p_sample_t *out_sample)
 {
     if (!out_sample) return ESP_ERR_INVALID_ARG;
     int16_t ax = 0, ay = 0, az = 0;
@@ -197,7 +197,7 @@ esp_err_t icm4288p_read_accel(icm4288p_sample_t *out_sample)
     return ESP_OK;
 }
 
-esp_err_t icm4288p_read_fifo(icm4288p_sample_t *out_samples, size_t max_samples, size_t *out_count)
+esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_samples, size_t *out_count)
 {
     if (!out_samples || !out_count) return ESP_ERR_INVALID_ARG;
     *out_count = 0;

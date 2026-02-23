@@ -1,9 +1,9 @@
-#ifndef ICM4288P_BASELINE_H
-#define ICM4288P_BASELINE_H
+#ifndef ICM42688P_BASELINE_H
+#define ICM42688P_BASELINE_H
 
 #include <stdbool.h>
 #include "esp_err.h"
-#include "icm4288p.h"
+#include "icm42688p.h"
 #include "config_manager.h"
 
 typedef struct {
@@ -21,6 +21,6 @@ typedef struct {
 extern icm_freq_profile_t g_icm_baseline;
 
 // Load or create baseline for the given device id. Blocking sampling at 1 kHz if missing.
-esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *out_profile);
+esp_err_t icm42688p_ensure_baseline(const char *device_id, icm_freq_profile_t *out_profile);
 
-#endif // ICM4288P_BASELINE_H
+#endif // ICM42688P_BASELINE_H

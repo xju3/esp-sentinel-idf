@@ -1,4 +1,4 @@
-#include "icm4288p_baseline.h"
+#include "icm42688p_baseline.h"
 #include "fs_utils.h"
 #include "logger.h"
 #include "cJSON.h"
@@ -14,14 +14,14 @@
 #define POLL_RATE_HZ 50
 #define SAMPLE_WINDOW_MS 1000
 
-extern esp_err_t icm4288p_read_fifo(icm4288p_sample_t *out_samples, size_t max_samples, size_t *out_count);
+extern esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_samples, size_t *out_count);
 
 icm_freq_profile_t g_icm_baseline = {0};
 
 typedef struct {
     uint32_t total;
     uint32_t count;
-    icm4288p_sample_t prev;
+    icm42688p_sample_t prev;
     // running mean/variance (Welford) for each axis
     double mean_x, mean_y, mean_z;
     double m2_x, m2_y, m2_z;
@@ -37,10 +37,11 @@ static void icm_baseline_timer_cb(void *arg)
         return;
     }
 
-    icm4288p_sample_t batch[128]; // Buffer for ~20ms of data at 4kHz (approx 80 samples)
+    // Buffer for ~20ms of data at 4kHz (approx 80 samples)
+    icm42688p_sample_t batch[128]; 
     size_t count = 0;
     
-    esp_err_t r = icm4288p_read_fifo(batch, 128, &count);
+    esp_err_t r = icm42688p_read_fifo(batch, 128, &count);
     if (r != ESP_OK) {
         c->err = r;
         c->count = c->total;
@@ -50,7 +51,7 @@ static void icm_baseline_timer_cb(void *arg)
     for (size_t i = 0; i < count; i++) {
         if (c->count >= c->total) break;
         
-        icm4288p_sample_t s = batch[i];
+        icm42688p_sample_t s = batch[i];
         c->count++;
 
         // Welford update X
@@ -134,6 +135,19 @@ static void append_entry(const char *device_id, const icm_freq_profile_t *p)
         root = cJSON_CreateArray();
     }
 
+    // Remove existing entry for this device_id if it exists
+    if (cJSON_IsArray(root)) {
+        size_t count = cJSON_GetArraySize(root);
+        for (size_t i = 0; i < count; ++i) {
+            cJSON *item = cJSON_GetArrayItem(root, i);
+            cJSON *did = cJSON_GetObjectItemCaseSensitive(item, "device_id");
+            if (cJSON_IsString(did) && strcmp(did->valuestring, device_id) == 0) {
+                cJSON_DeleteItemFromArray(root, i);
+                break; // Assuming unique device_ids
+            }
+        }
+    }
+
     cJSON *entry = cJSON_CreateObject();
     cJSON_AddStringToObject(entry, "device_id", device_id);
     cJSON *freqs = cJSON_CreateObject();
@@ -161,7 +175,7 @@ static void append_entry(const char *device_id, const icm_freq_profile_t *p)
 }
 
 
-esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *out_profile)
+esp_err_t icm42688p_ensure_baseline(const char *device_id, icm_freq_profile_t *out_profile)
 {
     if (!device_id || !out_profile) {
         return ESP_ERR_INVALID_ARG;
@@ -172,9 +186,9 @@ esp_err_t icm4288p_ensure_baseline(const char *device_id, icm_freq_profile_t *ou
         return ESP_OK;
     }
 
-    LOG_INFOF("device profile does not exist (%s), sampling...", device_id);
-    esp_err_t err = icm4288p_init();
+    esp_err_t err = icm42688p_init();
     if (err != ESP_OK) {
+        LOG_ERRORF("ICM42688P init failed: %d", err);
         return err;
     }
 

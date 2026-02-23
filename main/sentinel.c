@@ -10,7 +10,7 @@
 #include "web_server.h"
 #include "logger.h"
 #include "sdkconfig.h"
-#include "icm4288p_baseline.h"
+#include "icm42688p_baseline.h"
 
 extern esp_err_t ppp_4g_init(void);
 
@@ -70,8 +70,8 @@ void app_main(void)
 
     // 确保ICM42688P基线存在（按设备ID），结果写入全局 g_icm_baseline
     const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
-    esp_err_t bret = icm4288p_ensure_baseline(device_id, &g_icm_baseline);
-    if (bret == ESP_OK)
+    esp_err_t err = icm42688p_ensure_baseline(device_id, &g_icm_baseline);
+    if (err == ESP_OK)
     {
         LOG_INFOF("Baseline X: val=%.5f off=%.5f, Y: val=%.5f off=%.5f, Z: val=%.5f off=%.5f",
                   g_icm_baseline.x.val, g_icm_baseline.x.offset,
@@ -80,7 +80,7 @@ void app_main(void)
     }
     else
     {
-        LOG_WARNF("Baseline ensure failed: %d", bret);
+        LOG_WARNF("Baseline ensure failed: %d", err);
     }
 
 #ifdef CONFIG_DEV_MODE
