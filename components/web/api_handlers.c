@@ -36,13 +36,13 @@ esp_err_t api_get_config_handler(httpd_req_t *req)
     }
 
     const char *path = NULL;
-    if (fsu_is_user_mounted() && fsu_file_exists(CONFIG_USER_PATH))
+    if (fsu_is_user_mounted() && fsu_file_exists(PATH_CONFIG_USER))
     {
-        path = CONFIG_USER_PATH;
+        path = PATH_CONFIG_USER;
     }
-    else if (fsu_is_storage_mounted() && fsu_file_exists(CONFIG_DEFAULT_PATH))
+    else if (fsu_is_storage_mounted() && fsu_file_exists(PATH_CONFIG_DEFAULT))
     {
-        path = CONFIG_DEFAULT_PATH;
+        path = PATH_CONFIG_DEFAULT;
     }
 
     if (!path)
@@ -218,29 +218,25 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
 esp_err_t api_get_consumption_handler(httpd_req_t *req)
 {
     LOG_DEBUG("loading power consumption configuration.");
-    
-    // 定义功耗配置文件路径
-    const char *consumption_path = "/system/config/consumption.json";
-    
-    // 检查文件是否存在
     if (!fsu_is_storage_mounted())
     {
         LOG_ERROR("Storage not mounted");
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "storage not mounted");
     }
-    
-    if (!fsu_file_exists(consumption_path))
+
+    // 检查文件是否存在
+    if (!fsu_file_exists(PATH_HW_CONSUMPTION))
     {
-        LOG_ERRORF("Consumption file not found: %s", consumption_path);
+        LOG_ERRORF("Consumption file not found: %s", PATH_HW_CONSUMPTION);
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "consumption file not found");
     }
     
     // 读取文件内容
     size_t len = 0;
-    char *json = fsu_read_file_alloc(consumption_path, &len);
+    char *json = fsu_read_file_alloc(PATH_HW_CONSUMPTION, &len);
     if (!json)
     {
-        LOG_ERRORF("Failed to read consumption file: %s", consumption_path);
+        LOG_ERRORF("Failed to read consumption file: %s", PATH_HW_CONSUMPTION);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "read failed");
     }
     

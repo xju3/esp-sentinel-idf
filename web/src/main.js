@@ -37,7 +37,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const categoryLabel = document.getElementById('iso-category-label');
       if (categoryInput) {
         categoryInput.value = config.iso.category;
-        
+
         // 查找对应的选项标签并更新显示
         const dropdown = document.getElementById('iso-category-dropdown');
         if (dropdown) {
@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (categoryLabel) categoryLabel.textContent = label;
           }
         }
-        
+
         // 检查是否需要显示安装基础选择（特别是Class II的情况）
         setTimeout(() => {
           checkFoundationRequirement(config.iso.category);
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const commBtn = document.querySelector(`#comm-type [data-value="${config.comm_type}"]`);
       if (commBtn) {
         commBtn.click();
-        
+
         // 如果是WiFi，需要加载并选择之前的SSID
         if (config.comm_type === 2 && config.wifi?.ssid) {
           // 延迟以允许WiFi选择框初始化
@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 保存要设置的SSID和密码
             const savedSsid = config.wifi.ssid;
             const savedPass = config.wifi.pass;
-            
+
             // 先检查WiFi选择框是否已经初始化
             const wifiSelect = document.getElementById('wifi-select');
             if (wifiSelect && wifiSelect.options.length > 1) {
@@ -140,12 +140,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
     }
-    
+
     // 辅助函数：设置WiFi选择
     function setWifiSelection(ssid, password) {
       const wifiSelect = document.getElementById('wifi-select');
       if (!wifiSelect) return;
-      
+
       // 尝试找到匹配的选项
       let found = false;
       for (let i = 0; i < wifiSelect.options.length; i++) {
@@ -165,11 +165,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           break;
         }
       }
-      
+
       if (found) {
         // 触发change事件以更新密码框显示
         wifiSelect.dispatchEvent(new Event('change', { bubbles: true }));
-        
+
         // 如果有密码，填充到密码框
         if (password) {
           const wifiPassword = document.getElementById('wifi-password');
@@ -193,7 +193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           wifiSelect.appendChild(option);
           wifiSelect.selectedIndex = wifiSelect.options.length - 1;
           wifiSelect.dispatchEvent(new Event('change', { bubbles: true }));
-          
+
           if (password) {
             const wifiPassword = document.getElementById('wifi-password');
             if (wifiPassword) {
@@ -260,13 +260,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const panels = document.querySelectorAll('.panel');
   const steps = document.querySelectorAll('.step');
   const mask = document.getElementById('processing-mask');
-  
+
   // 4. 导航逻辑
   function updateUI(stepIndex) {
     // 更新面板
     panels.forEach(p => p.classList.remove('active'));
     const targetPanel = document.getElementById(`panel-${stepIndex}`) || document.getElementById('panel-5');
-    if(targetPanel) targetPanel.classList.add('active');
+    if (targetPanel) targetPanel.classList.add('active');
 
     // 更新步骤条
     steps.forEach(s => {
@@ -291,8 +291,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('preview-iso-standard').textContent = isoStandard;
 
     const isoCategoryLabel = document.getElementById('iso-category-label');
-    const isoCategoryText = isoCategoryLabel && isoCategoryLabel.textContent 
-      ? isoCategoryLabel.textContent 
+    const isoCategoryText = isoCategoryLabel && isoCategoryLabel.textContent
+      ? isoCategoryLabel.textContent
       : '未选择';
     document.getElementById('preview-iso-category').textContent = isoCategoryText;
 
@@ -358,12 +358,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     btn.addEventListener('click', (e) => {
       const targetId = e.target.id.replace('to-', '');
       const currentStep = parseInt(targetId) - 1;
-      
+
       // 验证当前步骤的必填字段
       if (!validateStep(currentStep)) {
         return; // 验证失败，不切换面板
       }
-      
+
       updateUI(parseInt(targetId));
     });
   });
@@ -373,15 +373,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     const toast = document.getElementById('error-toast');
     const errorTitle = document.getElementById('error-title');
     const errorMessage = document.getElementById('error-message');
-    
+
     if (toast && errorTitle && errorMessage) {
       errorTitle.textContent = title;
       errorMessage.textContent = message;
-      
+
       // 显示Toast
       toast.classList.remove('hidden');
       toast.classList.remove('translate-x-full');
-      
+
       // 5秒后自动隐藏
       setTimeout(() => {
         hideErrorToast();
@@ -444,7 +444,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 验证额定转速 - 必须大于等于1
         const rpmInput = document.getElementById('device-rpm');
         const rpmValue = rpmInput.value.trim();
-        
+
         if (rpmValue === '') {
           isValid = false;
           errorMessage = '请输入额定转速';
@@ -468,11 +468,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             rpmInput.classList.remove('border-red-500');
           }
         }
-        
+
         // 验证已用月数 - 必须大于等于0
         const monthInput = document.getElementById('months-used');
         const monthValue = monthInput.value.trim();
-        
+
         // 已用月数不是必填项，但如果填写了就需要验证
         if (monthValue !== '') {
           const monthNum = parseFloat(monthValue);
@@ -516,19 +516,19 @@ document.addEventListener('DOMContentLoaded', async () => {
           // 更宽松的验证：允许域名、IP地址、带端口的域名/IP
           // 移除可能的协议前缀（http://, https://, mqtt://等）
           let hostToValidate = serverHost;
-          
+
           // 如果包含协议前缀，移除它
           const protocolRegex = /^(https?|mqtt|ws|wss|ftp):\/\//i;
           if (protocolRegex.test(hostToValidate)) {
             hostToValidate = hostToValidate.replace(protocolRegex, '');
           }
-          
+
           // 验证基本格式：域名或IP地址
           // 域名正则：允许字母、数字、连字符、点号
           // IP地址正则：IPv4格式
           const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
           const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-          
+
           // 检查是否包含端口
           let hostWithoutPort = hostToValidate;
           let port = '';
@@ -536,7 +536,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const parts = hostToValidate.split(':');
             hostWithoutPort = parts[0];
             port = parts[1];
-            
+
             // 验证端口号
             if (port) {
               const portNum = parseInt(port, 10);
@@ -550,7 +550,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               }
             }
           }
-          
+
           // 验证主机部分
           if (!domainRegex.test(hostWithoutPort) && !ipv4Regex.test(hostWithoutPort)) {
             isValid = false;
@@ -573,7 +573,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             wifiSelect.focus();
           } else {
             wifiSelect.classList.remove('border-red-500');
-            
+
             // 检查是否需要密码
             const selectedOption = wifiSelect.options[wifiSelect.selectedIndex];
             const isEncrypted = selectedOption.dataset.encrypted === '1';
@@ -634,20 +634,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 移除同组其他 active
         group.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
         e.target.classList.add('active');
-        
+
         // 特殊逻辑：基础选择显示/隐藏
         if (group.id === 'iso-standard') {
           const isAdvanced = e.target.dataset.value === 'ISO20816';
           const foundationGroup = document.getElementById('foundation-group');
-          
+
           // 无论切换到哪个ISO标准，都先隐藏安装基础
           foundationGroup.style.display = 'none';
           clearFoundationSelection();
-          
+
           // 清空当前选择的机械类别
           document.getElementById('iso-category').value = '';
           document.getElementById('iso-category-label').textContent = '请选择设备类型';
-          
+
           // 根据ISO标准更新机械类别选项
           updateIsoCategoryDropdown(isAdvanced);
         }
@@ -663,25 +663,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isAdvanced) {
       // ISO 20816 高级选项 - 包含LaTeX公式
       options = [
-        { 
-          value: '1', 
-          label: '中大型工业电机 (Motor)', 
-          formula: 'P > 15\\text{ kW}, \\ 120 \\sim 15000\\text{ RPM}' 
+        {
+          value: '1',
+          label: '中大型工业电机 (Motor)',
+          formula: 'P > 15\\text{ kW}, \\ 120 \\sim 15000\\text{ RPM}'
         },
-        { 
-          value: '2', 
-          label: '卧式离心泵 (Horizontal Pump)', 
-          formula: '\\text{独立轴承}, \\ P > 15\\text{ kW}' 
+        {
+          value: '2',
+          label: '卧式离心泵 (Horizontal Pump)',
+          formula: '\\text{独立轴承}, \\ P > 15\\text{ kW}'
         },
-        { 
-          value: '3', 
-          label: '立式旋转机械 (Vertical Machine)', 
-          formula: 'P > 15\\text{ kW}, \\ \\text{垂直悬挂结构}' 
+        {
+          value: '3',
+          label: '立式旋转机械 (Vertical Machine)',
+          formula: 'P > 15\\text{ kW}, \\ \\text{垂直悬挂结构}'
         },
-        { 
-          value: '4', 
-          label: '高速透平机械 (High-speed Turbo)', 
-          formula: 'n > 15000\\text{ RPM}' 
+        {
+          value: '4',
+          label: '高速透平机械 (High-speed Turbo)',
+          formula: 'n > 15000\\text{ RPM}'
         }
       ];
     } else {
@@ -690,7 +690,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         { value: '1', label: 'Class I', formula: '15\\text{--}75\\text{ kW}' },
         { value: '2', label: 'Class II', formula: '\\leq 300\\text{ kW}' },
         { value: '3', label: 'Class III/IV', formula: '> 300\\text{ kW}' }
-       
+
       ];
     }
 
@@ -727,20 +727,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('iso-category').value = value;
         document.getElementById('iso-category-label').textContent = label;
         dropdown.classList.add('hidden');
-        
+
         // 检查是否需要显示安装基础选择
         checkFoundationRequirement(value);
       });
     });
   }
-  
+
   // 5.1.1 检查是否需要显示安装基础选择
   function checkFoundationRequirement(categoryValue) {
     const foundationGroup = document.getElementById('foundation-group');
     const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
-    
+
     if (!foundationGroup || !isoStandardBtn) return;
-    
+
     // 只有在ISO 10816标准下才检查
     if (isoStandardBtn.dataset.value === 'ISO10816') {
       // Class II (value: '2') 或 Class III/IV (value: '3') 需要选择安装基础
@@ -756,7 +756,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       foundationGroup.style.display = 'block';
     }
   }
-  
+
   // 5.1.2 清空安装基础选择
   function clearFoundationSelection() {
     const foundationBtns = document.querySelectorAll('#foundation-select .pill');
@@ -795,15 +795,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const rangeInput = document.getElementById('report-cycle');
   const rangeVal = document.getElementById('cycle-val');
   const reportFrequency = document.getElementById('report-frequency');
-  
+
   // 电池续航计算相关元素
   const batteryCapacityElement = document.getElementById('battery-capacity');
   const commTypeDisplayElement = document.getElementById('comm-type-display');
   const batteryLifeElement = document.getElementById('battery-life');
-  
+
   // 电池容量（从配置读取）
   let batteryCapacity = 9000; // 默认值，从配置加载后会更新
-  
+
   // 功耗参数（从consumption.json读取）
   let powerConsumption = {
     imu_working: 1.0,          // IMU工作电流 (mA)
@@ -814,25 +814,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     wifi_working_rx: 95.0,     // WiFi接收电流 (mA)
     wifi_standby_deep: 0.01    // WiFi深度休眠电流 (mA)
   };
-  
+
   // 时间参数（秒）
   const SAMPLE_DURATION = 2;    // 每次采集耗时 (秒)
   const REPORT_DURATION = 20;   // 每次上报耗时 (秒)
-  
+
   // 电池效率系数
   const BATTERY_EFFICIENCY = 0.85; // 电池有效转换率
-  
+
   // 计算上报频率的函数
   function calculateReportFrequency() {
     const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
     if (!detectFreqBtn || !rangeInput || !reportFrequency) return;
-    
+
     const detectInterval = parseInt(detectFreqBtn.dataset.value); // 分钟
     const reportCycle = parseInt(rangeInput.value); // 次数
-    
+
     // 计算总分钟数
     const totalMinutes = detectInterval * reportCycle;
-    
+
     // 转换为友好的时间显示
     let frequencyText = '';
     if (totalMinutes < 60) {
@@ -854,40 +854,40 @@ document.addEventListener('DOMContentLoaded', async () => {
         frequencyText = `${days}天${hours}小时`;
       }
     }
-    
+
     reportFrequency.textContent = frequencyText;
-    
+
     // 同时计算电池续航
     calculateBatteryLife(detectInterval, reportCycle);
   }
-  
+
   // 计算电池续航的函数 - 根据提供的公式重新实现
   function calculateBatteryLife(detectInterval, reportCycle) {
     if (!batteryCapacity || !batteryLifeElement) return;
-    
+
     // 获取通讯方式
     const commTypeBtn = document.querySelector('#comm-type .pill.active');
     const commType = commTypeBtn ? parseInt(commTypeBtn.dataset.value) : 1; // 默认4G
-    
+
     // 更新通讯方式显示
     if (commTypeDisplayElement) {
       commTypeDisplayElement.textContent = commType === 1 ? '4G (LTE)' : 'WiFi';
     }
-    
+
     // 1. 定义变量 (基于consumption.json和业务逻辑)
     // 电池变量
     const C = batteryCapacity; // 电池标称容量 = 9000 mAh
     const η = 0.85; // 电池有效转换率（扣除自放电和升降压损耗）
     const C_eff = C * η; // 有效电量 = 7650 mAh (当C=9000时)
-    
+
     // 耗电电流变量 (单位: mA) - 从powerConsumption对象获取
     // 硬休眠总电流 = wifi.standby_hardware + imu.standby_hardware + 4g.standby_hardware
     // 注意：consumption.json中没有standby_hardware，使用standby_deep_sleep代替
     const I_sleep = powerConsumption.wifi_standby_deep; // 0.01 mA (WiFi深度休眠)
-    
+
     // 仅采集时电流 = ESP32工作电流 (30mA) + imu.working_typical (1.0)
     const I_sample = 30 + powerConsumption.imu_working; // 31 mA
-    
+
     // 联网上报时电流
     let I_report;
     if (commType === 1) {
@@ -897,44 +897,44 @@ document.addEventListener('DOMContentLoaded', async () => {
       // WiFi模式: ESP32工作 + imu.working_typical + wifi.working_tx
       I_report = 30 + powerConsumption.imu_working + powerConsumption.wifi_working_tx; // 316 mA
     }
-    
+
     // 时间变量 (单位: 秒)
     const F_d = detectInterval * 60;  // 采集间隔 (秒)
     const F_r = detectInterval * reportCycle * 60;  // 上报间隔 (秒)
     const t_s = 2;    // 每次唤醒采集耗时 (秒)
     const t_r = 20;   // 每次唤醒上报耗时 (秒)
-    
+
     // 2. 计算公式
     // 步骤 A：计算一个周期内的总耗能 (Q_cycle，单位：毫安秒 mAs)
-    
+
     // 采集次数 (N) = F_r / F_d (例如 8小时/1小时 = 8次)
     const N = Math.floor(F_r / F_d);
-    
+
     // 采集总耗能 = N × t_s × I_sample
     const Q_sample = N * t_s * I_sample;
-    
+
     // 上报总耗能 = 1 × t_r × I_report
     const Q_report = t_r * I_report;
-    
+
     // 休眠总耗时 = F_r - (N × t_s) - t_r
     const sleepSeconds = F_r - (N * t_s) - t_r;
-    
+
     // 休眠总耗能 = 休眠总耗时 × I_sleep
     const Q_sleep = sleepSeconds * I_sleep;
-    
+
     // 单周期总耗能
     const Q_cycle = Q_sample + Q_report + Q_sleep;
-    
+
     // 步骤 B：计算平均电流 (I_avg，单位：mA)
     const I_avg = Q_cycle / F_r;
-    
+
     // 步骤 C：计算理论可用时间
     // 可用小时数 = C_eff / I_avg
     const lifeHours = C_eff / I_avg;
-    
+
     // 可用天数 = Hours / 24
     const lifeDays = lifeHours / 24;
-    
+
     // 3. 更新显示
     if (batteryLifeElement) {
       if (lifeDays >= 365) {
@@ -949,60 +949,60 @@ document.addEventListener('DOMContentLoaded', async () => {
         const hours = lifeHours.toFixed(0);
         batteryLifeElement.textContent = `${hours} 小时`;
       }
-      
-      // 调试信息（可选）
-      console.log(`电池续航计算详情：
-        采集间隔: ${detectInterval}分钟 (${F_d}秒)
-        上报间隔: ${reportCycle}次检测 (${F_r}秒)
-        采集次数: ${N}次
-        休眠电流: ${I_sleep} mA
-        采集电流: ${I_sample} mA
-        上报电流: ${I_report} mA
-        周期总耗能: ${Q_cycle.toFixed(2)} mAs
-        平均电流: ${I_avg.toFixed(3)} mA
-        有效容量: ${C_eff} mAh
-        续航时间: ${lifeHours.toFixed(1)}小时 (${lifeDays.toFixed(1)}天)`);
+
     }
-  }
-  
-  // 加载电池容量和功耗配置
-  async function loadBatteryConfig(configData) {
-    try {
-      // 使用已经加载的配置数据，避免重复调用API
-      if (configData && configData.battery !== undefined) {
-        batteryCapacity = configData.battery;
-        if (batteryCapacityElement) {
-          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-        }
-      } else {
-        // 如果没有battery字段，使用默认值
-        console.log('配置中没有battery字段，使用默认值9000 mAh');
-        if (batteryCapacityElement) {
-          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-        }
-      }
-      
-      // 尝试加载功耗配置（/api/consumption接口可能尚未完成）
+
+    // 加载电池容量和功耗配置
+    async function loadBatteryConfig(configData) {
       try {
-        const consumptionResponse = await fetch('/api/consumption');
-        if (consumptionResponse.ok) {
-          const consumption = await consumptionResponse.json();
-          if (consumption.components) {
-            const comp = consumption.components;
-            powerConsumption = {
-              imu_working: comp.imu?.consumption?.working || 1.0,
-              imu_standby: comp.imu?.consumption?.standby || 0.003,
-              cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
-              cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
-              wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
-              wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
-              wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
-            };
-            
-            console.log('功耗配置已从API加载:', powerConsumption);
+        // 使用已经加载的配置数据，避免重复调用API
+        if (configData && configData.battery !== undefined) {
+          batteryCapacity = configData.battery;
+          if (batteryCapacityElement) {
+            batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
           }
         } else {
-          console.log('功耗配置API未就绪，使用默认值');
+          // 如果没有battery字段，使用默认值
+          console.log('配置中没有battery字段，使用默认值9000 mAh');
+          if (batteryCapacityElement) {
+            batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+          }
+        }
+
+        // 尝试加载功耗配置（/api/consumption接口可能尚未完成）
+        try {
+          const consumptionResponse = await fetch('/api/consumption');
+          if (consumptionResponse.ok) {
+            const consumption = await consumptionResponse.json();
+            if (consumption.components) {
+              const comp = consumption.components;
+              powerConsumption = {
+                imu_working: comp.imu?.consumption?.working || 1.0,
+                imu_standby: comp.imu?.consumption?.standby || 0.003,
+                cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
+                cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
+                wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
+                wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
+                wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
+              };
+
+              console.log('功耗配置已从API加载:', powerConsumption);
+            }
+          } else {
+            console.log('功耗配置API未就绪，使用默认值');
+            // 使用与consumption.json匹配的默认值
+            powerConsumption = {
+              imu_working: 1.0,
+              imu_standby: 0.003,
+              cellular_working: 500.0,
+              cellular_standby: 2.0,
+              wifi_working_tx: 285.0,
+              wifi_working_rx: 95.0,
+              wifi_standby_deep: 0.01
+            };
+          }
+        } catch (apiError) {
+          console.log('功耗配置API请求失败，使用默认值:', apiError.message);
           // 使用与consumption.json匹配的默认值
           powerConsumption = {
             imu_working: 1.0,
@@ -1014,429 +1014,416 @@ document.addEventListener('DOMContentLoaded', async () => {
             wifi_standby_deep: 0.01
           };
         }
-      } catch (apiError) {
-        console.log('功耗配置API请求失败，使用默认值:', apiError.message);
-        // 使用与consumption.json匹配的默认值
-        powerConsumption = {
-          imu_working: 1.0,
-          imu_standby: 0.003,
-          cellular_working: 500.0,
-          cellular_standby: 2.0,
-          wifi_working_tx: 285.0,
-          wifi_working_rx: 95.0,
-          wifi_standby_deep: 0.01
-        };
-      }
-      
-    } catch (error) {
-      console.warn('Failed to load battery config:', error);
-      // 使用默认值
-      if (batteryCapacityElement) {
-        batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
-      }
-    }
-  }
-  
-  if (rangeInput && rangeVal && reportFrequency) {
-    // 加载电池配置 - 使用已经加载的configData
-    loadBatteryConfig(configData).then(() => {
-      // 初始计算
-      calculateReportFrequency();
-    });
-    
-    // 监听range slider变化
-    rangeInput.addEventListener('input', (e) => {
-      rangeVal.textContent = e.target.value;
-      calculateReportFrequency();
-    });
-    
-    // 监听检测频率变化
-    const detectFrequencyGroup = document.getElementById('detect-frequency');
-    if (detectFrequencyGroup) {
-      detectFrequencyGroup.addEventListener('click', (e) => {
-        if (e.target.classList.contains('pill')) {
-          // 等待pill激活
-          setTimeout(() => {
-            calculateReportFrequency();
-          }, 10);
+
+      } catch (error) {
+        console.warn('Failed to load battery config:', error);
+        // 使用默认值
+        if (batteryCapacityElement) {
+          batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
         }
-      });
+      }
     }
-    
-    // 监听通讯方式变化
+
+    if (rangeInput && rangeVal && reportFrequency) {
+      // 加载电池配置 - 使用已经加载的configData
+      loadBatteryConfig(configData).then(() => {
+        // 初始计算
+        calculateReportFrequency();
+      });
+
+      // 监听range slider变化
+      rangeInput.addEventListener('input', (e) => {
+        rangeVal.textContent = e.target.value;
+        calculateReportFrequency();
+      });
+
+      // 监听检测频率变化
+      const detectFrequencyGroup = document.getElementById('detect-frequency');
+      if (detectFrequencyGroup) {
+        detectFrequencyGroup.addEventListener('click', (e) => {
+          if (e.target.classList.contains('pill')) {
+            // 等待pill激活
+            setTimeout(() => {
+              calculateReportFrequency();
+            }, 10);
+          }
+        });
+      }
+
+      // 监听通讯方式变化
+      const commTypeGroup = document.getElementById('comm-type');
+      if (commTypeGroup) {
+        commTypeGroup.addEventListener('click', (e) => {
+          if (e.target.classList.contains('pill')) {
+            // 等待pill激活
+            setTimeout(() => {
+              const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+              if (detectFreqBtn && rangeInput) {
+                const detectInterval = parseInt(detectFreqBtn.dataset.value);
+                const reportCycle = parseInt(rangeInput.value);
+                calculateBatteryLife(detectInterval, reportCycle);
+              }
+            }, 10);
+          }
+        });
+      }
+    }
+
+    // 7. WiFi 逻辑
+    const wifiBox = document.getElementById('wifi-box');
     const commTypeGroup = document.getElementById('comm-type');
+    const refreshWifiBtn = document.getElementById('refresh-wifi');
+    const wifiSelect = document.getElementById('wifi-select');
+
+    // 添加扫描状态标志，防止重复扫描
+    let isScanning = false;
+
+    // 监听通讯方式切换 (通过pill-group通用逻辑 + 额外的WiFi处理)
     if (commTypeGroup) {
       commTypeGroup.addEventListener('click', (e) => {
         if (e.target.classList.contains('pill')) {
-          // 等待pill激活
-          setTimeout(() => {
-            const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
-            if (detectFreqBtn && rangeInput) {
-              const detectInterval = parseInt(detectFreqBtn.dataset.value);
-              const reportCycle = parseInt(rangeInput.value);
-              calculateBatteryLife(detectInterval, reportCycle);
-            }
-          }, 10);
+          const isWifi = e.target.dataset.value === '2';
+          if (wifiBox) wifiBox.style.display = isWifi ? 'block' : 'none';
+          if (isWifi && !isScanning) {
+            simulateWifiScan();
+          }
         }
       });
     }
-  }
 
-  // 7. WiFi 逻辑
-  const wifiBox = document.getElementById('wifi-box');
-  const commTypeGroup = document.getElementById('comm-type');
-  const refreshWifiBtn = document.getElementById('refresh-wifi');
-  const wifiSelect = document.getElementById('wifi-select');
-  
-  // 添加扫描状态标志，防止重复扫描
-  let isScanning = false;
+    // 7.1 WiFi 扫描完整流程
+    async function scanWifiNetworks() {
+      // 防止重复扫描
+      if (isScanning) {
+        console.log('Scan already in progress, skipping...');
+        return false;
+      }
 
-  // 监听通讯方式切换 (通过pill-group通用逻辑 + 额外的WiFi处理)
-  if (commTypeGroup) {
-    commTypeGroup.addEventListener('click', (e) => {
-      if (e.target.classList.contains('pill')) {
-        const isWifi = e.target.dataset.value === '2';
-        if (wifiBox) wifiBox.style.display = isWifi ? 'block' : 'none';
-        if (isWifi && !isScanning) {
-          simulateWifiScan();
+      isScanning = true;
+      const processingMask = document.getElementById('processing-mask');
+      const maskTitle = document.getElementById('mask-title');
+      const maskDescription = document.getElementById('mask-description');
+      const maskStatus = document.getElementById('mask-status');
+      const maskProgress = document.getElementById('mask-progress');
+      const maskProgressText = document.getElementById('mask-progress-text');
+
+      try {
+        // 显示等待窗口
+        if (processingMask) {
+          processingMask.classList.remove('hidden');
+          processingMask.classList.add('flex');
         }
-      }
-    });
-  }
 
-  // 7.1 WiFi 扫描完整流程
-  async function scanWifiNetworks() {
-    // 防止重复扫描
-    if (isScanning) {
-      console.log('Scan already in progress, skipping...');
-      return false;
-    }
-    
-    isScanning = true;
-    const processingMask = document.getElementById('processing-mask');
-    const maskTitle = document.getElementById('mask-title');
-    const maskDescription = document.getElementById('mask-description');
-    const maskStatus = document.getElementById('mask-status');
-    const maskProgress = document.getElementById('mask-progress');
-    const maskProgressText = document.getElementById('mask-progress-text');
-    
-    try {
-      // 显示等待窗口
-      if (processingMask) {
-        processingMask.classList.remove('hidden');
-        processingMask.classList.add('flex');
+        // 重置进度
+        if (maskProgress) {
+          maskProgress.style.width = '0%';
+        }
+        if (maskProgressText) {
+          maskProgressText.textContent = '0%';
+        }
+        if (maskStatus) {
+          maskStatus.textContent = '初始化...';
+        }
+
+        // 1. 启动WiFi扫描
+        console.log('Starting WiFi scan...');
+        updateMaskProgress(10, '正在启动扫描...');
+        const startResponse = await fetch('/api/wifi-scan-start', { method: 'GET' });
+        console.log(startResponse);
+        if (!startResponse.ok) {
+          throw new Error('Failed to start WiFi scan');
+        }
+
+        // 2. 轮询获取扫描结果（5次，每次间隔1秒）
+        let wifiData = null;
+        let attempts = 0;
+        const maxAttempts = 5;
+
+        while (attempts < maxAttempts) {
+          attempts++;
+
+          updateMaskProgress(10 + (attempts * 15), `查询中 (${attempts}/${maxAttempts})...`);
+
+          const response = await fetch('/api/wifi-list');
+          if (!response.ok) {
+            throw new Error('Failed to fetch WiFi list');
+          }
+
+          const data = await response.json();
+
+          // 检查是否处理完成
+          if (data.status === 'processing') {
+            if (attempts < maxAttempts) {
+              // 等待2秒后重试（增加延迟）
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              continue;
+            }
+          } else if (data.networks && Array.isArray(data.networks)) {
+            wifiData = data.networks;
+            if (wifiData.length > 0) {
+              updateMaskProgress(90, `发现 ${wifiData.length} 个网络...`);
+              break;
+            }
+          }
+        }
+
+        if (!wifiData) {
+          throw new Error('WiFi scan timeout or no data received');
+        }
+
+        // 3. 过滤信号弱的热点 (rssi < -75)，但如果没有强信号的则显示所有
+        updateMaskProgress(95, '正在处理扫描结果...');
+        let filteredNetworks = wifiData.filter(network => {
+          return network.rssi >= -75;
+        });
+
+        if (filteredNetworks.length === 0) {
+          // 如果没有强信号网络，显示所有扫到的网络
+          filteredNetworks = wifiData;
+        }
+
+        if (filteredNetworks.length === 0) {
+          throw new Error('No available WiFi networks found');
+        }
+
+        // 4. 填充WiFi选择下拉菜单
+        const wifiSelect = document.getElementById('wifi-select');
+        if (wifiSelect) {
+          // 按信号强度排序（从强到弱）
+          filteredNetworks.sort((a, b) => b.rssi - a.rssi);
+
+          wifiSelect.innerHTML = '<option value="">请选择 WiFi</option>';
+
+          filteredNetworks.forEach(network => {
+            const signalShength = getSignalQuality(network.rssi);
+            const encLabel = network.enc ? ' 🔒' : '';
+            const option = document.createElement('option');
+            option.value = network.ssid;
+            option.dataset.encrypted = network.enc ? '1' : '0';
+            option.textContent = `${network.ssid} (${signalShength})${encLabel}`;
+            wifiSelect.appendChild(option);
+          });
+
+          wifiSelect.disabled = false;
+        }
+
+        // 完成进度
+        updateMaskProgress(100, '扫描完成！');
+
+        // 延迟隐藏等待窗口，让用户看到完成状态
+        setTimeout(() => {
+          if (processingMask) {
+            processingMask.classList.add('hidden');
+            processingMask.classList.remove('flex');
+          }
+        }, 1000);
+
+        isScanning = false; // 重置扫描状态
+        return true; // 成功
+
+      } catch (error) {
+        console.error('WiFi scan error:', error);
+
+        // 显示错误信息
+        if (maskTitle) maskTitle.textContent = '扫描失败';
+        if (maskDescription) maskDescription.textContent = error.message || '请检查网络连接';
+        if (maskStatus) maskStatus.textContent = '错误';
+        if (maskProgress) maskProgress.style.width = '100%';
+        if (maskProgressText) maskProgressText.textContent = '100%';
+
+        // 3秒后隐藏
+        setTimeout(() => {
+          if (processingMask) {
+            processingMask.classList.add('hidden');
+            processingMask.classList.remove('flex');
+          }
+        }, 3000);
+
+        // WiFi选择框禁用
+        const wifiSelect = document.getElementById('wifi-select');
+        if (wifiSelect) {
+          wifiSelect.innerHTML = '<option value="">扫描失败，请重试</option>';
+          wifiSelect.disabled = true;
+        }
+
+        isScanning = false; // 重置扫描状态
+        return false; // 失败
       }
-      
-      // 重置进度
+    }
+
+    // 7.1.1 更新遮罩进度
+    function updateMaskProgress(percent, statusText) {
+      const maskProgress = document.getElementById('mask-progress');
+      const maskProgressText = document.getElementById('mask-progress-text');
+      const maskStatus = document.getElementById('mask-status');
+
       if (maskProgress) {
-        maskProgress.style.width = '0%';
+        maskProgress.style.width = `${percent}%`;
       }
       if (maskProgressText) {
-        maskProgressText.textContent = '0%';
+        maskProgressText.textContent = `${percent}%`;
       }
       if (maskStatus) {
-        maskStatus.textContent = '初始化...';
+        maskStatus.textContent = statusText;
       }
-
-      // 1. 启动WiFi扫描
-      console.log('Starting WiFi scan...');
-      updateMaskProgress(10, '正在启动扫描...');
-      const startResponse = await fetch('/api/wifi-scan-start', { method: 'GET' });
-      console.log(startResponse);
-      if (!startResponse.ok) {
-        throw new Error('Failed to start WiFi scan');
-      }
-
-      // 2. 轮询获取扫描结果（5次，每次间隔1秒）
-      let wifiData = null;
-      let attempts = 0;
-      const maxAttempts = 5;
-
-      while (attempts < maxAttempts) {
-        attempts++;
-        
-        updateMaskProgress(10 + (attempts * 15), `查询中 (${attempts}/${maxAttempts})...`);
-        
-        const response = await fetch('/api/wifi-list');
-        if (!response.ok) {
-          throw new Error('Failed to fetch WiFi list');
-        }
-
-        const data = await response.json();
-        
-        // 检查是否处理完成
-        if (data.status === 'processing') {
-          if (attempts < maxAttempts) {
-            // 等待2秒后重试（增加延迟）
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            continue;
-          }
-        } else if (data.networks && Array.isArray(data.networks)) {
-          wifiData = data.networks;
-          if (wifiData.length > 0) {
-            updateMaskProgress(90, `发现 ${wifiData.length} 个网络...`);
-            break;
-          }
-        }
-      }
-
-      if (!wifiData) {
-        throw new Error('WiFi scan timeout or no data received');
-      }
-
-      // 3. 过滤信号弱的热点 (rssi < -75)，但如果没有强信号的则显示所有
-      updateMaskProgress(95, '正在处理扫描结果...');
-      let filteredNetworks = wifiData.filter(network => {
-        return network.rssi >= -75;
-      });
-
-      if (filteredNetworks.length === 0) {
-        // 如果没有强信号网络，显示所有扫到的网络
-        filteredNetworks = wifiData;
-      }
-
-      if (filteredNetworks.length === 0) {
-        throw new Error('No available WiFi networks found');
-      }
-
-      // 4. 填充WiFi选择下拉菜单
-      const wifiSelect = document.getElementById('wifi-select');
-      if (wifiSelect) {
-        // 按信号强度排序（从强到弱）
-        filteredNetworks.sort((a, b) => b.rssi - a.rssi);
-
-        wifiSelect.innerHTML = '<option value="">请选择 WiFi</option>';
-        
-        filteredNetworks.forEach(network => {
-          const signalShength = getSignalQuality(network.rssi);
-          const encLabel = network.enc ? ' 🔒' : '';
-          const option = document.createElement('option');
-          option.value = network.ssid;
-          option.dataset.encrypted = network.enc ? '1' : '0';
-          option.textContent = `${network.ssid} (${signalShength})${encLabel}`;
-          wifiSelect.appendChild(option);
-        });
-
-        wifiSelect.disabled = false;
-      }
-
-      // 完成进度
-      updateMaskProgress(100, '扫描完成！');
-      
-      // 延迟隐藏等待窗口，让用户看到完成状态
-      setTimeout(() => {
-        if (processingMask) {
-          processingMask.classList.add('hidden');
-          processingMask.classList.remove('flex');
-        }
-      }, 1000);
-
-      isScanning = false; // 重置扫描状态
-      return true; // 成功
-
-    } catch (error) {
-      console.error('WiFi scan error:', error);
-      
-      // 显示错误信息
-      if (maskTitle) maskTitle.textContent = '扫描失败';
-      if (maskDescription) maskDescription.textContent = error.message || '请检查网络连接';
-      if (maskStatus) maskStatus.textContent = '错误';
-      if (maskProgress) maskProgress.style.width = '100%';
-      if (maskProgressText) maskProgressText.textContent = '100%';
-      
-      // 3秒后隐藏
-      setTimeout(() => {
-        if (processingMask) {
-          processingMask.classList.add('hidden');
-          processingMask.classList.remove('flex');
-        }
-      }, 3000);
-
-      // WiFi选择框禁用
-      const wifiSelect = document.getElementById('wifi-select');
-      if (wifiSelect) {
-        wifiSelect.innerHTML = '<option value="">扫描失败，请重试</option>';
-        wifiSelect.disabled = true;
-      }
-
-      isScanning = false; // 重置扫描状态
-      return false; // 失败
     }
-  }
 
-  // 7.1.1 更新遮罩进度
-  function updateMaskProgress(percent, statusText) {
-    const maskProgress = document.getElementById('mask-progress');
-    const maskProgressText = document.getElementById('mask-progress-text');
-    const maskStatus = document.getElementById('mask-status');
-    
-    if (maskProgress) {
-      maskProgress.style.width = `${percent}%`;
+    // 7.2 信号强度评级
+    function getSignalQuality(rssi) {
+      if (rssi >= -50) return '强';
+      if (rssi >= -60) return '中强';
+      if (rssi >= -70) return '中';
+      return '弱';
     }
-    if (maskProgressText) {
-      maskProgressText.textContent = `${percent}%`;
+
+    // 7.3 模拟 WiFi 扫描入口
+    function simulateWifiScan() {
+      if (!wifiSelect) return;
+      wifiSelect.innerHTML = '<option>正在扫描...</option>';
+      wifiSelect.disabled = true;
+
+      // 调用新的扫描流程
+      scanWifiNetworks();
     }
-    if (maskStatus) {
-      maskStatus.textContent = statusText;
+
+    if (refreshWifiBtn) {
+      refreshWifiBtn.addEventListener('click', simulateWifiScan);
     }
-  }
 
-  // 7.2 信号强度评级
-  function getSignalQuality(rssi) {
-    if (rssi >= -50) return '强';
-    if (rssi >= -60) return '中强';
-    if (rssi >= -70) return '中';
-    return '弱';
-  }
+    // WiFi 密码框显示逻辑 - 仅当选择加密热点时显示
+    wifiSelect?.addEventListener('change', (e) => {
+      const pwdContainer = document.getElementById('wifi-password-container');
+      const wifiPassword = document.getElementById('wifi-password');
 
-  // 7.3 模拟 WiFi 扫描入口
-  function simulateWifiScan() {
-    if (!wifiSelect) return;
-    wifiSelect.innerHTML = '<option>正在扫描...</option>';
-    wifiSelect.disabled = true;
-    
-    // 调用新的扫描流程
-    scanWifiNetworks();
-  }
+      if (!pwdContainer) return;
 
-  if (refreshWifiBtn) {
-    refreshWifiBtn.addEventListener('click', simulateWifiScan);
-  }
-
-  // WiFi 密码框显示逻辑 - 仅当选择加密热点时显示
-  wifiSelect?.addEventListener('change', (e) => {
-    const pwdContainer = document.getElementById('wifi-password-container');
-    const wifiPassword = document.getElementById('wifi-password');
-    
-    if (!pwdContainer) return;
-    
-    if (!e.target.value) {
-      // 未选择
-      pwdContainer.style.display = 'none';
-      if (wifiPassword) wifiPassword.value = '';
-    } else {
-      // 检查选中项是否加密
-      const selectedOption = e.target.options[e.target.selectedIndex];
-      const isEncrypted = selectedOption.dataset.encrypted === '1';
-      
-      if (isEncrypted) {
-        pwdContainer.style.display = 'block';
-        if (wifiPassword) wifiPassword.focus();
-      } else {
+      if (!e.target.value) {
+        // 未选择
         pwdContainer.style.display = 'none';
         if (wifiPassword) wifiPassword.value = '';
-      }
-    }
-  });
-
-  // 8. 确认配置按钮
-  const submitBtn = document.getElementById('submit-config');
-  if (submitBtn) {
-    submitBtn.addEventListener('click', async () => {
-      // 验证WiFi配置
-      const commTypeBtn = document.querySelector('#comm-type .pill.active');
-      const commType = commTypeBtn?.dataset.value;
-      
-      if (commType === '2') {
-        // 选择了WiFi
-        const wifiSelect = document.getElementById('wifi-select');
-        const wifiPassword = document.getElementById('wifi-password');
-        
-        if (!wifiSelect?.value) {
-          showErrorToast('请选择一个WiFi热点');
-          return;
-        }
-        
-        // 检查是否需要密码
-        const selectedOption = wifiSelect.options[wifiSelect.selectedIndex];
+      } else {
+        // 检查选中项是否加密
+        const selectedOption = e.target.options[e.target.selectedIndex];
         const isEncrypted = selectedOption.dataset.encrypted === '1';
-        
-        if (isEncrypted && !wifiPassword?.value) {
-          showErrorToast('此WiFi网络已加密，请输入密码');
-          return;
-        }
-      }
-      
-      // 显示处理中的遮罩
-      if (mask) {
-        mask.classList.remove('hidden');
-        mask.classList.add('flex');
-      }
-      
-      // 调用API提交配置
-      try {
-        const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
-        const isoStandard = isoStandardBtn?.dataset.value || '';
-        const isoCategory = document.getElementById('iso-category')?.value || '';
-        
-        const foundationBtn = document.querySelector('#foundation-select .pill.active');
-        const isoFoundation = foundationBtn?.dataset.value || 'rigid';
 
-        const deviceId = document.getElementById('device-id')?.value || '';
-        const deviceName = document.getElementById('device-name')?.value || '';
-        const rpm = document.getElementById('device-rpm')?.value || 1480;
-        const months = document.getElementById('months-used')?.value || 0;
-
-        const wifiSSID = document.getElementById('wifi-select')?.value || '';
-        const wifiPassword = document.getElementById('wifi-password')?.value || '';
-        
-        const reportCycle = document.getElementById('report-cycle')?.value || 6;
-        
-        const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
-        const detectInterval = detectFreqBtn?.dataset.value || 30;
-        
-        const commTypeBtn = document.querySelector('#comm-type .pill.active');
-        const commType = commTypeBtn?.dataset.value || 1;
-
-        const serverHost = document.getElementById('server-host')?.value || 'sentinel-cloud.com';
-
-        const config = {
-          iso: {
-            standard: isoStandard,
-            category: isoCategory,
-            foundation: isoFoundation
-          },
-          deviceId: deviceId,
-          deviceName: deviceName,
-          rpm: parseInt(rpm) || 1480,
-          months: parseInt(months) || 0,
-          battery: batteryCapacity, // 添加电池容量字段
-          host: serverHost,
-          detect_interval: parseInt(detectInterval) || 30,
-          report_cycle: parseInt(reportCycle) || 6,
-          comm_type: parseInt(commType) || 1,
-          ble_enabled: true,
-          wifi: {
-            ssid: wifiSSID,
-            pass: wifiPassword
-          },
-          configured: true
-        };
-
-        console.log('Sending config:', config);
-        
-        const response = await fetch('/api/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(config)
-        });
-        
-        if (!response.ok) {
-          throw new Error(`保存失败: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        console.log('配置已提交:', result);
-        showErrorToast('配置已成功提交！设备将立即重启并开始监测。', '成功');
-      } catch (error) {
-        console.error('Save error:', error);
-        showErrorToast('保存失败: ' + error.message);
-      } finally {
-        if (mask) {
-          mask.classList.add('hidden');
-          mask.classList.remove('flex');
+        if (isEncrypted) {
+          pwdContainer.style.display = 'block';
+          if (wifiPassword) wifiPassword.focus();
+        } else {
+          pwdContainer.style.display = 'none';
+          if (wifiPassword) wifiPassword.value = '';
         }
       }
     });
-  }
-});
+
+    // 8. 确认配置按钮
+    const submitBtn = document.getElementById('submit-config');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', async () => {
+        // 验证WiFi配置
+        const commTypeBtn = document.querySelector('#comm-type .pill.active');
+        const commType = commTypeBtn?.dataset.value;
+
+        if (commType === '2') {
+          // 选择了WiFi
+          const wifiSelect = document.getElementById('wifi-select');
+          const wifiPassword = document.getElementById('wifi-password');
+
+          if (!wifiSelect?.value) {
+            showErrorToast('请选择一个WiFi热点');
+            return;
+          }
+
+          // 检查是否需要密码
+          const selectedOption = wifiSelect.options[wifiSelect.selectedIndex];
+          const isEncrypted = selectedOption.dataset.encrypted === '1';
+
+          if (isEncrypted && !wifiPassword?.value) {
+            showErrorToast('此WiFi网络已加密，请输入密码');
+            return;
+          }
+        }
+
+        // 显示处理中的遮罩
+        if (mask) {
+          mask.classList.remove('hidden');
+          mask.classList.add('flex');
+        }
+
+        // 调用API提交配置
+        try {
+          const isoStandardBtn = document.querySelector('#iso-standard .pill.active');
+          const isoStandard = isoStandardBtn?.dataset.value || '';
+          const isoCategory = document.getElementById('iso-category')?.value || '';
+
+          const foundationBtn = document.querySelector('#foundation-select .pill.active');
+          const isoFoundation = foundationBtn?.dataset.value || 'rigid';
+
+          const deviceId = document.getElementById('device-id')?.value || '';
+          const deviceName = document.getElementById('device-name')?.value || '';
+          const rpm = document.getElementById('device-rpm')?.value || 1480;
+          const months = document.getElementById('months-used')?.value || 0;
+
+          const wifiSSID = document.getElementById('wifi-select')?.value || '';
+          const wifiPassword = document.getElementById('wifi-password')?.value || '';
+
+          const reportCycle = document.getElementById('report-cycle')?.value || 6;
+
+          const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+          const detectInterval = detectFreqBtn?.dataset.value || 30;
+
+          const commTypeBtn = document.querySelector('#comm-type .pill.active');
+          const commType = commTypeBtn?.dataset.value || 1;
+
+          const serverHost = document.getElementById('server-host')?.value || 'sentinel-cloud.com';
+
+          const config = {
+            iso: {
+              standard: isoStandard,
+              category: isoCategory,
+              foundation: isoFoundation
+            },
+            deviceId: deviceId,
+            deviceName: deviceName,
+            rpm: parseInt(rpm) || 1480,
+            months: parseInt(months) || 0,
+            battery: batteryCapacity, // 添加电池容量字段
+            host: serverHost,
+            detect_interval: parseInt(detectInterval) || 30,
+            report_cycle: parseInt(reportCycle) || 6,
+            comm_type: parseInt(commType) || 1,
+            ble_enabled: true,
+            wifi: {
+              ssid: wifiSSID,
+              pass: wifiPassword
+            },
+            configured: true
+          };
+
+          console.log('Sending config:', config);
+
+          const response = await fetch('/api/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+          });
+
+          if (!response.ok) {
+            throw new Error(`保存失败: ${response.status}`);
+          }
+
+          const result = await response.json();
+          console.log('配置已提交:', result);
+          showErrorToast('配置已成功提交！设备将立即重启并开始监测。', '成功');
+        } catch (error) {
+          console.error('Save error:', error);
+          showErrorToast('保存失败: ' + error.message);
+        } finally {
+          if (mask) {
+            mask.classList.add('hidden');
+            mask.classList.remove('flex');
+          }
+        }
+      });
+    }
+  });

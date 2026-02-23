@@ -21,8 +21,9 @@ extern "C" {
 #define CONFIG_MAX_ISO_CAT_LEN     32
 #define CONFIG_MAX_ISO_FOUND_LEN   16
 
-#define CONFIG_DEFAULT_PATH "/system/c/default_config.json"
-#define CONFIG_USER_PATH    "/user/user_config.json"
+#define PATH_CONFIG_DEFAULT "/system/c/default_config.json"
+#define PATH_HW_CONSUMPTION "/system/c/consumption.json"
+#define PATH_CONFIG_USER    "/user/user_config.json"
 
 typedef struct {
     int16_t type;
