@@ -260,3 +260,18 @@ esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_sample
     free(raw_data);
     return err;
 }
+
+esp_err_t icm42688p_set_sleep(bool sleep)
+{
+    uint8_t pwr_mgmt0_val = sleep ? 0x00 : 0x0F; // 0x00 = sleep, 0x0F = wake (accel+gyro on)
+    esp_err_t err = icm_write_reg(ICM42688P_REG_PWR_MGMT0, pwr_mgmt0_val);
+    if (err != ESP_OK) {
+        LOG_ERRORF("Failed to set sleep mode %d: %d", sleep, err);
+        return err;
+    }
+    
+    // Small delay for mode transition
+    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    return ESP_OK;
+}

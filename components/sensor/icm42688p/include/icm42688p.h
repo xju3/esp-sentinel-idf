@@ -55,6 +55,12 @@ esp_err_t icm42688p_read_accel(icm42688p_sample_t *out_sample);
 // Read WHO_AM_I register; returns ESP_OK and fills id.
 esp_err_t icm42688p_who_am_i(uint8_t *out_id);
 
+// Set sensor sleep mode (true = sleep, false = wake)
+esp_err_t icm42688p_set_sleep(bool sleep);
+
+// Read FIFO data (for streaming mode)
+esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_samples, size_t *out_count);
+
 #ifdef __cplusplus
 }
 #endif

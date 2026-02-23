@@ -9,6 +9,9 @@
 extern "C" {
 #endif
 
+// Forward declaration for MQTT client handle
+typedef struct esp_mqtt_client *esp_mqtt_client_handle_t;
+
 /**
  * @brief 初始化并启动 Wi-Fi SoftAP (热点) 模式
  * * 用于设备初次配网或本地无网环境下的 Web 界面访问。
@@ -62,6 +65,19 @@ void wifi_event_handler(void *arg, esp_event_base_t event_base,
  * * @return esp_err_t 返回 ESP_OK 表示初始化成功
  */
 esp_err_t wifi_common_init(bool create_ap, bool create_sta);
+
+/**
+ * @brief 初始化 MQTT 客户端
+ * * 在网络连接成功后调用，启动 MQTT 客户端
+ * * @return esp_err_t 返回 ESP_OK 表示初始化成功
+ */
+esp_err_t mqtt_client_init(void);
+
+/**
+ * @brief 全局 MQTT 客户端句柄
+ * * 用于其他模块发送 MQTT 消息
+ */
+extern esp_mqtt_client_handle_t g_mqtt_client;
 
 #ifdef __cplusplus
 }
