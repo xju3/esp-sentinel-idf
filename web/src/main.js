@@ -431,25 +431,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         break;
 
-      case 3: // 第3步：检测策略
-        // 验证检测频率
-        const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
-        if (!detectFreqBtn) {
-          isValid = false;
-          errorMessage = '请选择检测频率';
-          break;
-        }
-
-        // 验证上报周期（range slider总是有值，但需要验证是否在范围内）
-        const reportCycle = document.getElementById('report-cycle').value;
-        if (!reportCycle || reportCycle < 1 || reportCycle > 10) {
-          isValid = false;
-          errorMessage = '上报周期必须在1-10之间';
-          break;
-        }
-        break;
-
-      case 4: // 第4步：通讯配置
+      case 3: // 第3步：通讯配置
         // 验证通讯方式
         const commTypeBtn = document.querySelector('#comm-type .pill.active');
         if (!commTypeBtn) {
@@ -507,6 +489,24 @@ document.addEventListener('DOMContentLoaded', async () => {
               }
             }
           }
+        }
+        break;
+
+      case 4: // 第4步：检测策略
+        // 验证检测频率
+        const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+        if (!detectFreqBtn) {
+          isValid = false;
+          errorMessage = '请选择检测频率';
+          break;
+        }
+
+        // 验证上报周期（range slider总是有值，但需要验证是否在范围内）
+        const reportCycle = document.getElementById('report-cycle').value;
+        if (!reportCycle || reportCycle < 1 || reportCycle > 24) {
+          isValid = false;
+          errorMessage = '上报周期必须在1-24之间';
+          break;
         }
         break;
     }
@@ -659,6 +659,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   const rangeVal = document.getElementById('cycle-val');
   const reportFrequency = document.getElementById('report-frequency');
   
+  // 电池续航计算相关元素
+  const batteryCapacityElement = document.getElementById('battery-capacity');
+  const commTypeDisplayElement = document.getElementById('comm-type-display');
+  const batteryLifeElement = document.getElementById('battery-life');
+  
+  // 电池容量（从配置读取）
+  let batteryCapacity = 9000; // 默认值，从配置加载后会更新
+  
+  // 功耗参数（从consumption.json读取）
+  let powerConsumption = {
+    imu_working: 1.0,          // IMU工作电流 (mA)
+    imu_standby: 0.003,        // IMU待机电流 (mA)
+    cellular_working: 500.0,   // 4G工作电流 (mA)
+    cellular_standby: 2.0,     // 4G软件待机电流 (mA)
+    wifi_working_tx: 285.0,    // WiFi发射电流 (mA)
+    wifi_working_rx: 95.0,     // WiFi接收电流 (mA)
+    wifi_standby_deep: 0.01    // WiFi深度休眠电流 (mA)
+  };
+  
+  // 时间参数（秒）
+  const SAMPLE_DURATION = 2;    // 每次采集耗时 (秒)
+  const REPORT_DURATION = 20;   // 每次上报耗时 (秒)
+  
+  // 电池效率系数
+  const BATTERY_EFFICIENCY = 0.85; // 电池有效转换率
+  
   // 计算上报频率的函数
   function calculateReportFrequency() {
     const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
@@ -693,11 +719,165 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     reportFrequency.textContent = frequencyText;
+    
+    // 同时计算电池续航
+    calculateBatteryLife(detectInterval, reportCycle);
+  }
+  
+  // 计算电池续航的函数 - 根据提供的公式重新实现
+  function calculateBatteryLife(detectInterval, reportCycle) {
+    if (!batteryCapacity || !batteryLifeElement) return;
+    
+    // 获取通讯方式
+    const commTypeBtn = document.querySelector('#comm-type .pill.active');
+    const commType = commTypeBtn ? parseInt(commTypeBtn.dataset.value) : 1; // 默认4G
+    
+    // 更新通讯方式显示
+    if (commTypeDisplayElement) {
+      commTypeDisplayElement.textContent = commType === 1 ? '4G (LTE)' : 'WiFi';
+    }
+    
+    // 1. 定义变量 (基于consumption.json和业务逻辑)
+    // 电池变量
+    const C = batteryCapacity; // 电池标称容量 = 9000 mAh
+    const η = 0.85; // 电池有效转换率（扣除自放电和升降压损耗）
+    const C_eff = C * η; // 有效电量 = 7650 mAh (当C=9000时)
+    
+    // 耗电电流变量 (单位: mA) - 从powerConsumption对象获取
+    // 硬休眠总电流 = wifi.standby_hardware + imu.standby_hardware + 4g.standby_hardware
+    // 注意：consumption.json中没有standby_hardware，使用standby_deep_sleep代替
+    const I_sleep = powerConsumption.wifi_standby_deep; // 0.01 mA (WiFi深度休眠)
+    
+    // 仅采集时电流 = ESP32工作电流 (30mA) + imu.working_typical (1.0)
+    const I_sample = 30 + powerConsumption.imu_working; // 31 mA
+    
+    // 联网上报时电流
+    let I_report;
+    if (commType === 1) {
+      // 4G模式: ESP32工作 + imu.working_typical + 4g.working_typical
+      I_report = 30 + powerConsumption.imu_working + powerConsumption.cellular_working; // 531 mA
+    } else {
+      // WiFi模式: ESP32工作 + imu.working_typical + wifi.working_tx
+      I_report = 30 + powerConsumption.imu_working + powerConsumption.wifi_working_tx; // 316 mA
+    }
+    
+    // 时间变量 (单位: 秒)
+    const F_d = detectInterval * 60;  // 采集间隔 (秒)
+    const F_r = detectInterval * reportCycle * 60;  // 上报间隔 (秒)
+    const t_s = 2;    // 每次唤醒采集耗时 (秒)
+    const t_r = 20;   // 每次唤醒上报耗时 (秒)
+    
+    // 2. 计算公式
+    // 步骤 A：计算一个周期内的总耗能 (Q_cycle，单位：毫安秒 mAs)
+    
+    // 采集次数 (N) = F_r / F_d (例如 8小时/1小时 = 8次)
+    const N = Math.floor(F_r / F_d);
+    
+    // 采集总耗能 = N × t_s × I_sample
+    const Q_sample = N * t_s * I_sample;
+    
+    // 上报总耗能 = 1 × t_r × I_report
+    const Q_report = t_r * I_report;
+    
+    // 休眠总耗时 = F_r - (N × t_s) - t_r
+    const sleepSeconds = F_r - (N * t_s) - t_r;
+    
+    // 休眠总耗能 = 休眠总耗时 × I_sleep
+    const Q_sleep = sleepSeconds * I_sleep;
+    
+    // 单周期总耗能
+    const Q_cycle = Q_sample + Q_report + Q_sleep;
+    
+    // 步骤 B：计算平均电流 (I_avg，单位：mA)
+    const I_avg = Q_cycle / F_r;
+    
+    // 步骤 C：计算理论可用时间
+    // 可用小时数 = C_eff / I_avg
+    const lifeHours = C_eff / I_avg;
+    
+    // 可用天数 = Hours / 24
+    const lifeDays = lifeHours / 24;
+    
+    // 3. 更新显示
+    if (batteryLifeElement) {
+      if (lifeDays >= 365) {
+        const years = (lifeDays / 365).toFixed(1);
+        batteryLifeElement.textContent = `${years} 年`;
+      } else if (lifeDays >= 30) {
+        const months = (lifeDays / 30).toFixed(1);
+        batteryLifeElement.textContent = `${months} 个月`;
+      } else if (lifeDays >= 1) {
+        batteryLifeElement.textContent = `${lifeDays.toFixed(1)} 天`;
+      } else {
+        const hours = lifeHours.toFixed(0);
+        batteryLifeElement.textContent = `${hours} 小时`;
+      }
+      
+      // 调试信息（可选）
+      console.log(`电池续航计算详情：
+        采集间隔: ${detectInterval}分钟 (${F_d}秒)
+        上报间隔: ${reportCycle}次检测 (${F_r}秒)
+        采集次数: ${N}次
+        休眠电流: ${I_sleep} mA
+        采集电流: ${I_sample} mA
+        上报电流: ${I_report} mA
+        周期总耗能: ${Q_cycle.toFixed(2)} mAs
+        平均电流: ${I_avg.toFixed(3)} mA
+        有效容量: ${C_eff} mAh
+        续航时间: ${lifeHours.toFixed(1)}小时 (${lifeDays.toFixed(1)}天)`);
+    }
+  }
+  
+  // 加载电池容量和功耗配置
+  async function loadBatteryConfig() {
+    try {
+      // 加载电池容量
+      const configResponse = await fetch('/api/config');
+      if (configResponse.ok) {
+        const config = await configResponse.json();
+        if (config.capacity !== undefined) {
+          batteryCapacity = config.capacity;
+          if (batteryCapacityElement) {
+            batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+          }
+        }
+      }
+      
+      // 加载功耗配置
+      const consumptionResponse = await fetch('/api/consumption');
+      if (consumptionResponse.ok) {
+        const consumption = await consumptionResponse.json();
+        if (consumption.components) {
+          const comp = consumption.components;
+          powerConsumption = {
+            imu_working: comp.imu?.consumption?.working || 1.0,
+            imu_standby: comp.imu?.consumption?.standby || 0.003,
+            cellular_working: comp.cellular?.consumption?.working_avg || 500.0,
+            cellular_standby: comp.cellular?.consumption?.standby_software || 2.0,
+            wifi_working_tx: comp.wifi?.consumption?.working_tx || 285.0,
+            wifi_working_rx: comp.wifi?.consumption?.working_rx || 95.0,
+            wifi_standby_deep: comp.wifi?.consumption?.standby_deep_sleep || 0.01
+          };
+          
+          // 调试信息
+          console.log('功耗配置已加载:', powerConsumption);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load battery config:', error);
+      // 使用默认值
+      if (batteryCapacityElement) {
+        batteryCapacityElement.textContent = `${batteryCapacity} mAh`;
+      }
+    }
   }
   
   if (rangeInput && rangeVal && reportFrequency) {
-    // 初始计算
-    calculateReportFrequency();
+    // 加载电池配置
+    loadBatteryConfig().then(() => {
+      // 初始计算
+      calculateReportFrequency();
+    });
     
     // 监听range slider变化
     rangeInput.addEventListener('input', (e) => {
@@ -713,6 +893,24 @@ document.addEventListener('DOMContentLoaded', async () => {
           // 等待pill激活
           setTimeout(() => {
             calculateReportFrequency();
+          }, 10);
+        }
+      });
+    }
+    
+    // 监听通讯方式变化
+    const commTypeGroup = document.getElementById('comm-type');
+    if (commTypeGroup) {
+      commTypeGroup.addEventListener('click', (e) => {
+        if (e.target.classList.contains('pill')) {
+          // 等待pill激活
+          setTimeout(() => {
+            const detectFreqBtn = document.querySelector('#detect-frequency .pill.active');
+            if (detectFreqBtn && rangeInput) {
+              const detectInterval = parseInt(detectFreqBtn.dataset.value);
+              const reportCycle = parseInt(rangeInput.value);
+              calculateBatteryLife(detectInterval, reportCycle);
+            }
           }, 10);
         }
       });

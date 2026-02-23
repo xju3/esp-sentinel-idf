@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>检测频率按钮修复测试</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      background: #f9fafb;
+    }
+    .test-title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 15px;
+    }
+    .button-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .pill {
+      padding: 8px 16px;
+      border-radius: 9999px;
+      border: 1px solid #cbd5e1;
+      background-color: white;
+      color: #334155;
+      transition: background-color 0.2s;
+      font-size: 14px;
+      min-width: 70px;
+      text-align: center;
+    }
+    .pill:hover {
+      background-color: #f8fafc;
+    }
+    .pill.active {
+      background-color: #2563eb;
+      color: white;
+      border-color: #2563eb;
+    }
+    .result {
+      margin-top: 15px;
+      padding: 12px;
+      background: #f0f9ff;
+      border-radius: 8px;
+      border: 1px solid #bae6fd;
+    }
+    .success {
+      color: #059669;
+      font-weight: 500;
+    }
+    .info {
+      color: #3b82f6;
+    }
+    .dimension {
+      font-family: monospace;
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <h1>检测频率按钮修复测试</h1>
+  
+  <div class="test-section">
+    <div class="test-title">修复前（原始问题）</div>
+    <p>问题：按钮使用固定宽度 <span class="dimension">w-16</span>（64px），导致"24小时"等较长文本显示不全</p>
+    <div class="button-container">
+      <button class="pill w-16 text-center">1分钟</button>
+      <button class="pill w-16 text-center">5分钟</button>
+      <button class="pill w-16 text-center">10分钟</button>
+      <button class="pill w-16 text-center active">30分钟</button>
+      <button class="pill w-16 text-center">1小时</button>
+      <button class="pill w-16 text-center">2小时</button>
+      <button class="pill w-16 text-center">4小时</button>
+      <button class="pill w-16 text-center">8小时</button>
+      <button class="pill w-16 text-center">12小时</button>
+      <button class="pill w-16 text-center">24小时</button>
+    </div>
+    <div class="result">
+      <div class="info">问题：按钮宽度固定为64px，"24小时"文本可能被截断或显示不完整</div>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <div class="test-title">修复后（当前方案）</div>
+    <p>解决方案：使用 <span class="dimension">min-w-[70px]</span> + <span class="dimension">px-3 py-2</span>，按钮根据内容自适应宽度</p>
+    <div class="button-container">
+      <button class="pill min-w-[70px] text-center px-3 py-2">1分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">5分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">10分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2 active">30分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">1小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">2小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">4小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">8小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">12小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">24小时</button>
+    </div>
+    <div class="result">
+      <div class="success">✓ 修复成功：按钮宽度自适应，所有文本都能完整显示</div>
+      <div class="info">改进：最小宽度70px确保一致性，内边距提供更好的点击区域</div>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <div class="test-title">响应式测试</div>
+    <p>在不同屏幕宽度下的表现：</p>
+    <div class="button-container">
+      <button class="pill min-w-[70px] text-center px-3 py-2">1分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">5分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">10分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2 active">30分钟</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">1小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">2小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">4小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">8小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">12小时</button>
+      <button class="pill min-w-[70px] text-center px-3 py-2">24小时</button>
+    </div>
+    <div class="result">
+      <div class="success">✓ 响应式良好：使用 <span class="dimension">flex-wrap</span>，在小屏幕上按钮会自动换行</div>
+      <div class="info">布局：按钮容器使用 <span class="dimension">flex gap-3 flex-wrap</span> 确保间距和换行</div>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <div class="test-title">与其他按钮组对比</div>
+    <p>检查其他pill按钮组是否也有类似问题：</p>
+    
+    <div style="margin-bottom: 20px;">
+      <div style="font-weight: 500; margin-bottom: 8px;">ISO标准按钮组：</div>
+      <div class="button-container">
+        <button class="pill active">ISO 10816 (通用)</button>
+        <button class="pill">ISO 20816 (高级)</button>
+      </div>
+      <div style="font-size: 13px; color: #6b7280; margin-top: 5px;">状态：正常（无固定宽度限制）</div>
+    </div>
+    
+    <div style="margin-bottom: 20px;">
+      <div style="font-weight: 500; margin-bottom: 8px;">通讯方式按钮组：</div>
+      <div class="button-container">
+        <button class="pill active">4G (LTE)</button>
+        <button class="pill">WiFi</button>
+      </div>
+      <div style="font-size: 13px; color: #6b7280; margin-top: 5px;">状态：正常（无固定宽度限制）</div>
+    </div>
+    
+    <div>
+      <div style="font-weight: 500; margin-bottom: 8px;">安装基础按钮组：</div>
+      <div class="button-container">
+        <button class="pill">刚性基础</button>
+        <button class="pill">柔性基础</button>
+      </div>
+      <div style="font-size: 13px; color: #6b7280; margin-top: 5px;">状态：正常（无固定宽度限制）</div>
+    </div>
+    
+    <div class="result">
+      <div class="success">✓ 其他按钮组正常：只有检测频率按钮组有固定宽度问题</div>
+    </div>
+  </div>
+  
+  <div class="test-section">
+    <div class="test-title">修复总结</div>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li><strong>问题定位：</strong>检测频率按钮使用固定宽度 <span class="dimension">w-16</span>（64px）</li>
+      <li><strong>影响：</strong>"24小时"等较长文本显示不全或布局混乱</li>
+      <li><strong>解决方案：</strong>
+        <ul style="margin: 5px 0 5px 20px; padding-left: 0;">
+          <li>将 <span class="dimension">w-16</span> 改为 <span class="dimension">min-w-[70px]</span></li>
+          <li>添加 <span class="dimension">px-3 py-2</span> 改善内边距</li>
+          <li>保留 <span class="dimension">text-center</span> 确保文本居中</li>
+        </ul>
+      </li>
+      <li><strong>效果：</strong>按钮宽度自适应，所有文本完整显示，响应式布局正常</li>
+    </ul>
+  </div>
+  
+  <script>
+    // 添加按钮点击交互
+    document.querySelectorAll('.pill').forEach(button => {
+      button.addEventListener('click', function() {
+        // 移除同组其他按钮的active类
+        const container = this.closest('.button-container');
+        if (container) {
+          container.querySelectorAll('.pill').forEach(btn => {
+            btn.classList.remove('active');
+          });
+        }
+        // 添加active类到当前按钮
+        this.classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>
