@@ -26,6 +26,7 @@ sdkconfig.local
 .Spotlight-V100
 .Trashes
 
+resources/system/www
 # =========================
 # VS Code / 编辑器相关
 # =========================
