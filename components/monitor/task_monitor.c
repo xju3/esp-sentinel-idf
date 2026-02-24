@@ -2,7 +2,6 @@
 #include "icm42688p.h"
 #include "icm42688p_baseline.h"
 #include "../algo/include/algo_rms.h"
-#include "../algo/include/algo_test.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "esp_timer.h"
@@ -52,10 +51,8 @@ static void monitor_task_loop(void *arg)
             // --- Initialize Algorithm Context ---
             algo_welford_t algo_ctx;
             algo_welford_init(&algo_ctx);
-            // iso10816_state_t iso_state;
-            //iso10816_init(&iso_state);
-            t_iso10816_state_t t_iso_state;
-            t_iso10816_init(&t_iso_state);
+            iso10816_state_t iso_state;
+            iso10816_init(&iso_state);
 
             int64_t start_time = esp_timer_get_time();
             size_t total_samples = 0;
@@ -128,9 +125,7 @@ static void monitor_task_loop(void *arg)
                                 &msg.payload.rms.rms_z);
 
             // --- ISO10816 Velocity RMS (10-1000Hz) ---
-            // TODO: 
             iso10816_result_t iso_res = {0};
-            // static iso10816_state_t iso_res;
             static bool iso_inited = false;
             float elapsed_sec = (float)((esp_timer_get_time() - start_time) / 1000000.0);
             if (elapsed_sec > 0 && stored_samples > 0)
@@ -141,8 +136,7 @@ static void monitor_task_loop(void *arg)
                 {
                     fs_est = (float)stored_samples / elapsed_sec; // 用 stored_samples，不用 total_samples
                 }
-                // TODO:  t_iso10816_compute(&iso_state, s_ax, s_ay, s_az, (int)stored_samples, fs_est, &iso_res);
-                t_iso10816_compute(&t_iso_state, s_ax, s_ay, s_az, (int)stored_samples, 4096.0f, &iso_res);
+                iso10816_compute(&iso_state, s_ax, s_ay, s_az, (int)stored_samples, fs_est, &iso_res);
                 LOG_INFOF("ISO10816: fs=%.1fHz, N=%d, v(mm/s) XYZ=%.3f, %.3f, %.3f, 3D=%.3f",
                           fs_est, (int)stored_samples, iso_res.vx_rms, iso_res.vy_rms, iso_res.vz_rms, iso_res.v3d_rms);
             }
@@ -191,7 +185,7 @@ esp_err_t task_monitor_start(void)
     if (interval_min <= 0)
         interval_min = 1; // Default to 1 min if invalid
     // uint64_t interval_us = (uint64_t)interval_min * 1000000 / 2;
-    uint64_t interval_us = (uint64_t)interval_min * 60ULL * 1000000ULL;
+    uint64_t interval_us = (uint64_t)interval_min * 3ULL * 1000000ULL;
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, interval_us));
 
     // Create monitor task

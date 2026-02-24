@@ -1,3 +1,3 @@
 idf_component_register(SRCS "task_monitor.c"
-                       INCLUDE_DIRS "."
-                       REQUIRES freertos config logger icm42688p algo)
+                    INCLUDE_DIRS "."
+                    PRIV_REQUIRES algo icm42688p config logger)
