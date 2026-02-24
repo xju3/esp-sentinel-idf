@@ -181,16 +181,17 @@ esp_err_t icm42688p_ensure_baseline(const char *device_id, icm_freq_profile_t *o
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (load_existing(device_id, out_profile)) {
-        g_icm_baseline = *out_profile;
-        return ESP_OK;
-    }
+    // if (load_existing(device_id, out_profile)) {
+    //     g_icm_baseline = *out_profile;
+    //     return ESP_OK;
+    // }
 
     esp_err_t err = icm42688p_init();
     if (err != ESP_OK) {
         LOG_ERRORF("ICM42688P init failed: %d", err);
         return err;
     }
+    
 
     const uint32_t period_us = 1000000UL / POLL_RATE_HZ;
     const uint32_t total_samples = (SAMPLE_WINDOW_MS * SAMPLE_RATE_HZ) / 1000;
@@ -268,5 +269,6 @@ esp_err_t icm42688p_ensure_baseline(const char *device_id, icm_freq_profile_t *o
 
     append_entry(device_id, out_profile);
     LOG_INFO("Baseline sampling finished and stored");
+    //TODO: 这里可以需要deinit.
     return ESP_OK;
 }

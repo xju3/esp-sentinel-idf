@@ -61,6 +61,7 @@ esp_err_t icm42688p_set_sleep(bool sleep);
 // Read FIFO data (for streaming mode)
 esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_samples, size_t *out_count);
 
+
 #ifdef __cplusplus
 }
 #endif

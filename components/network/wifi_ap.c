@@ -18,6 +18,9 @@
 void captive_dns_start(void);
 void captive_dns_stop(void);
 
+// 静态变量跟踪事件循环是否已初始化
+static bool s_event_loop_initialized = false;
+
 // AP 参数定义
 #define SENTINEL_WIFI_PASS "12345678"
 #define SENTINEL_MAX_CONN 4
@@ -64,7 +67,12 @@ esp_err_t wifi_common_init(bool create_ap, bool create_sta)
 {
     // 1. 初始化底层 TCP/IP 堆栈
     ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
+    // 只在第一次调用时创建默认事件循环
+    if (!s_event_loop_initialized) {
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        s_event_loop_initialized = true;
+    }
     
     if (create_ap) {
         esp_netif_create_default_wifi_ap();

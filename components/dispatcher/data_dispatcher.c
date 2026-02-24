@@ -58,7 +58,7 @@ static bool send_to_mqtt(const char *topic, const char *json_str) {
         int msg_id = esp_mqtt_client_publish(g_mqtt_client, topic, json_str, 0, 1, 0);
         
         if (msg_id != -1) {
-            LOG_INFOF("Data sent successfully (msg_id: %d)", msg_id);
+            // LOG_INFOF("Data sent successfully (msg_id: %d)", msg_id);
             return true;
         }
         

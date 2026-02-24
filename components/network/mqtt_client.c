@@ -68,10 +68,22 @@ esp_err_t mqtt_client_init(void)
     
     LOG_INFOF("Initializing MQTT client to: %s", g_user_config.host);
     
+    // 构建完整的 MQTT URI
+    char mqtt_uri[LEN_MAX_HOST + 20]; // 额外空间用于协议和端口
+    if (strstr(g_user_config.host, "://") == NULL) {
+        // 如果没有协议前缀，添加 mqtt://
+        snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:1883", g_user_config.host);
+    } else {
+        // 如果已有协议前缀，直接使用
+        strncpy(mqtt_uri, g_user_config.host, sizeof(mqtt_uri) - 1);
+        mqtt_uri[sizeof(mqtt_uri) - 1] = '\0';
+    }
+    
+    LOG_INFOF("MQTT URI: %s", mqtt_uri);
+    
     // 配置 MQTT 客户端
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = g_user_config.host,
-        .broker.address.port = 1883, // 默认 MQTT 端口
+        .broker.address.uri = mqtt_uri,
         .credentials.client_id = g_user_config.device_id,
         .session.keepalive = 60, // 60秒心跳
         .network.disable_auto_reconnect = false, // 启用自动重连

@@ -29,9 +29,10 @@ esp_err_t scan_wifi(void);
  * @brief 初始化并连接到指定的 Wi-Fi 路由器 (STA 模式)
  * * @param ssid 路由器的 SSID
  * @param pass 路由器的密码
+ * @param connected_cb Wi-Fi连接成功后的回调函数（可选，可为NULL）
  * @return esp_err_t 返回 ESP_OK 表示连接成功
  */
-esp_err_t wifi_init_sta(const char *ssid, const char *pass);
+esp_err_t wifi_init_sta(const char *ssid, const char *pass, void (*connected_cb)(void));
 
 /**
  * @brief 初始化 4G 模组并启动 PPP 拨号

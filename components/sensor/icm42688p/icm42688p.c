@@ -8,12 +8,12 @@
 #include "esp_heap_caps.h"
 #include <stdlib.h>
 
-#define ICM42688P_REG_WHO_AM_I   0x75
-#define ICM42688P_REG_PWR_MGMT0  0x4E
-#define ICM42688P_REG_ACCEL_X1   0x1F
-#define ICM42688P_REG_FIFO_CONFIG  0x16
-#define ICM42688P_REG_FIFO_COUNTH  0x2E
-#define ICM42688P_REG_FIFO_DATA    0x30
+#define ICM42688P_REG_WHO_AM_I 0x75
+#define ICM42688P_REG_PWR_MGMT0 0x4E
+#define ICM42688P_REG_ACCEL_X1 0x1F
+#define ICM42688P_REG_FIFO_CONFIG 0x16
+#define ICM42688P_REG_FIFO_COUNTH 0x2E
+#define ICM42688P_REG_FIFO_DATA 0x30
 #define ICM42688P_REG_ACCEL_CONFIG0 0x50
 #define ICM42688P_REG_FIFO_CONFIG1 0x5F
 
@@ -24,6 +24,7 @@ static spi_device_handle_t s_icm_dev = NULL;
 static int16_t s_last_ax = 0, s_last_ay = 0, s_last_az = 0;
 static int64_t s_last_read_us = -1;
 static uint32_t s_last_interval_us = 0;
+static bool icm_42688_initialized = false;
 
 static esp_err_t icm_spi_init_bus(void)
 {
@@ -36,7 +37,8 @@ static esp_err_t icm_spi_init_bus(void)
         .max_transfer_sz = 4092, // Increased to support FIFO burst reads
     };
     esp_err_t err = spi_bus_initialize(ICM42688P_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (err == ESP_ERR_INVALID_STATE) {
+    if (err == ESP_ERR_INVALID_STATE)
+    {
         // Bus already initialized; accept.
         return ESP_OK;
     }
@@ -58,18 +60,36 @@ static esp_err_t icm_spi_add_device(void)
 
 static esp_err_t icm_write_reg(uint8_t reg, uint8_t val)
 {
-    uint8_t tx[2] = { (uint8_t)(reg & 0x7F), val };
+    if (s_icm_dev == NULL)
+    {
+        LOG_ERROR("SPI device handle is NULL");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t tx[2] = {(uint8_t)(reg & 0x7F), val};
     spi_transaction_t t = {
         .length = 16,
         .tx_buffer = tx,
     };
-    return spi_device_polling_transmit(s_icm_dev, &t);
+    esp_err_t err = spi_device_polling_transmit(s_icm_dev, &t);
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("SPI write failed: reg=0x%02x, val=0x%02x, err=%d", reg, val, err);
+    }
+    return err;
 }
 
 static esp_err_t icm_read_reg(uint8_t reg, uint8_t *out)
 {
-    if (!out) return ESP_ERR_INVALID_ARG;
-    uint8_t tx[2] = { (uint8_t)(reg | 0x80), 0 };
+    if (!out)
+        return ESP_ERR_INVALID_ARG;
+    if (s_icm_dev == NULL)
+    {
+        LOG_ERROR("SPI device handle is NULL in read_reg");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t tx[2] = {(uint8_t)(reg | 0x80), 0};
     uint8_t rx[2] = {0};
     spi_transaction_t t = {
         .length = 16,
@@ -78,17 +98,21 @@ static esp_err_t icm_read_reg(uint8_t reg, uint8_t *out)
         .flags = 0,
     };
     esp_err_t err = spi_device_polling_transmit(s_icm_dev, &t);
-    if (err == ESP_OK) {
-        *out = rx[1];
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("SPI read failed: reg=0x%02x, err=%d", reg, err);
+        return err;
     }
-    return err;
+    *out = rx[1];
+    return ESP_OK;
 }
 
 static esp_err_t icm_read_accel_raw(int16_t *ax, int16_t *ay, int16_t *az)
 {
-    if (!ax || !ay || !az) return ESP_ERR_INVALID_ARG;
+    if (!ax || !ay || !az)
+        return ESP_ERR_INVALID_ARG;
 
-    uint8_t tx[7] = { (uint8_t)(ICM42688P_REG_ACCEL_X1 | 0x80), 0,0,0,0,0,0 };
+    uint8_t tx[7] = {(uint8_t)(ICM42688P_REG_ACCEL_X1 | 0x80), 0, 0, 0, 0, 0, 0};
     uint8_t rx[7] = {0};
     spi_transaction_t t = {
         .length = 7 * 8,
@@ -97,7 +121,8 @@ static esp_err_t icm_read_accel_raw(int16_t *ax, int16_t *ay, int16_t *az)
         .flags = 0,
     };
     esp_err_t err = spi_device_polling_transmit(s_icm_dev, &t);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+        return err;
 
     *ax = (int16_t)((rx[1] << 8) | rx[2]);
     *ay = (int16_t)((rx[3] << 8) | rx[4]);
@@ -108,16 +133,19 @@ static esp_err_t icm_read_accel_raw(int16_t *ax, int16_t *ay, int16_t *az)
 // Cached/raw read with user-specified min interval (us). If interval_us==0, always re-read.
 esp_err_t icm42688p_read_accel_raw_rate(int16_t *ax, int16_t *ay, int16_t *az, uint32_t interval_us)
 {
-    if (!ax || !ay || !az) return ESP_ERR_INVALID_ARG;
+    if (!ax || !ay || !az)
+        return ESP_ERR_INVALID_ARG;
 
     int64_t now = esp_timer_get_time();
     bool reuse = (interval_us > 0) &&
                  (s_last_read_us >= 0) &&
                  (now - s_last_read_us < (int64_t)interval_us);
 
-    if (!reuse) {
+    if (!reuse)
+    {
         esp_err_t err = icm_read_accel_raw(&s_last_ax, &s_last_ay, &s_last_az);
-        if (err != ESP_OK) return err;
+        if (err != ESP_OK)
+            return err;
         s_last_read_us = now;
         s_last_interval_us = interval_us;
     }
@@ -130,52 +158,85 @@ esp_err_t icm42688p_read_accel_raw_rate(int16_t *ax, int16_t *ay, int16_t *az, u
 
 esp_err_t icm42688p_init(void)
 {
+    if (icm_42688_initialized) {
+        LOG_INFO("ICM42688P already initialized");
+        return ESP_OK;
+    }
+    LOG_INFO("Initializing ICM42688P SPI bus...");
     esp_err_t err = icm_spi_init_bus();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        LOG_ERRORF("ICM SPI bus init failed: %d", err);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        LOG_ERRORF("ICM SPI bus init failed: %d (%s)", err, esp_err_to_name(err));
         return err;
     }
+    LOG_INFO("ICM SPI bus initialized");
 
+    LOG_INFO("Adding ICM42688P SPI device...");
     err = icm_spi_add_device();
-    if (err != ESP_OK) {
-        LOG_ERRORF("ICM add device failed: %d", err);
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("ICM add device failed: %d (%s)", err, esp_err_to_name(err));
         return err;
     }
+    LOG_INFOF("ICM SPI device added, handle: %p", s_icm_dev);
 
     vTaskDelay(pdMS_TO_TICKS(50));
 
     uint8_t id = 0;
+    LOG_INFO("Reading WHO_AM_I register...");
     err = icm_read_reg(ICM42688P_REG_WHO_AM_I, &id);
-    if (err != ESP_OK) {
-        LOG_ERRORF("ICM read WHO_AM_I failed: %d", err);
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("ICM read WHO_AM_I failed: %d (%s)", err, esp_err_to_name(err));
         return err;
     }
-    if (id == 0x00 || id == 0xFF) {
-        LOG_ERROR("ICM invalid WHO_AM_I");
+    LOG_INFOF("ICM WHO_AM_I: 0x%02x", id);
+
+    if (id == 0x00 || id == 0xFF)
+    {
+        LOG_ERROR("ICM invalid WHO_AM_I (sensor not responding)");
         return ESP_FAIL;
     }
 
+    LOG_INFO("Setting power management...");
     err = icm_write_reg(ICM42688P_REG_PWR_MGMT0, 0x0F);
-    if (err != ESP_OK) {
-        LOG_ERRORF("ICM write PWR_MGMT0 failed: %d", err);
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("ICM write PWR_MGMT0 failed: %d (%s)", err, esp_err_to_name(err));
         return err;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Set ODR to 4kHz (0x04) and FS to +/- 16g (0x00) -> 0x04
+    LOG_INFO("Setting accelerometer configuration...");
     err = icm_write_reg(ICM42688P_REG_ACCEL_CONFIG0, 0x04);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("ICM write ACCEL_CONFIG0 failed: %d", err);
+        return err;
+    }
 
     // Enable Accel in FIFO (Packet 3: Header + Accel + Temp = 8 bytes)
     // Bit 0: FIFO_ACCEL_EN
+    LOG_INFO("Enabling FIFO...");
     err = icm_write_reg(ICM42688P_REG_FIFO_CONFIG1, 0x01);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("ICM write FIFO_CONFIG1 failed: %d", err);
+        return err;
+    }
 
     // Set FIFO mode to Stream-to-FIFO
     // Bits 7:6 = 01 (Stream mode)
     err = icm_write_reg(ICM42688P_REG_FIFO_CONFIG, 0x40);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("ICM write FIFO_CONFIG failed: %d", err);
+        return err;
+    }
+    icm_42688_initialized = true;
 
+    LOG_INFO("ICM42688P initialization complete");
     return ESP_OK;
 }
 
@@ -186,10 +247,12 @@ esp_err_t icm42688p_who_am_i(uint8_t *out_id)
 
 esp_err_t icm42688p_read_accel(icm42688p_sample_t *out_sample)
 {
-    if (!out_sample) return ESP_ERR_INVALID_ARG;
+    if (!out_sample)
+        return ESP_ERR_INVALID_ARG;
     int16_t ax = 0, ay = 0, az = 0;
     esp_err_t err = icm_read_accel_raw(&ax, &ay, &az);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+        return err;
 
     out_sample->x_g = (float)ax / ICM42688P_ACCEL_LSB_PER_G;
     out_sample->y_g = (float)ay / ICM42688P_ACCEL_LSB_PER_G;
@@ -199,11 +262,18 @@ esp_err_t icm42688p_read_accel(icm42688p_sample_t *out_sample)
 
 esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_samples, size_t *out_count)
 {
-    if (!out_samples || !out_count) return ESP_ERR_INVALID_ARG;
+    if (!out_samples || !out_count)
+        return ESP_ERR_INVALID_ARG;
     *out_count = 0;
 
+    if (s_icm_dev == NULL)
+    {
+        // LOG_WARN("SPI device not initialized, cannot read FIFO");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     // 1. Read FIFO Count
-    uint8_t tx_cnt[3] = { (uint8_t)(ICM42688P_REG_FIFO_COUNTH | 0x80), 0, 0 };
+    uint8_t tx_cnt[3] = {(uint8_t)(ICM42688P_REG_FIFO_COUNTH | 0x80), 0, 0};
     uint8_t rx_cnt[3] = {0};
     spi_transaction_t t_cnt = {
         .length = 24,
@@ -211,22 +281,30 @@ esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_sample
         .rx_buffer = rx_cnt,
     };
     esp_err_t err = spi_device_polling_transmit(s_icm_dev, &t_cnt);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("Failed to read FIFO count: %d", err);
+        return err;
+    }
 
     uint16_t bytes_in_fifo = (uint16_t)((rx_cnt[1] << 8) | rx_cnt[2]);
-    if (bytes_in_fifo == 0) return ESP_OK;
+    if (bytes_in_fifo == 0)
+        return ESP_OK;
 
     // Packet 3 size: Header(1) + Accel(6) + Temp(1) = 8 bytes
     const size_t packet_size = 8;
     size_t num_packets = bytes_in_fifo / packet_size;
-    if (num_packets > max_samples) num_packets = max_samples;
-    if (num_packets == 0) return ESP_OK;
+    if (num_packets > max_samples)
+        num_packets = max_samples;
+    if (num_packets == 0)
+        return ESP_OK;
 
     size_t read_len = num_packets * packet_size;
 
     // 2. Burst Read FIFO Data (DMA capable buffer required)
     uint8_t *raw_data = heap_caps_malloc(read_len + 1, MALLOC_CAP_DMA);
-    if (!raw_data) return ESP_ERR_NO_MEM;
+    if (!raw_data)
+        return ESP_ERR_NO_MEM;
 
     // First byte is command
     raw_data[0] = (uint8_t)(ICM42688P_REG_FIFO_DATA | 0x80);
@@ -240,11 +318,13 @@ esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_sample
     // Use interrupt/DMA based transmit to avoid blocking CPU during large transfer
     err = spi_device_transmit(s_icm_dev, &t_data);
 
-    if (err == ESP_OK) {
-        for (size_t i = 0; i < num_packets; i++) {
+    if (err == ESP_OK)
+    {
+        for (size_t i = 0; i < num_packets; i++)
+        {
             // Offset 1 for command byte, then i * packet_size
             uint8_t *pkt = &raw_data[1 + i * packet_size];
-            
+
             // Packet 3: Header(1), AccelX(2), AccelY(2), AccelZ(2), Temp(1)
             int16_t ax = (int16_t)((pkt[1] << 8) | pkt[2]);
             int16_t ay = (int16_t)((pkt[3] << 8) | pkt[4]);
@@ -263,15 +343,22 @@ esp_err_t icm42688p_read_fifo(icm42688p_sample_t *out_samples, size_t max_sample
 
 esp_err_t icm42688p_set_sleep(bool sleep)
 {
+    if (s_icm_dev == NULL)
+    {
+        LOG_WARNF("SPI device not initialized, skipping sleep mode %d", sleep);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     uint8_t pwr_mgmt0_val = sleep ? 0x00 : 0x0F; // 0x00 = sleep, 0x0F = wake (accel+gyro on)
     esp_err_t err = icm_write_reg(ICM42688P_REG_PWR_MGMT0, pwr_mgmt0_val);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         LOG_ERRORF("Failed to set sleep mode %d: %d", sleep, err);
         return err;
     }
-    
+
     // Small delay for mode transition
     vTaskDelay(pdMS_TO_TICKS(10));
-    
+
     return ESP_OK;
 }
