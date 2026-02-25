@@ -1,7 +1,7 @@
 #include "task_monitor.h"
 #include "icm42688p.h"
 #include "icm42688p_baseline.h"
-#include "../algo/include/algo_rms.h"
+#include "algo_rms.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "esp_timer.h"

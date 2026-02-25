@@ -6,7 +6,7 @@
 //  - Biquad design no longer resets state implicitly; reset is explicit
 //  - Avoid frequent redesign on small fs jitter (tolerance)
 //  - Skip initial samples to avoid IIR cold-start transient contaminating RMS
-//  - Uses DF2T biquad (same structure as your code) with explicit state
+//  - Biquad 执行优先走 esp-dsp 的 dsps_biquad_f32（ESP32-S3 可走硬件优化）
 //  - Keeps your Welford baseline-corrected accel-RMS path unchanged
 //
 // Notes:
@@ -51,9 +51,13 @@ void algo_welford_finish(const algo_welford_t *ctx,
 // ---------------- ISO10816/20816 velocity RMS ----------------
 
 typedef struct {
-    float b0, b1, b2;
-    float a1, a2;
-    float s1, s2; // DF2T state
+    // esp-dsp biquad 系数格式：b0,b1,b2,a1,a2 (假设 a0=1)
+    // 这里用数组存放，便于直接调用 dsps_biquad_f32（ESP32-S3 有硬件优化实现）。
+    float coef[5];
+
+    // esp-dsp biquad 延迟线 w0,w1（Direct Form II）
+    // 注意：该状态与 DF2T 的 s1/s2 定义不同，但两者实现的是同一差分方程。
+    float w[2];
 } algo_biquad_t;
 
 typedef struct {
@@ -81,6 +85,7 @@ typedef struct {
     float fc_lp_hz;      // default 1000 Hz (or min(1000, 0.45*fs))
     float skip_seconds;  // default 0.25s
     float fs_tol_hz;     // default 50 Hz
+    float leak_hz;       // leaky integrator bleed freq (default 0.5 Hz)
 } iso10816_state_t;
 
 void iso10816_init(iso10816_state_t *st);
@@ -89,6 +94,7 @@ void iso10816_init(iso10816_state_t *st);
 void iso10816_set_fc_lp(iso10816_state_t *st, float fc_lp_hz);
 void iso10816_set_skip_seconds(iso10816_state_t *st, float skip_seconds);
 void iso10816_set_fs_tolerance(iso10816_state_t *st, float fs_tol_hz);
+void iso10816_set_leak_hz(iso10816_state_t *st, float leak_hz);
 
 // Compute velocity RMS (mm/s RMS) for one window.
 // ax/ay/az are acceleration in g.

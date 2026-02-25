@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #include <math.h>
 
+// esp-dsp: biquad 硬件加速 (ESP32-S3)
+#include "dsps_biquad.h"
+
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -76,17 +79,14 @@ void algo_welford_finish(const algo_welford_t *ctx,
 
 static inline void algo_biquad_reset(algo_biquad_t *q) {
     if (!q) return;
-    q->s1 = 0.0f;
-    q->s2 = 0.0f;
+    q->w[0] = 0.0f;
+    q->w[1] = 0.0f;
 }
 
 static inline float algo_biquad_process(algo_biquad_t *q, float x) {
-    // DF2T
-    float y = q->b0 * x + q->s1;
-    float s1_new = q->b1 * x - q->a1 * y + q->s2;
-    float s2_new = q->b2 * x - q->a2 * y;
-    q->s1 = s1_new;
-    q->s2 = s2_new;
+    // 1-sample 处理封装：内部仍走 esp-dsp 的 DF-II 实现（可能走硬件优化路径）
+    float y = 0.0f;
+    (void)dsps_biquad_f32(&x, &y, 1, q->coef, q->w);
     return y;
 }
 
@@ -95,7 +95,6 @@ static inline float algo_biquad_process(algo_biquad_t *q, float x) {
 static void algo_biquad_design_butter2(algo_biquad_t *q, int type, float fc, float fs) {
     if (!q || fs <= 0.0f) return;
 
-    float nyq = 0.5f * fs;
     if (fc < 0.001f) fc = 0.001f;
     if (fc > 0.499f * fs) fc = 0.499f * fs;
 
@@ -125,13 +124,33 @@ static void algo_biquad_design_butter2(algo_biquad_t *q, int type, float fc, flo
     }
 
     float inv_a0 = 1.0f / a0;
-    q->b0 = b0 * inv_a0;
-    q->b1 = b1 * inv_a0;
-    q->b2 = b2 * inv_a0;
-    q->a1 = a1 * inv_a0;
-    q->a2 = a2 * inv_a0;
+
+    // esp-dsp 需要的系数顺序：b0,b1,b2,a1,a2 (a0=1)
+    q->coef[0] = b0 * inv_a0;
+    q->coef[1] = b1 * inv_a0;
+    q->coef[2] = b2 * inv_a0;
+    q->coef[3] = a1 * inv_a0;
+    q->coef[4] = a2 * inv_a0;
 
     // IMPORTANT: do not reset state here.
+}
+
+// 工业级确定性：每窗口先做一次 “均值相减” 作为强制去直流。
+// 目的：把重力 1g 以及零偏从积分链路中彻底移除，否则积分会把 DC 无限放大。
+static inline void iso10816_remove_mean_3axis(const float *ax, const float *ay, const float *az,
+                                             int N,
+                                             float *mx, float *my, float *mz)
+{
+    double sx = 0.0, sy = 0.0, sz = 0.0;
+    for (int i = 0; i < N; ++i) {
+        sx += ax[i];
+        sy += ay[i];
+        sz += az[i];
+    }
+    const double invN = 1.0 / (double)N;
+    *mx = (float)(sx * invN);
+    *my = (float)(sy * invN);
+    *mz = (float)(sz * invN);
 }
 
 static void iso10816_design_if_needed(iso10816_state_t *st, float fs) {
@@ -180,6 +199,7 @@ void iso10816_init(iso10816_state_t *st) {
     st->fc_lp_hz = 1000.0f;
     st->skip_seconds = 0.25f; // good for 1-second snapshots
     st->fs_tol_hz = 50.0f;
+    st->leak_hz = 0.5f; // integrator bleed to suppress DC drift
 }
 
 void iso10816_set_fc_lp(iso10816_state_t *st, float fc_lp_hz) {
@@ -197,6 +217,11 @@ void iso10816_set_fs_tolerance(iso10816_state_t *st, float fs_tol_hz) {
     st->fs_tol_hz = fs_tol_hz;
 }
 
+void iso10816_set_leak_hz(iso10816_state_t *st, float leak_hz) {
+    if (!st) return;
+    st->leak_hz = leak_hz;
+}
+
 void iso10816_compute(iso10816_state_t *st,
                       const float *ax, const float *ay, const float *az,
                       int N, float fs, iso10816_result_t *out)
@@ -205,14 +230,23 @@ void iso10816_compute(iso10816_state_t *st,
         return;
     }
 
+    // 输出确定性：无论什么异常路径，先清零输出。
+    out->vx_rms = out->vy_rms = out->vz_rms = out->v3d_rms = 0.0f;
+
     // Design (or reuse) coefficients
     iso10816_design_if_needed(st, fs);
 
-    // Per-window independent measurement (your current workflow)
+    // (0) 每窗口独立：重置滤波器状态 + 积分器，避免“跨窗口记忆”导致确定性下降。
+    // 你的业务模型是“每分钟抓 1 秒快照”，因此应把状态视作每窗口局部。
+    // 若未来要做连续流式监测，可把下面 reset 移到外部，仅在需要时调用。
+    algo_biquad_reset(&st->hp10_x); algo_biquad_reset(&st->hp10_y); algo_biquad_reset(&st->hp10_z);
+    algo_biquad_reset(&st->lp_x);   algo_biquad_reset(&st->lp_y);   algo_biquad_reset(&st->lp_z);
+    algo_biquad_reset(&st->hp1_vx); algo_biquad_reset(&st->hp1_vy); algo_biquad_reset(&st->hp1_vz);
     st->vx = st->vy = st->vz = 0.0f;
 
     const float dt = 1.0f / fs;
     const float g_to_ms2 = 9.80665f;
+    const float leak = (st->leak_hz > 0.0f) ? expf(-2.0f * (float)M_PI * st->leak_hz * dt) : 1.0f;
 
     int skip = 0;
     if (st->skip_seconds > 0.0f) {
@@ -221,13 +255,23 @@ void iso10816_compute(iso10816_state_t *st,
         if (skip > N) skip = N;
     }
 
+    // (1) 强制去直流：每窗口均值相减（直接去掉 1g + 零偏）
+    // 说明：即使后面还有 10Hz HPF，这一步也必须做。
+    // 原因：
+    //  - IIR HPF 有启动瞬态/有限衰减；
+    //  - 在极低频/数值误差下仍会有残余 DC，被积分无限放大；
+    //  - 均值相减能把 DC 分量在数值上“硬清零”，确定性更强。
+    float mean_x = 0.0f, mean_y = 0.0f, mean_z = 0.0f;
+    iso10816_remove_mean_3axis(ax, ay, az, N, &mean_x, &mean_y, &mean_z);
+
     double sum_vx2 = 0.0, sum_vy2 = 0.0, sum_vz2 = 0.0;
     int used = 0;
 
     for (int i = 0; i < N; ++i) {
-        float x = ax[i] * g_to_ms2;
-        float y = ay[i] * g_to_ms2;
-        float z = az[i] * g_to_ms2;
+        // 先减去每窗口均值，再换算为 m/s^2
+        float x = (ax[i] - mean_x) * g_to_ms2;
+        float y = (ay[i] - mean_y) * g_to_ms2;
+        float z = (az[i] - mean_z) * g_to_ms2;
 
         // Accel band-pass: 10Hz HP + LP
         x = algo_biquad_process(&st->hp10_x, x);
@@ -239,9 +283,9 @@ void iso10816_compute(iso10816_state_t *st,
         z = algo_biquad_process(&st->lp_z, z);
 
         // Integrate to velocity (m/s)
-        st->vx += x * dt;
-        st->vy += y * dt;
-        st->vz += z * dt;
+        st->vx = st->vx * leak + x * dt;
+        st->vy = st->vy * leak + y * dt;
+        st->vz = st->vz * leak + z * dt;
 
         // Velocity HP at 1Hz
         float vx_hp = algo_biquad_process(&st->hp1_vx, st->vx);
@@ -262,7 +306,6 @@ void iso10816_compute(iso10816_state_t *st,
     }
 
     if (used <= 0) {
-        out->vx_rms = out->vy_rms = out->vz_rms = out->v3d_rms = 0.0f;
         return;
     }
 
@@ -274,3 +317,25 @@ void iso10816_compute(iso10816_state_t *st,
                          out->vy_rms * out->vy_rms +
                          out->vz_rms * out->vz_rms);
 }
+
+/*
+调用示例（与当前 monitor_task_loop 的用法一致）：
+
+    iso10816_state_t st;
+    iso10816_init(&st);
+    // 可选：
+    // iso10816_set_fc_lp(&st, 1000.0f);
+    // iso10816_set_skip_seconds(&st, 0.25f);
+    // iso10816_set_leak_hz(&st, 0.5f);
+
+    iso10816_result_t res;
+    iso10816_compute(&st, ax_g, ay_g, az_g, N, fs, &res);
+    // res.vx_rms/res.vy_rms/res.vz_rms/res.v3d_rms 单位：mm/s RMS
+
+关键链路说明（工业级确定性要点）：
+  1) 每窗口均值相减：硬去 DC（含 1g 重力 + 三轴零偏），避免积分无限放大。
+  2) 加速度带通：10Hz 高通 + 低通(fc_lp)，进一步抑制低频/高频非目标能量。
+  3) 时域积分：v[n] = leak*v[n-1] + a[n]*dt，其中 leak = exp(-2*pi*leak_hz*dt)
+     leak_hz 相当于给积分器加一个极低频“泄漏”，抑制漂移。
+  4) 速度再高通(1Hz)：作为二次兜底，滤除残余极低频漂移。
+*/
