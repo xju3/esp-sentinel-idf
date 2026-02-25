@@ -12,8 +12,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-esp_err_t set_device_baseline(uint32_t duration_ms,
-                               vib_baseline_t *out_bl, const char *device_id);
+esp_err_t set_device_baseline(uint32_t duration_ms,  const char *device_id);
 
 #ifdef __cplusplus
 }

@@ -23,17 +23,22 @@ static esp_timer_handle_t s_timer = NULL;
 
 static void task_monitor_imu_data_callback(const icm_raw_data_t *data, size_t count)
 {
-    static uint32_t chunk_counter = 0;
-    chunk_counter++;
-    if (count > 0 && (chunk_counter % 10 == 0)) {
-        // ICM 传感器硬件输出是大端(Big-Endian)，ESP32 内存是小端(Little-Endian)
-        // 必须进行一次字节翻转才能得到真实的整型数值
-        int16_t real_x = (int16_t)__builtin_bswap16((uint16_t)data[0].x);
-        int16_t real_y = (int16_t)__builtin_bswap16((uint16_t)data[0].y);
-        int16_t real_z = (int16_t)__builtin_bswap16((uint16_t)data[0].z);
-        // 顺便把 Header 打出来，如果配置正确，Header 的 Bit6 应该是 1 (代表 Accel)
-        ESP_LOGI("IMU_TEST", "Chunk #%lu | Header: 0x%02X | X=%d, Y=%d, Z=%d", 
-                 chunk_counter, data[0].header, real_x, real_y, real_z);
+   if (g_imu_stream == NULL) return;
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    
+    // 计算本次需要灌入水管的字节数
+    size_t bytes_to_send = count * sizeof(icm_raw_data_t);
+    
+    // 无脑将数据推入流缓冲区
+    xStreamBufferSendFromISR(g_imu_stream, 
+                             (void*)data, 
+                             bytes_to_send, 
+                             &xHigherPriorityTaskWoken);
+    
+    // 如果有任务正阻塞在等水喝，立刻触发上下文切换唤醒它
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
     }
 }
 
@@ -69,7 +74,6 @@ esp_err_t task_monitor_start(void)
 {
     if (g_monitor_queue != NULL)
         return ESP_OK; // Already started
-    LOG_DEBUG("Starting ICM-42688-P DMA Stream Test...");
     // 第一步：基础物理初始化 (总线和 DMA 内存分配)
     esp_err_t err = drv_icm42688_init();
     if (err != ESP_OK)
@@ -77,7 +81,6 @@ esp_err_t task_monitor_start(void)
         LOG_DEBUGF("IMU Init failed! Error: %d", err);
         return ESP_ERR_INVALID_STATE;
     }
-    LOG_DEBUG("IMU Init OK.");
 
     // 第二步：动态配置 (1kHz ODR, 16g 量程, 不开启 WoM 休眠唤醒)
     icm_cfg_t cfg = {
@@ -91,7 +94,6 @@ esp_err_t task_monitor_start(void)
         LOG_ERROR("IMU Config failed!");
         return ESP_ERR_INVALID_STATE;
     }
-    LOG_DEBUG("IMU Config OK.");
 
     // Create global queue for producer-consumer pattern
     // g_monitor_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(monitor_accel_raw_data_t));

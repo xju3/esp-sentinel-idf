@@ -21,10 +21,10 @@ extern "C" {
 #define LEN_MAX_ISO_CAT     32
 #define LEN_MAX_ISO_FOUND   16
 
-#define FILE_PATH_CONFIG_DEFAULT "/system/c/default_config.json"
-#define FILE_PATH_HW_CONSUMPTION "/system/c/consumption.json"
-#define FILE_PATH_CONFIG_USER    "/user/user_config.json"
-#define FILE_PATH_DEVICE_PROFILE     "/user/device_profile.json"
+#define FILE_PATH_CONFIG_DEFAULT    "/system/c/default_config.json"
+#define FILE_PATH_HW_CONSUMPTION    "/system/c/consumption.json"
+#define FILE_PATH_CONFIG_USER       "/user/user_config.json"
+#define FILE_PATH_DEVICE_PROFILE   "/user/device_profile.json"
 
 
 typedef struct {

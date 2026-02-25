@@ -30,7 +30,7 @@ typedef struct {
         monitor_rms_data_t rms;
         // future: monitor_fft_data_t fft;
     } payload;
-} monitor_msg_t;
+} monitor_rms_msg_t;
 
 // Global Queue Handle
 extern QueueHandle_t g_monitor_queue;

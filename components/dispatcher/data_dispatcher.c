@@ -21,7 +21,7 @@ static bool is_mqtt_connected(void) {
 }
 
 // 构建 JSON 消息
-static char* build_json_message(const monitor_msg_t *msg) {
+static char* build_json_message(const monitor_rms_msg_t *msg) {
     if (!msg) return NULL;
     
     cJSON *root = cJSON_CreateObject();
@@ -74,7 +74,7 @@ static bool send_to_mqtt(const char *topic, const char *json_str) {
 }
 
 static void dispatcher_task(void *arg) {
-    monitor_msg_t msg;
+    monitor_rms_msg_t msg;
     char topic[128];
     
     // 构造 MQTT Topic: /device/{id}/data

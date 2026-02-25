@@ -48,15 +48,17 @@ void start_tasks()
         return;
     }
     const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
-
-
-    err = set_device_baseline(1000, &g_baseline, device_id);
+    // 获取设备的基准姿态
+    err = set_device_baseline(1000, device_id);
     if (err != ESP_OK)
     {
         LOG_WARNF("Baseline capture failed: %d", err);
         return;
     }
 
+    // 创建消息处理队列
+    g_monitor_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(monitor_rms_msg_t));
+    // 启动传感器监控任务
     err = task_monitor_start();
     if (err != ESP_OK)
     {
@@ -67,6 +69,7 @@ void start_tasks()
     {
         LOG_INFO("Monitor task started successfully");
     }
+    
     // 启动消费者任务 (data_dispatcher)
     err = data_dispatcher_start();
     if (err != ESP_OK)

@@ -21,18 +21,37 @@ StreamBufferHandle_t g_imu_stream = NULL;
 
 static void app_basline_imu_data_callback(const icm_raw_data_t *data, size_t count)
 {
+    // 1. 安全拦截：如果水管还没建好，直接丢弃数据，防止空指针崩溃
+    if (g_imu_stream == NULL)
+    {
+        return;
+    }
+
+    // 2. 计算本次需要灌入水管的字节数 (通常是 128 * 8 = 1024 字节)
+    size_t bytes_to_send = count * sizeof(icm_raw_data_t);
+
+    // 3. 核心修复：使用 Task 级别的 API 发送数据
+    // 参数 4 为超时时间(Ticks)：设为 0！(非阻塞)
+    // 宁可丢数据，也绝不阻塞极高优先级的 DMA 守护任务
+    size_t bytes_sent = xStreamBufferSend(g_imu_stream,
+                                          (const void *)data,
+                                          bytes_to_send,
+                                          0);
+
+    // (可选防御) 如果发现水管满了，打印个警告。
+    // 如果这里频发警告，说明 app_baseline_capture 处理太慢了，或者水管建得太细
+    // if (bytes_sent != bytes_to_send) {
+    //     ESP_LOGW("IMU_CB", "StreamBuffer Full! Dropped %d bytes", bytes_to_send - bytes_sent);
+    // }
+
+    // 4. 极简心跳打印 (确认数据正常流转)
     static uint32_t chunk_counter = 0;
     chunk_counter++;
     if (count > 0 && (chunk_counter % 10 == 0))
     {
-        // ICM 传感器硬件输出是大端(Big-Endian)，ESP32 内存是小端(Little-Endian)
-        // 必须进行一次字节翻转才能得到真实的整型数值
-        int16_t real_x = (int16_t)__builtin_bswap16((uint16_t)data[0].x);
-        int16_t real_y = (int16_t)__builtin_bswap16((uint16_t)data[0].y);
+        // 仅供测试肉眼观察，做一次大端翻转打印 Z 轴
         int16_t real_z = (int16_t)__builtin_bswap16((uint16_t)data[0].z);
-        // 顺便把 Header 打出来，如果配置正确，Header 的 Bit6 应该是 1 (代表 Accel)
-        ESP_LOGI("IMU_TEST", "Chunk #%lu | Header: 0x%02X | X=%d, Y=%d, Z=%d",
-                 chunk_counter, data[0].header, real_x, real_y, real_z);
+        ESP_LOGD("IMU_CB", "Chunk #%lu pushed. Z=%d", chunk_counter, real_z);
     }
 }
 
@@ -152,6 +171,7 @@ static void append_entry(const char *device_id, const vib_baseline_t *p)
         free(out);
     }
     cJSON_Delete(root);
+    LOG_DEBUGF("file written: %s", FILE_PATH_DEVICE_PROFILE);
 }
 
 static esp_err_t app_baseline_capture(StreamBufferHandle_t stream,
@@ -217,51 +237,49 @@ static esp_err_t app_baseline_capture(StreamBufferHandle_t stream,
     return ESP_OK;
 }
 
-esp_err_t set_device_baseline(uint32_t duration_ms,
-                              vib_baseline_t *out_bl, const char *device_id)
+esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
 {
 
-    if (g_imu_stream)
-    {
-        LOG_WARN("g_imu_stream already exists!");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    bool existing = load_existing(device_id, out_bl);
+    bool existing = load_existing(device_id, &g_baseline);
     if (existing)
     {
-        LOG_DEBUGF("baseline: %f, %f, %f", out_bl->x.val, out_bl->y.val, out_bl->z.val);
         return ESP_OK;
     }
 
+    // 1. 先建好水管 (水管总长设为 IMU_STREAM_SIZE，触发水位线设为 1)
     g_imu_stream = xStreamBufferCreate(IMU_STREAM_SIZE, 1);
     if (g_imu_stream == NULL)
     {
         LOG_ERROR("Failed to create stream buffer!");
-        vTaskDelete(NULL);
         return ESP_ERR_INVALID_STATE;
     }
 
+    // 清除Buffer
     xStreamBufferReset(g_imu_stream);
+
+    // 3. 配置传感器
     icm_cfg_t cfg = {.odr = ICM_ODR_1KHZ, .fs = ICM_FS_16G};
     drv_icm42688_config(&cfg);
+
+    // 4. 打开水龙头，此时 Callback 会开始疯狂调用 xStreamBufferSend
     esp_err_t err = drv_icm42688_start_stream(app_basline_imu_data_callback);
+
+    // 5. 本任务进入阻塞，开始大口喝水并计算 Welford
+    err = app_baseline_capture(g_imu_stream, 3000, &g_baseline, device_id);
+
+    // 6. 3 秒结束，关水龙头
+    drv_icm42688_stop_stream();
+
+    // 7. (极其重要) 基线算完后，拆除水管释放宝贵的内部 RAM！
+    vStreamBufferDelete(g_imu_stream);
+    g_imu_stream = NULL;
     if (err != ESP_OK)
     {
-        LOG_ERROR("Stream start failed!");
+        LOG_ERROR("Baseline capture failed!");
+        return ESP_ERR_INVALID_STATE;
     }
-    // 4. 调用我们的外包函数，把水管交给它，让它处理 3000 毫秒
-    // 此时，本任务会进入阻塞状态，在内部循环喝水、算 Welford
-    err = app_baseline_capture(g_imu_stream, 3000, &g_baseline, device_id);
-    if (err == ESP_OK)
-    {
-        ESP_LOGI(TAG, "Baseline generation success!");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Baseline generation failed!");
-    }
-    drv_icm42688_stop_stream();
-    append_entry(device_id, out_bl);
+    append_entry(device_id, &g_baseline);
+    LOG_DEBUGF(" device baseline value: %f, %f, %f", g_baseline.x.val, g_baseline.y.val, g_baseline.z.val);
+    LOG_DEBUGF("device baseline offset: %f, %f, %f", g_baseline.x.offset, g_baseline.y.offset, g_baseline.z.offset);
     return ESP_OK;
 }
