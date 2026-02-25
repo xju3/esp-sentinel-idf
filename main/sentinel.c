@@ -56,8 +56,6 @@ void start_tasks()
         return;
     }
 
-    // 创建消息处理队列
-    g_monitor_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(monitor_rms_msg_t));
     // 启动传感器监控任务
     err = task_monitor_start();
     if (err != ESP_OK)

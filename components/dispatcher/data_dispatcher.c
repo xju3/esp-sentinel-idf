@@ -83,7 +83,7 @@ static void dispatcher_task(void *arg) {
 
     while (1) {
         // 阻塞等待队列消息 (真正的消费者)
-        if (xQueueReceive(g_monitor_queue, &msg, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(g_monitor_rms_queue, &msg, portMAX_DELAY) == pdTRUE) {
             
             // 构建 JSON 消息
             char *json_str = build_json_message(&msg);
@@ -109,7 +109,7 @@ static void dispatcher_task(void *arg) {
 }
 
 esp_err_t data_dispatcher_start(void) {
-    if (!g_monitor_queue) {
+    if (!g_monitor_rms_queue) {
         LOG_ERROR("Monitor queue not initialized!");
         return ESP_FAIL;
     }

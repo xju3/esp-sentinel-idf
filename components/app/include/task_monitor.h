@@ -33,7 +33,7 @@ typedef struct {
 } monitor_rms_msg_t;
 
 // Global Queue Handle
-extern QueueHandle_t g_monitor_queue;
+extern QueueHandle_t g_monitor_rms_queue;
 
 // Start the monitor task
 esp_err_t task_monitor_start(void);

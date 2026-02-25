@@ -1,4 +1,4 @@
-idf_component_register(SRCS app_baseline.c
+idf_component_register(SRCS app_baseline.c sys_daq.c task_monitor.c
                        INCLUDE_DIRS "include"
                        REQUIRES esp_wifi esp_netif nvs_flash esp_event lwip logger driver config algo mqtt)
 

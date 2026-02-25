@@ -28,8 +28,8 @@ typedef struct {
 
 // 全局 StreamBuffer 句柄 (水管)
 // 注意：不要在头文件里定义变量（否则会导致 multiple definition 链接错误）。
-extern StreamBufferHandle_t g_imu_stream;
-#define IMU_STREAM_SIZE 4096
+extern StreamBufferHandle_t task_monitor_imu_stream;
+#define IMU_STREAM_SIZE 16 * 1024
 extern vib_baseline_t g_baseline;
 #ifdef __cplusplus
 }
