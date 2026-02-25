@@ -12,7 +12,7 @@
 #define VIB_ISO10816_H
 
 #include "vib_algo_err.h"
-#include "pipeline/vib_accel_to_velocity.h"
+#include "vib_accel_to_velocity.h"
 
 #ifdef __cplusplus
 extern "C" {

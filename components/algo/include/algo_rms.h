@@ -24,8 +24,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdbool.h>
-
-#include "icm42688p_baseline.h" // icm_freq_profile_t
+#include "vib_baseline.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,7 +44,7 @@ void algo_welford_update(algo_welford_t *ctx, float x, float y, float z);
 // Baseline-corrected accel RMS feature (your existing logic):
 // out = max(0, sqrt(var + (mean-base_mean)^2) - base_offset)
 void algo_welford_finish(const algo_welford_t *ctx,
-                         const icm_freq_profile_t *baseline,
+                         const vib_baseline_t *baseline,
                          float *out_x, float *out_y, float *out_z);
 
 // ---------------- ISO10816/20816 velocity RMS ----------------

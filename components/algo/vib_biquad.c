@@ -1,6 +1,6 @@
 // core/vib_biquad.c
 
-#include "core/vib_biquad.h"
+#include "vib_biquad.h"
 
 #include <math.h>
 

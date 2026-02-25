@@ -1,7 +1,6 @@
 // pipeline/vib_accel_to_velocity.c
 
-#include "pipeline/vib_accel_to_velocity.h"
-
+#include "vib_accel_to_velocity.h"
 #include <math.h>
 
 #ifndef M_PI

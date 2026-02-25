@@ -20,7 +20,7 @@
 #include <stdbool.h>
 
 #include "vib_algo_err.h"
-#include "core/vib_biquad.h"
+#include "vib_biquad.h"
 
 #ifdef __cplusplus
 extern "C" {

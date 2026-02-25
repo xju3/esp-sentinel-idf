@@ -16,12 +16,15 @@
 #define VIB_WELFORD_FEATURE_H
 
 #include "vib_algo_err.h"
-#include "vib_baseline.h"
-#include "core/vib_stats.h"
+#include "vib_stats.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Forward declaration to avoid circular dependency with vib_baseline.h
+// struct vib_baseline_s;
+// typedef struct vib_baseline_s vib_baseline_t;
 
 typedef struct {
     float fx, fy, fz;
@@ -34,7 +37,6 @@ typedef struct {
 //  - baseline: 可为NULL；NULL时 base_mean=0 base_offset=0
 //  - out: 输出
 vib_algo_err_t vib_welford_feature_from_stats(const vib_welford_3d_t *stats,
-                                             const vib_baseline_t *baseline,
                                              vib_welford_feature_out_t *out);
 
 #ifdef __cplusplus

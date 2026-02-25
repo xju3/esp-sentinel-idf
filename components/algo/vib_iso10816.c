@@ -1,6 +1,6 @@
 // features/vib_iso10816.c
 
-#include "features/vib_iso10816.h"
+#include "vib_iso10816.h"
 
 #include <math.h>
 

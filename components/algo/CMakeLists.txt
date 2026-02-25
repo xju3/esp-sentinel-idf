@@ -5,22 +5,20 @@ idf_component_register(
         algo_rms.c
         fft_core.cpp
         iso_10816.cpp
-        time_domain.cpp
-        envelope.cpp
 
         # New modular vibration algorithm library (pure C, no malloc)
-        core/vib_biquad.c
-        core/vib_fft.c
+        vib_biquad.c
+        vib_fft.c
 
-        features/vib_welford_feature.c
-        pipeline/vib_accel_to_velocity.c
-        features/vib_iso10816.c
-        features/vib_fft_analyzer.c
-        features/vib_kurtosis.c
-        features/vib_envelope.c
+        vib_baseline.c
 
-        app/vib_vibration_analyzer.c
+        vib_welford_feature.c
+        vib_accel_to_velocity.c
+        vib_iso10816.c
+        vib_fft_analyzer.c
+        vib_kurtosis.c
+        vib_envelope.c
 
     INCLUDE_DIRS include .
-    REQUIRES esp-dsp icm42688p config logger fs_utils
+    REQUIRES esp-dsp icm42688p config logger fs_utils app
 )

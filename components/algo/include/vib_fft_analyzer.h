@@ -16,7 +16,7 @@
 #include <stdbool.h>
 
 #include "vib_algo_err.h"
-#include "core/vib_fft.h"
+#include "vib_fft.h"
 
 #ifdef __cplusplus
 extern "C" {

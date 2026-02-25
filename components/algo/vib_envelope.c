@@ -1,6 +1,6 @@
 // features/vib_envelope.c
 
-#include "features/vib_envelope.h"
+#include "vib_envelope.h"
 
 void vib_envelope_init(vib_envelope_state_t *st)
 {

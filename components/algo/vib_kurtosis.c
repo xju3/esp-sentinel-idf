@@ -1,6 +1,6 @@
 // features/vib_kurtosis.c
 
-#include "features/vib_kurtosis.h"
+#include "vib_kurtosis.h"
 
 vib_algo_err_t vib_kurtosis_window(const float *x, const float *y, const float *z,
                                    int N, vib_kurtosis_out_t *out)

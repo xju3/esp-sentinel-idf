@@ -31,11 +31,14 @@ extern "C"
      * 加了强制紧凑修饰后，确保结构体大小永远是绝对的 6 个字节（X,Y,Z 各 2 字节）。
      * 这对于 DMA 直接把 SPI 硬件流映射到内存结构体至关重要，哪怕错位 1 个字节，整个波形就全毁了。
      */
+
     typedef struct
     {
-        int16_t x;
-        int16_t y;
-        int16_t z;
+        uint8_t header; // 包头 (标识数据有效性等)
+        int16_t x;      // 原始 X 轴 (注意：内部为大端模式)
+        int16_t y;      // 原始 Y 轴
+        int16_t z;      // 原始 Z 轴
+        int8_t temp;    // 8位截断温度辅助数据
     } __attribute__((packed)) icm_raw_data_t;
 
     /**
@@ -43,10 +46,10 @@ extern "C"
      */
     typedef enum
     {
-        ICM_ODR_1KHZ = 0x05, // 适合常规设备状态监测
-        ICM_ODR_4KHZ = 0x04, // 适合低速电机监测
-        ICM_ODR_8KHZ = 0x03, // 适合常规轴承异常频段
-        ICM_ODR_16KHZ = 0x02 // 适合极早期微小故障/齿轮啮合高频分析
+        ICM_ODR_1KHZ = 0x06, // 修复：官方手册 0x06 才是 1kHz
+        ICM_ODR_4KHZ = 0x04,
+        ICM_ODR_8KHZ = 0x03,
+        ICM_ODR_16KHZ = 0x02
     } icm_odr_t;
 
     /**

@@ -1,9 +1,5 @@
 #include "task_monitor.h"
-#include "icm42688p.h"
-#include "icm42688p_baseline.h"
 #include "algo_rms.h"
-#include "vib_baseline.h"
-#include "app/vib_vibration_analyzer.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "esp_timer.h"
@@ -11,6 +7,8 @@
 #include "freertos/task.h"
 #include <time.h>
 #include <string.h>
+#include "drv_icm_42688_p.h"
+#include "esp_log.h"
 
 #define MONITOR_QUEUE_SIZE 10
 #define SAMPLE_DURATION_MS 1000
@@ -23,6 +21,23 @@ QueueHandle_t g_monitor_queue = NULL;
 static SemaphoreHandle_t s_wakeup_sem = NULL;
 static esp_timer_handle_t s_timer = NULL;
 
+static void task_monitor_imu_data_callback(const icm_raw_data_t *data, size_t count)
+{
+    static uint32_t chunk_counter = 0;
+    chunk_counter++;
+    if (count > 0 && (chunk_counter % 10 == 0)) {
+        // ICM 传感器硬件输出是大端(Big-Endian)，ESP32 内存是小端(Little-Endian)
+        // 必须进行一次字节翻转才能得到真实的整型数值
+        int16_t real_x = (int16_t)__builtin_bswap16((uint16_t)data[0].x);
+        int16_t real_y = (int16_t)__builtin_bswap16((uint16_t)data[0].y);
+        int16_t real_z = (int16_t)__builtin_bswap16((uint16_t)data[0].z);
+        // 顺便把 Header 打出来，如果配置正确，Header 的 Bit6 应该是 1 (代表 Accel)
+        ESP_LOGI("IMU_TEST", "Chunk #%lu | Header: 0x%02X | X=%d, Y=%d, Z=%d", 
+                 chunk_counter, data[0].header, real_x, real_y, real_z);
+    }
+}
+
+
 static void monitor_timer_cb(void *arg)
 {
     xSemaphoreGive(s_wakeup_sem);
@@ -30,208 +45,22 @@ static void monitor_timer_cb(void *arg)
 
 static void monitor_task_loop(void *arg)
 {
-    // DMA buffer for SPI transaction (8 bytes per sample + 1 cmd byte)
-    // 128 samples * 8 bytes + 1 cmd = 1025 bytes
-    // static uint8_t dma_buf[1025] __attribute__((aligned(4)));
-    static icm42688p_sample_t sample_buf[128];
-    static float s_ax[MONITOR_MAX_SAMPLES];
-    static float s_ay[MONITOR_MAX_SAMPLES];
-    static float s_az[MONITOR_MAX_SAMPLES];
-    icm42688p_init();
-    LOG_INFOF("Monitor task started. Interval: %d min", g_user_config.detect);
-
     while (1)
     {
         // Wait for timer trigger (blocking wait for semaphore)
         if (xSemaphoreTake(s_wakeup_sem, portMAX_DELAY) == pdTRUE)
         {
-
-            // --- Wakeup Sensor ---
-            // icm42688p_set_sleep(false);
-            // vTaskDelay(pdMS_TO_TICKS(WARMUP_DELAY_MS)); // Wait for MEMS stabilization
-
-            // --- Initialize Algorithm Context ---
-            // legacy algo ctx (kept until all call sites migrated)
-            algo_welford_t algo_ctx;
-            algo_welford_init(&algo_ctx);
-            iso10816_state_t iso_state;
-            iso10816_init(&iso_state);
-
-            // new unified analyzer
-            vib_analyzer_state_t vib_st;
-            vib_analyzer_init(&vib_st);
-
-            int64_t start_time = esp_timer_get_time();
-            size_t total_samples = 0;
-            size_t stored_samples = 0;
-
-            // --- Stream Sampling for 1 Second ---
-            bool sensor_working = false;
-            while ((esp_timer_get_time() - start_time) < (SAMPLE_DURATION_MS * 1000))
+            LOG_DEBUG("Starting DMA stream at 1kHz...");
+            esp_err_t err = drv_icm42688_start_stream(task_monitor_imu_data_callback);
+            if (err != ESP_OK)
             {
-                size_t count = 0;
-                esp_err_t err = icm42688p_read_fifo(sample_buf, 128, &count);
-
-                if (err == ESP_OK && count > 0)
-                {
-                    sensor_working = true;
-                    for (size_t i = 0; i < count; i++)
-                    {
-                        algo_welford_update(&algo_ctx, sample_buf[i].x_g, sample_buf[i].y_g, sample_buf[i].z_g);
-                        if (stored_samples < MONITOR_MAX_SAMPLES)
-                        {
-                            s_ax[stored_samples] = sample_buf[i].x_g;
-                            s_ay[stored_samples] = sample_buf[i].y_g;
-                            s_az[stored_samples] = sample_buf[i].z_g;
-                            stored_samples++;
-                        }
-                    }
-                    total_samples += count;
-                }
-
-                // Non-blocking yield - allow FIFO to fill (4kHz = 0.25ms/sample)
-                // Using minimal delay to avoid CPU blocking
-                vTaskDelay(pdMS_TO_TICKS(FIFO_POLL_INTERVAL_MS));
+                LOG_ERROR("Stream start failed!");
+                return;
             }
-
-            // 如果传感器没有工作，使用模拟数据
-            if (!sensor_working)
-            {
-                LOG_WARN("Sensor not working, using simulated data");
-                // 生成一些模拟数据
-                for (int i = 0; i < 100; i++)
-                {
-                    float sim_x = 0.01f * (i % 10);
-                    float sim_y = 0.02f * (i % 5);
-                    float sim_z = 0.03f * (i % 3);
-                    algo_welford_update(&algo_ctx, sim_x, sim_y, sim_z);
-                    if (stored_samples < MONITOR_MAX_SAMPLES)
-                    {
-                        s_ax[stored_samples] = sim_x;
-                        s_ay[stored_samples] = sim_y;
-                        s_az[stored_samples] = sim_z;
-                        stored_samples++;
-                    }
-                }
-                total_samples = 100;
-            }
-
-            // --- Put Sensor to Sleep ---
-            // icm42688p_set_sleep(true);
-
-            // --- Calculate RMS with Baseline Correction ---
-            monitor_msg_t msg;
-            memset(&msg, 0, sizeof(msg));
-            msg.type = MONITOR_MSG_TYPE_RMS;
-            msg.payload.rms.timestamp = time(NULL);
-
-            // This calculates: Delta = Raw_RMS - Baseline_Offset
-            algo_welford_finish(&algo_ctx, &g_icm_baseline,
-                                &msg.payload.rms.rms_x,
-                                &msg.payload.rms.rms_y,
-                                &msg.payload.rms.rms_z);
-
-            // --- ISO10816 Velocity RMS (10-1000Hz) ---
-            iso10816_result_t iso_res = {0};
-            float elapsed_sec = (float)((esp_timer_get_time() - start_time) / 1000000.0);
-            if (elapsed_sec > 0 && stored_samples > 0)
-            {
-                // float fs_est = (float)total_samples / elapsed_sec;
-                float fs_est = 0.0f;
-                if (elapsed_sec > 0)
-                {
-                    fs_est = (float)stored_samples / elapsed_sec; // 用 stored_samples，不用 total_samples
-                }
-                iso10816_compute(&iso_state, s_ax, s_ay, s_az, (int)stored_samples, fs_est, &iso_res);
-                LOG_INFOF("ISO10816: fs=%.1fHz, N=%d, v(mm/s) XYZ=%.3f, %.3f, %.3f, 3D=%.3f",
-                          fs_est, (int)stored_samples, iso_res.vx_rms, iso_res.vy_rms, iso_res.vz_rms, iso_res.v3d_rms);
-            }
-            else
-            {
-                LOG_WARN("ISO10816 skipped due to insufficient samples");
-            }
-
-            // --- New unified analyzer call (Welford + ISO + optional FFT) ---
-            if (stored_samples > 0 && elapsed_sec > 0) {
-                float fs_est2 = (float)stored_samples / elapsed_sec;
-
-                // baseline: icm_freq_profile_t -> vib_baseline_t
-                vib_baseline_t bl;
-                bl.x.val = g_icm_baseline.x.val;
-                bl.x.offset = g_icm_baseline.x.offset;
-                bl.y.val = g_icm_baseline.y.val;
-                bl.y.offset = g_icm_baseline.y.offset;
-                bl.z.val = g_icm_baseline.z.val;
-                bl.z.offset = g_icm_baseline.z.offset;
-
-                // cfg: 这里默认不开FFT（避免占用大buffer）；你可按需开启
-                vib_analyzer_cfg_t cfg = {
-                    .fs_fixed = 0.0f,
-                    .fs_tol_hz = 50.0f,
-                    .skip_seconds = 0.25f,
-                    .welford_enable = true,
-                    .iso_enable = true,
-                    .fft_enable = false,
-                    .fft_use_velocity = false,
-                    .fft_npeaks = 5,
-                    .fft_min_freq_hz = 10.0f,
-                    .bands = NULL,
-                    .nbands = 0,
-                };
-
-                // workbuf: 速度临时数组（m/s）
-                static float v_vx[MONITOR_MAX_SAMPLES];
-                static float v_vy[MONITOR_MAX_SAMPLES];
-                static float v_vz[MONITOR_MAX_SAMPLES];
-                vib_analyzer_workbuf_t wb = {
-                    .vx = v_vx,
-                    .vy = v_vy,
-                    .vz = v_vz,
-                    .v_len = MONITOR_MAX_SAMPLES,
-                    .fft_wb = {
-                        .twiddle = NULL,
-                        .twiddle_len = 0,
-                        .work = NULL,
-                        .work_len = 0,
-                    },
-                };
-
-                vib_analyzer_out_t vout;
-                vib_algo_err_t verr = vib_analyze_window(&vib_st,
-                                                         s_ax, s_ay, s_az,
-                                                         (int)stored_samples,
-                                                         fs_est2,
-                                                         &bl,
-                                                         &cfg,
-                                                         &wb,
-                                                         NULL,
-                                                         &vout);
-                if (verr == VIB_ALGO_OK) {
-                    LOG_INFOF("[vib] Welford-corrected RMS(g): X=%.5f Y=%.5f Z=%.5f 3D=%.5f",
-                              vout.welford.fx, vout.welford.fy, vout.welford.fz, vout.welford.f3d);
-                    LOG_INFOF("[vib] ISO10816 VRMS(mm/s): X=%.3f Y=%.3f Z=%.3f 3D=%.3f",
-                              vout.iso.vx_rms_mmps, vout.iso.vy_rms_mmps, vout.iso.vz_rms_mmps, vout.iso.v3d_rms_mmps);
-                } else {
-                    LOG_WARNF("[vib] vib_analyze_window failed: %d", (int)verr);
-                }
-            }
-
-            LOG_DEBUGF("Detect: Samples=%d, RMS(X,Y,Z)=%.3f, %.3f, %.3f",
-                       (int)total_samples, msg.payload.rms.rms_x, msg.payload.rms.rms_y, msg.payload.rms.rms_z);
-
-            // --- Enqueue Data (Black Box Pattern) ---
-            if (g_monitor_queue)
-            {
-                if (uxQueueSpacesAvailable(g_monitor_queue) == 0)
-                {
-                    // Queue full - drop oldest message to maintain real-time monitoring
-                    monitor_msg_t dummy;
-                    xQueueReceive(g_monitor_queue, &dummy, 0);
-                    LOG_WARN("Queue full, dropped oldest msg");
-                }
-                // Non-blocking send (timeout=0)
-                xQueueSend(g_monitor_queue, &msg, 0);
-            }
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            LOG_DEBUG("5 seconds passed. Stopping DMA stream...");
+            drv_icm42688_stop_stream();
+            LOG_DEBUG("Test finished successfully. System idle.");
         }
     }
 }
@@ -241,8 +70,33 @@ esp_err_t task_monitor_start(void)
     if (g_monitor_queue != NULL)
         return ESP_OK; // Already started
 
+    LOG_DEBUG("Starting ICM-42688-P DMA Stream Test...");
+
+    // 第一步：基础物理初始化 (总线和 DMA 内存分配)
+    esp_err_t err = drv_icm42688_init();
+    if (err != ESP_OK)
+    {
+        LOG_DEBUGF("IMU Init failed! Error: %d", err);
+        return ESP_ERR_INVALID_STATE;
+    }
+    LOG_DEBUG("IMU Init OK.");
+
+    // 第二步：动态配置 (1kHz ODR, 16g 量程, 不开启 WoM 休眠唤醒)
+    icm_cfg_t cfg = {
+        .odr = ICM_ODR_1KHZ,
+        .fs = ICM_FS_16G,
+        .enable_wom = false,
+        .wom_thr_mg = 0};
+    err = drv_icm42688_config(&cfg);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("IMU Config failed!");
+        return ESP_ERR_INVALID_STATE;
+    }
+    LOG_DEBUG("IMU Config OK.");
+
     // Create global queue for producer-consumer pattern
-    g_monitor_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(monitor_msg_t));
+    // g_monitor_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(monitor_accel_raw_data_t));
     s_wakeup_sem = xSemaphoreCreateBinary();
 
     // Create hardware timer for periodic wakeup
@@ -255,11 +109,10 @@ esp_err_t task_monitor_start(void)
     int32_t interval_min = g_user_config.detect;
     if (interval_min <= 0)
         interval_min = 1; // Default to 1 min if invalid
-    // uint64_t interval_us = (uint64_t)interval_min * 1000000 / 2;
-    uint64_t interval_us = (uint64_t)interval_min * 3ULL * 1000000ULL;
+    uint64_t interval_us = (uint64_t)interval_min * 10ULL * 1000000ULL;
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, interval_us));
 
-    // Create monitor task
+    // // Create monitor task
     xTaskCreate(monitor_task_loop, "monitor_task", 4096, NULL, 5, NULL);
 
     // Trigger first measurement immediately

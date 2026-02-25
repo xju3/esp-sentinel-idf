@@ -11,9 +11,11 @@
 #include "web_server.h"
 #include "logger.h"
 #include "sdkconfig.h"
-#include "icm42688p_baseline.h"
+#include "vib_baseline.h"
+#include "app_baseline.h"
 #include "task_monitor.h"
 #include "data_dispatcher.h"
+#include "drv_icm_42688_p.h"
 
 extern esp_err_t ppp_4g_init(void);
 
@@ -38,51 +40,41 @@ void start_tasks()
     {
         LOG_INFO("MQTT client initialized successfully");
     }
-    // 确保ICM42688P基线存在（按设备ID），结果写入全局 g_icm_baseline
-    const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
-    err = icm42688p_ensure_baseline(device_id, &g_icm_baseline);
-    if (err == ESP_OK)
+
+    // 初始化硬件底层 (只调用一次)
+    err = drv_icm42688_init();
+    if (err != ESP_OK)
     {
-        LOG_INFOF("Baseline X: val=%.5f off=%.5f, Y: val=%.5f off=%.5f, Z: val=%.5f off=%.5f",
-                  g_icm_baseline.x.val, g_icm_baseline.x.offset,
-                  g_icm_baseline.y.val, g_icm_baseline.y.offset,
-                  g_icm_baseline.z.val, g_icm_baseline.z.offset);
+        LOG_WARNF("ICM42688P initialization failed: %d", err);
+        return;
+    }
+    const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
 
-        // 基线校准成功后，启动监控任务和数据分发任务
-        LOG_INFO("Starting monitor and dispatcher tasks...");
 
-        // 启动生产者任务 (task_monitor)
-        err = task_monitor_start();
-        if (err != ESP_OK)
-        {
-            LOG_ERRORF("Failed to start monitor task: %d", err);
-        }
-        else
-        {
-            LOG_INFO("Monitor task started successfully");
-        }
+    err = app_baseline_capture(g_imu_stream, 1000, &g_baseline, device_id);
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("Baseline capture failed: %d", err);
+        return;
+    }
 
-        // 启动消费者任务 (data_dispatcher)
-        err = data_dispatcher_start();
-        if (err != ESP_OK)
-        {
-            LOG_ERRORF("Failed to start data dispatcher: %d", err);
-        }
-        else
-        {
-            LOG_INFO("Data dispatcher started successfully");
-        }
-
-        LOG_INFO("System initialization complete. Device is now monitoring vibrations.");
+    err = task_monitor_start();
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("Failed to start monitor task: %d", err);
+        return;
     }
     else
     {
-        LOG_WARNF("Baseline ensure failed: %d", err);
-        // 基线校准失败，仍启动任务（使用默认基线值）
-        LOG_WARN("Starting tasks with default baseline values");
-        task_monitor_start();
-        data_dispatcher_start();
+        LOG_INFO("Monitor task started successfully");
     }
+    // 启动消费者任务 (data_dispatcher)
+    err = data_dispatcher_start();
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("Failed to start data dispatcher: %d", err);
+    }
+    LOG_INFO("System initialization complete. Device is now monitoring vibrations.");
 }
 
 void app_main(void)

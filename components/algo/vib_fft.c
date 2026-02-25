@@ -1,6 +1,6 @@
 // core/vib_fft.c
 
-#include "core/vib_fft.h"
+#include "vib_fft.h"
 
 #include <math.h>
 

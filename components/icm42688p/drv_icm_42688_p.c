@@ -35,7 +35,7 @@ static const char *TAG = "DRV_ICM";
 
 // DMA 每次搬运的字节数 (必须是 6 的倍数，因为每组数据 6 字节)
 // 1024 个点 * 6 字节 = 6144 字节。根据内部 SRAM 剩余情况可调整。
-#define DMA_CHUNK_SAMPLES 1024 
+#define DMA_CHUNK_SAMPLES 128
 #define DMA_CHUNK_BYTES   (DMA_CHUNK_SAMPLES * sizeof(icm_raw_data_t))
 
 /* ========================================================================= *
@@ -183,15 +183,16 @@ esp_err_t drv_icm42688_config(const icm_cfg_t *cfg) {
 
     // 1. 电源管理：彻底关闭陀螺仪 (Bit 3:2 = 00)，开启加速度计低噪模式 (Bit 1:0 = 11)
     icm_write_reg(ICM_REG_PWR_MGMT0, 0x03);
-    vTaskDelay(pdMS_TO_TICKS(1)); // 给电容充电留出 1ms 时间
+    //必须等待 MEMS 机械结构和 ADC 彻底稳定！
+    vTaskDelay(pdMS_TO_TICKS(20)); // 给电容充电留出 1ms 时间
 
     // 2. 翻译并下发 ODR 和 FS
     uint8_t accel_cfg = (cfg->fs << 5) | (cfg->odr);
     icm_write_reg(ICM_REG_ACCEL_CONFIG0, accel_cfg);
 
-    // 3. FIFO 路由配置 (极度重要：必须只允许加速度计数据进入 FIFO，否则数据解析全错)
-    // Bit 1 = 1 (Accel 开启), Bit 0 = 0 (Gyro 关闭) -> 0x02
-    icm_write_reg(ICM_REG_FIFO_CONFIG1, 0x02);
+    // 3. FIFO 路由配置 (必须同时开启 Accel 和 Temp 才能完美凑齐 8 字节的 Packet 1)
+    // Bit 0 = 1 (Accel), Bit 2 = 1 (Temp) -> 0x01 | 0x04 = 0x05
+    icm_write_reg(ICM_REG_FIFO_CONFIG1, 0x05);
 
     // 4. FIFO 模式配置：开启 Stream 模式 (0x40)
     icm_write_reg(ICM_REG_FIFO_CONFIG, 0x40);
@@ -215,91 +216,94 @@ static TaskHandle_t  s_dma_task_handle = NULL;
 /* ========================================================================= *
  * 核心引擎：DMA 守护任务 (The Worker Task)
  * ========================================================================= */
-static void icm_dma_worker_task(void *arg) {
+
+ static void icm_dma_worker_task(void *arg) {
     spi_transaction_t trans[2];
     spi_transaction_t *p_trans;
     esp_err_t ret;
 
-    // 清零事务结构体
     memset(trans, 0, sizeof(trans));
 
-    // 配置 Ping 事务 (指向 s_dma_ping 内存)
-    trans[0].length = DMA_CHUNK_BYTES * 8;        // 传输长度 (单位: bits)
-    trans[0].rx_buffer = s_dma_ping;              // DMA 接收终点
-    trans[0].cmd = ICM_REG_FIFO_DATA | 0x80;      // 0x30 寄存器 + 读标志
-    trans[0].user = (void*)0;                     // 自定义标记：代表 Ping
+    // Ping 事务
+    trans[0].length = DMA_CHUNK_BYTES * 8;
+    trans[0].rx_buffer = s_dma_ping;
+    trans[0].cmd = ICM_REG_FIFO_DATA | 0x80;
 
-    // 配置 Pong 事务 (指向 s_dma_pong 内存)
+    // Pong 事务
     trans[1].length = DMA_CHUNK_BYTES * 8;
     trans[1].rx_buffer = s_dma_pong;
     trans[1].cmd = ICM_REG_FIFO_DATA | 0x80;
-    trans[1].user = (void*)1;                     // 自定义标记：代表 Pong
 
-    // 引擎启动：将两个事务同时塞给 SPI 硬件队列
-    // DMA 控制器会自动按顺序处理，先搬运 Ping，完了自动切到 Pong
-    spi_device_queue_trans(s_spi_handle, &trans[0], portMAX_DELAY);
-    spi_device_queue_trans(s_spi_handle, &trans[1], portMAX_DELAY);
+    uint8_t ping_pong_flag = 0;
 
     while (s_stream_running) {
-        // 阻塞等待：直到任意一个 DMA 事务完成
-        // 这里 CPU 是完全挂起的，0 占用率
+        // ==============================================================
+        // 【核心修复：节拍同步】
+        // 在 1kHz ODR 下，IMU 产生 128 个点需要 128 毫秒。
+        // 我们主动挂起当前任务 125 毫秒 (稍微提前一点点，防止 2KB 的 FIFO 溢出)。
+        // 这 125 毫秒内，CPU 占用率为 0%，而硬件 IMU 正在后台默默灌装数据。
+        // ==============================================================
+        vTaskDelay(pdMS_TO_TICKS(125)); 
+
+        // 选定本次使用的 DMA 缓存 (Ping 或 Pong 轮换)
+        spi_transaction_t *t = (ping_pong_flag == 0) ? &trans[0] : &trans[1];
+        ping_pong_flag = !ping_pong_flag;
+
+        // 瞬间出击：派 DMA 去把这 125ms 攒下的数据一波抽干
+        spi_device_queue_trans(s_spi_handle, t, portMAX_DELAY);
+        
+        // 阻塞等待这不到 1 毫秒的纯硬件搬运完成
         ret = spi_device_get_trans_result(s_spi_handle, &p_trans, portMAX_DELAY);
         
-        if (ret == ESP_OK && s_stream_running) {
-            // 触发回调，把刚刚填满的纯净 Raw Data 抛给上层 (task_monitor)
-            if (s_data_cb) {
-                s_data_cb((const icm_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
-            }
-
-            // 核心闭环：把刚刚处理完的这个 Buffer，重新排到硬件队列的末尾
-            // 此时 DMA 正在后台疯狂搬运另一个 Buffer，以此形成永不停止的闭环
-            spi_device_queue_trans(s_spi_handle, p_trans, portMAX_DELAY);
+        if (ret == ESP_OK && s_stream_running && s_data_cb) {
+            // 将纯净的数据抛给上层 (此时数据绝对不会是 -1 了)
+            s_data_cb((const icm_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
         }
     }
 
-    // 清理残余的队列事务 (当 s_stream_running 被设为 false 时退出)
-    // 确保队列被抽干，释放硬件总线
-    int flush_count = 0;
-    while (spi_device_get_trans_result(s_spi_handle, &p_trans, 0) == ESP_OK) {
-        // 事务已被从底层队列拔出。
-        // 因为数据流已停止，我们直接丢弃 p_trans 里的无效数据，不做任何处理。
-        flush_count++;
-    }
-    
-    if (flush_count > 0) {
-        LOG_DEBUGF("Flushed %d residual DMA transactions.", flush_count);
-    }
-
+    // 退出清理
+    while (spi_device_get_trans_result(s_spi_handle, &p_trans, 0) == ESP_OK) {}
     s_dma_task_handle = NULL;
-    vTaskDelete(NULL); // 任务自尽
+    vTaskDelete(NULL);
 }
 
 /* ========================================================================= *
  * 对外接口：启动数据流
  * ========================================================================= */
-esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb) {
+
+ esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb) {
     if (!cb || !s_spi_handle) return ESP_ERR_INVALID_ARG;
     if (s_stream_running) return ESP_ERR_INVALID_STATE;
 
     s_data_cb = cb;
     s_stream_running = true;
 
-    // 1. 发车前必须“冲水”：清空传感器内部 FIFO 的脏数据
-    // SIGNAL_PATH_RESET (0x4B) Bit 1 = 1
-    icm_write_reg(0x4B, 0x02);
-    vTaskDelay(pdMS_TO_TICKS(1)); // 等待硬件重置完成
+    // =========================================================
+    // 【黄金启动序列：严格遵循 TDK 官方 FIFO 状态机】
+    // =========================================================
+    // 1. 先将 FIFO 切入 Bypass 模式 (关停进水阀)
+    icm_write_reg(ICM_REG_FIFO_CONFIG, 0x00);
+    vTaskDelay(pdMS_TO_TICKS(2));
 
-    // 2. 创建 DMA 守护任务
-    // 架构建议：将其绑定到 Core 1，并赋予仅次于最高的优先级
-    // 避免与 Core 0 上的 Wi-Fi/4G 协议栈或系统看门狗发生抢占
+    // 2. 暴力冲洗 FIFO 内部残留的脏数据
+    icm_write_reg(0x4B, 0x02); // SIGNAL_PATH_RESET: FIFO_FLUSH
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    // 3. 重新将 FIFO 切入 Stream 模式 (开启进水阀，开始接水！)
+    icm_write_reg(ICM_REG_FIFO_CONFIG, 0x40);
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    // =========================================================
+
+    // 创建 DMA 守护任务
     xTaskCreatePinnedToCore(
         icm_dma_worker_task, 
         "icm_dma_task", 
         4096, 
         NULL, 
-        configMAX_PRIORITIES - 1, // 极高优先级，确保数据立刻交接
+        configMAX_PRIORITIES - 1,
         &s_dma_task_handle, 
-        1                         // 绑定到 CPU 核心 1
+        1
     );
 
     LOG_INFO("ICM-42688-P DMA Stream Started.");

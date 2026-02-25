@@ -1,7 +1,7 @@
 // features/vib_welford_feature.c
 
-#include "features/vib_welford_feature.h"
-
+#include "vib_welford_feature.h"
+#include "vib_baseline.h"
 #include <math.h>
 
 static float one_axis_feature(const vib_welford_1d_t *s, float base_mean, float base_offset)
@@ -11,24 +11,28 @@ static float one_axis_feature(const vib_welford_1d_t *s, float base_mean, float 
     float var = vib_welford_1d_var_sample(s);
     float dm = mean - base_mean;
     float raw = var + dm * dm;
-    if (raw < 0.0f) raw = 0.0f;
+    if (raw < 0.0f)
+        raw = 0.0f;
     float rms = sqrtf(raw);
     float out = rms - base_offset;
     return (out > 0.0f) ? out : 0.0f;
 }
 
 vib_algo_err_t vib_welford_feature_from_stats(const vib_welford_3d_t *stats,
-                                             const vib_baseline_t *baseline,
-                                             vib_welford_feature_out_t *out)
+                                              vib_welford_feature_out_t *out)
 {
-    if (!stats || !out) return VIB_ALGO_BAD_ARGS;
+    if (!stats || !out)
+        return VIB_ALGO_BAD_ARGS;
 
     float bx = 0.0f, by = 0.0f, bz = 0.0f;
     float ox = 0.0f, oy = 0.0f, oz = 0.0f;
-    if (baseline) {
-        bx = baseline->x.val; by = baseline->y.val; bz = baseline->z.val;
-        ox = baseline->x.offset; oy = baseline->y.offset; oz = baseline->z.offset;
-    }
+
+    bx = g_baseline.x.val;
+    by = g_baseline.y.val;
+    bz = g_baseline.z.val;
+    ox = g_baseline.x.offset;
+    oy = g_baseline.y.offset;
+    oz = g_baseline.z.offset;
 
     out->fx = one_axis_feature(&stats->x, bx, ox);
     out->fy = one_axis_feature(&stats->y, by, oy);

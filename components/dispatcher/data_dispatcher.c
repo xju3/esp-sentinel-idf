@@ -1,5 +1,5 @@
 #include "data_dispatcher.h"
-#include "../monitor/task_monitor.h"
+#include "task_monitor.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "cJSON.h"

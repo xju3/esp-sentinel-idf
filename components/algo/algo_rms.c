@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include "vib_baseline.h"
 
 // esp-dsp: biquad 硬件加速 (ESP32-S3)
 #include "dsps_biquad.h"
@@ -42,7 +43,7 @@ void algo_welford_update(algo_welford_t *ctx, float x, float y, float z) {
 }
 
 void algo_welford_finish(const algo_welford_t *ctx,
-                         const icm_freq_profile_t *baseline,
+                         const vib_baseline_t *baseline,
                          float *out_x, float *out_y, float *out_z)
 {
     if (!ctx || !out_x || !out_y || !out_z) return;

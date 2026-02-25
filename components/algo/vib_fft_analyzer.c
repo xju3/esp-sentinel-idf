@@ -1,6 +1,6 @@
 // features/vib_fft_analyzer.c
 
-#include "features/vib_fft_analyzer.h"
+#include "vib_fft_analyzer.h"
 
 #include <math.h>
 #include <string.h>
