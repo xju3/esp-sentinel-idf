@@ -2,6 +2,8 @@
 #include "icm42688p.h"
 #include "icm42688p_baseline.h"
 #include "algo_rms.h"
+#include "vib_baseline.h"
+#include "app/vib_vibration_analyzer.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "esp_timer.h"
@@ -49,10 +51,15 @@ static void monitor_task_loop(void *arg)
             // vTaskDelay(pdMS_TO_TICKS(WARMUP_DELAY_MS)); // Wait for MEMS stabilization
 
             // --- Initialize Algorithm Context ---
+            // legacy algo ctx (kept until all call sites migrated)
             algo_welford_t algo_ctx;
             algo_welford_init(&algo_ctx);
             iso10816_state_t iso_state;
             iso10816_init(&iso_state);
+
+            // new unified analyzer
+            vib_analyzer_state_t vib_st;
+            vib_analyzer_init(&vib_st);
 
             int64_t start_time = esp_timer_get_time();
             size_t total_samples = 0;
@@ -126,7 +133,6 @@ static void monitor_task_loop(void *arg)
 
             // --- ISO10816 Velocity RMS (10-1000Hz) ---
             iso10816_result_t iso_res = {0};
-            static bool iso_inited = false;
             float elapsed_sec = (float)((esp_timer_get_time() - start_time) / 1000000.0);
             if (elapsed_sec > 0 && stored_samples > 0)
             {
@@ -143,6 +149,71 @@ static void monitor_task_loop(void *arg)
             else
             {
                 LOG_WARN("ISO10816 skipped due to insufficient samples");
+            }
+
+            // --- New unified analyzer call (Welford + ISO + optional FFT) ---
+            if (stored_samples > 0 && elapsed_sec > 0) {
+                float fs_est2 = (float)stored_samples / elapsed_sec;
+
+                // baseline: icm_freq_profile_t -> vib_baseline_t
+                vib_baseline_t bl;
+                bl.x.val = g_icm_baseline.x.val;
+                bl.x.offset = g_icm_baseline.x.offset;
+                bl.y.val = g_icm_baseline.y.val;
+                bl.y.offset = g_icm_baseline.y.offset;
+                bl.z.val = g_icm_baseline.z.val;
+                bl.z.offset = g_icm_baseline.z.offset;
+
+                // cfg: 这里默认不开FFT（避免占用大buffer）；你可按需开启
+                vib_analyzer_cfg_t cfg = {
+                    .fs_fixed = 0.0f,
+                    .fs_tol_hz = 50.0f,
+                    .skip_seconds = 0.25f,
+                    .welford_enable = true,
+                    .iso_enable = true,
+                    .fft_enable = false,
+                    .fft_use_velocity = false,
+                    .fft_npeaks = 5,
+                    .fft_min_freq_hz = 10.0f,
+                    .bands = NULL,
+                    .nbands = 0,
+                };
+
+                // workbuf: 速度临时数组（m/s）
+                static float v_vx[MONITOR_MAX_SAMPLES];
+                static float v_vy[MONITOR_MAX_SAMPLES];
+                static float v_vz[MONITOR_MAX_SAMPLES];
+                vib_analyzer_workbuf_t wb = {
+                    .vx = v_vx,
+                    .vy = v_vy,
+                    .vz = v_vz,
+                    .v_len = MONITOR_MAX_SAMPLES,
+                    .fft_wb = {
+                        .twiddle = NULL,
+                        .twiddle_len = 0,
+                        .work = NULL,
+                        .work_len = 0,
+                    },
+                };
+
+                vib_analyzer_out_t vout;
+                vib_algo_err_t verr = vib_analyze_window(&vib_st,
+                                                         s_ax, s_ay, s_az,
+                                                         (int)stored_samples,
+                                                         fs_est2,
+                                                         &bl,
+                                                         &cfg,
+                                                         &wb,
+                                                         NULL,
+                                                         &vout);
+                if (verr == VIB_ALGO_OK) {
+                    LOG_INFOF("[vib] Welford-corrected RMS(g): X=%.5f Y=%.5f Z=%.5f 3D=%.5f",
+                              vout.welford.fx, vout.welford.fy, vout.welford.fz, vout.welford.f3d);
+                    LOG_INFOF("[vib] ISO10816 VRMS(mm/s): X=%.3f Y=%.3f Z=%.3f 3D=%.3f",
+                              vout.iso.vx_rms_mmps, vout.iso.vy_rms_mmps, vout.iso.vz_rms_mmps, vout.iso.v3d_rms_mmps);
+                } else {
+                    LOG_WARNF("[vib] vib_analyze_window failed: %d", (int)verr);
+                }
             }
 
             LOG_DEBUGF("Detect: Samples=%d, RMS(X,Y,Z)=%.3f, %.3f, %.3f",
