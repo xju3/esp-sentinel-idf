@@ -69,9 +69,7 @@ esp_err_t task_monitor_start(void)
 {
     if (g_monitor_queue != NULL)
         return ESP_OK; // Already started
-
     LOG_DEBUG("Starting ICM-42688-P DMA Stream Test...");
-
     // 第一步：基础物理初始化 (总线和 DMA 内存分配)
     esp_err_t err = drv_icm42688_init();
     if (err != ESP_OK)

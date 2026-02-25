@@ -11,7 +11,6 @@
 #include "web_server.h"
 #include "logger.h"
 #include "sdkconfig.h"
-#include "vib_baseline.h"
 #include "app_baseline.h"
 #include "task_monitor.h"
 #include "data_dispatcher.h"
@@ -51,7 +50,7 @@ void start_tasks()
     const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
 
 
-    err = app_baseline_capture(g_imu_stream, 1000, &g_baseline, device_id);
+    err = set_device_baseline(1000, &g_baseline, device_id);
     if (err != ESP_OK)
     {
         LOG_WARNF("Baseline capture failed: %d", err);

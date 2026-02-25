@@ -49,6 +49,9 @@ static uint8_t *s_dma_ping = NULL;
 static uint8_t *s_dma_pong = NULL;
 
 
+static bool icm_42688_p_initialized = false;
+
+
 /* ========================================================================= *
  * 底层 SPI 读写辅助函数
  * ========================================================================= */
@@ -122,6 +125,11 @@ esp_err_t enable_icm42688p_wom(uint8_t threshold_mg)
  * 阶段一：基础物理初始化 (总线与内存分配)
  * ========================================================================= */
 esp_err_t drv_icm42688_init(void) {
+    
+    if (icm_42688_p_initialized) {
+        LOG_DEBUG("ICM-42688-P already initialized!");
+        return ESP_OK;
+    }
     esp_err_t ret;
 
     // 1. 初始化 SPI 总线 (启用 DMA 控制器，通常为 SPI2 或 SPI3)
@@ -170,7 +178,7 @@ esp_err_t drv_icm42688_init(void) {
         LOG_ERRORF("ICM-42688-P not found! WHO_AM_I = 0x%02X", who_am_i);
         return ESP_ERR_NOT_FOUND;
     }
-
+    icm_42688_p_initialized = true;
     LOG_INFO("ICM-42688-P Initialized with DMA buffers.");
     return ESP_OK;
 }

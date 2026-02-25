@@ -16,19 +16,22 @@
 static const char *TAG = "APP_BASELINE";
 #define LSB_TO_G (16.0f / 32768.0f)
 
+// Global StreamBuffer handle (created/managed by app layer)
+StreamBufferHandle_t g_imu_stream = NULL;
 
 static void app_basline_imu_data_callback(const icm_raw_data_t *data, size_t count)
 {
     static uint32_t chunk_counter = 0;
     chunk_counter++;
-    if (count > 0 && (chunk_counter % 10 == 0)) {
+    if (count > 0 && (chunk_counter % 10 == 0))
+    {
         // ICM 传感器硬件输出是大端(Big-Endian)，ESP32 内存是小端(Little-Endian)
         // 必须进行一次字节翻转才能得到真实的整型数值
         int16_t real_x = (int16_t)__builtin_bswap16((uint16_t)data[0].x);
         int16_t real_y = (int16_t)__builtin_bswap16((uint16_t)data[0].y);
         int16_t real_z = (int16_t)__builtin_bswap16((uint16_t)data[0].z);
         // 顺便把 Header 打出来，如果配置正确，Header 的 Bit6 应该是 1 (代表 Accel)
-        ESP_LOGI("IMU_TEST", "Chunk #%lu | Header: 0x%02X | X=%d, Y=%d, Z=%d", 
+        ESP_LOGI("IMU_TEST", "Chunk #%lu | Header: 0x%02X | X=%d, Y=%d, Z=%d",
                  chunk_counter, data[0].header, real_x, real_y, real_z);
     }
 }
@@ -151,40 +154,9 @@ static void append_entry(const char *device_id, const vib_baseline_t *p)
     cJSON_Delete(root);
 }
 
-esp_err_t set_device_baseline(uint32_t duration_ms,
-                               vib_baseline_t *out_bl, const char *device_id)
-{
-
-    bool existing = load_existing(device_id, out_bl);
-    if (existing) {
-        LOG_DEBUGF("baseline: %f, %f, %f", out_bl->x.val, out_bl->y.val, out_bl->z.val);
-        return ESP_OK;
-    }
-
-    g_imu_stream = xStreamBufferCreate(IMU_STREAM_SIZE, 1);
-    if (g_imu_stream == NULL) {
-        LOG_ERROR("Failed to create stream buffer!");
-        vTaskDelete(NULL);
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    xStreamBufferReset(g_imu_stream);
-    icm_cfg_t cfg = {.odr = ICM_ODR_1KHZ, .fs = ICM_FS_16G};
-    drv_icm42688_config(&cfg);
-    esp_err_t err = drv_icm42688_start_stream(app_basline_imu_data_callback);
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Stream start failed!");
-    }
-    drv_icm42688_stop_stream();
-    append_entry(device_id, out_bl);
-    return ESP_OK;
-    
-}
-
-esp_err_t app_baseline_capture(StreamBufferHandle_t stream,
-                               uint32_t duration_ms,
-                               vib_baseline_t *out_bl, const char *device_id)
+static esp_err_t app_baseline_capture(StreamBufferHandle_t stream,
+                                      uint32_t duration_ms,
+                                      vib_baseline_t *out_bl, const char *device_id)
 {
     if (!stream || !out_bl)
         return ESP_ERR_INVALID_ARG;
@@ -242,5 +214,54 @@ esp_err_t app_baseline_capture(StreamBufferHandle_t stream,
     out_bl->y.offset = sqrtf(vib_welford_1d_var_sample(&welford_st.y));
     out_bl->z.offset = sqrtf(vib_welford_1d_var_sample(&welford_st.z));
     LOG_DEBUGF("Baseline Capture Done! Processed %lu samples.", total_samples);
+    return ESP_OK;
+}
+
+esp_err_t set_device_baseline(uint32_t duration_ms,
+                              vib_baseline_t *out_bl, const char *device_id)
+{
+
+    if (g_imu_stream)
+    {
+        LOG_WARN("g_imu_stream already exists!");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    bool existing = load_existing(device_id, out_bl);
+    if (existing)
+    {
+        LOG_DEBUGF("baseline: %f, %f, %f", out_bl->x.val, out_bl->y.val, out_bl->z.val);
+        return ESP_OK;
+    }
+
+    g_imu_stream = xStreamBufferCreate(IMU_STREAM_SIZE, 1);
+    if (g_imu_stream == NULL)
+    {
+        LOG_ERROR("Failed to create stream buffer!");
+        vTaskDelete(NULL);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xStreamBufferReset(g_imu_stream);
+    icm_cfg_t cfg = {.odr = ICM_ODR_1KHZ, .fs = ICM_FS_16G};
+    drv_icm42688_config(&cfg);
+    esp_err_t err = drv_icm42688_start_stream(app_basline_imu_data_callback);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("Stream start failed!");
+    }
+    // 4. 调用我们的外包函数，把水管交给它，让它处理 3000 毫秒
+    // 此时，本任务会进入阻塞状态，在内部循环喝水、算 Welford
+    err = app_baseline_capture(g_imu_stream, 3000, &g_baseline, device_id);
+    if (err == ESP_OK)
+    {
+        ESP_LOGI(TAG, "Baseline generation success!");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Baseline generation failed!");
+    }
+    drv_icm42688_stop_stream();
+    append_entry(device_id, out_bl);
     return ESP_OK;
 }

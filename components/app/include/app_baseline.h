@@ -12,9 +12,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-esp_err_t app_baseline_capture(StreamBufferHandle_t stream, 
-                               uint32_t duration_ms, 
-                               vib_baseline_t *out_bl, const char *device_id); 
+esp_err_t set_device_baseline(uint32_t duration_ms,
+                               vib_baseline_t *out_bl, const char *device_id);
 
 #ifdef __cplusplus
 }
