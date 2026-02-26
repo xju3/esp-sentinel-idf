@@ -8,8 +8,6 @@
 #include "algo_pdm.h"
 #include "algo_dsp_utils.h"
 #include <math.h>
-#include <stdio.h>
-#include <inttypes.h>
 
 /* ========================================================================= *
  * PUBLIC API IMPLEMENTATION
@@ -147,18 +145,39 @@ void algo_welford_combine(algo_welford_ctx_t *result,
 }
 
 /**
- * @brief Get current statistics as a formatted string (for debugging)
+ * @brief Get current statistics as individual values (for debugging)
+ * @details Provides all statistics as separate output parameters
  */
-void algo_welford_to_string(const algo_welford_ctx_t *ctx, char *buffer, size_t buffer_size)
+void algo_welford_get_all_stats(const algo_welford_ctx_t *ctx,
+                                uint32_t *count,
+                                float *mean,
+                                float *std_dev,
+                                float *min_val,
+                                float *max_val)
 {
-    if (ctx == NULL || buffer == NULL || buffer_size == 0) {
+    if (ctx == NULL) {
+        if (count) *count = 0;
+        if (mean) *mean = 0.0f;
+        if (std_dev) *std_dev = 0.0f;
+        if (min_val) *min_val = 0.0f;
+        if (max_val) *max_val = 0.0f;
         return;
     }
     
-    float mean, variance, std_dev;
-    algo_welford_get_stats(ctx, &mean, &variance, &std_dev);
+    if (count) *count = ctx->count;
+    if (min_val) *min_val = ctx->min_val;
+    if (max_val) *max_val = ctx->max_val;
     
-    snprintf(buffer, buffer_size,
-             "Count: %" PRIu32 ", Mean: %.6f, StdDev: %.6f, Min: %.6f, Max: %.6f",
-             ctx->count, mean, std_dev, ctx->min_val, ctx->max_val);
+    if (ctx->count == 0) {
+        if (mean) *mean = 0.0f;
+        if (std_dev) *std_dev = 0.0f;
+        return;
+    }
+    
+    if (mean) *mean = (float)ctx->mean;
+    
+    if (std_dev) {
+        double var = (ctx->count > 1) ? (ctx->m2 / (ctx->count - 1)) : 0.0;
+        *std_dev = (float)sqrt(var);
+    }
 }

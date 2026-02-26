@@ -3,6 +3,7 @@
 
 idf_component_register(
     SRCS
+        "src/algo_pdm.c"
         "src/algo_ingest.c"
         "src/algo_dsp_utils.c"
         "src/algo_welford.c"

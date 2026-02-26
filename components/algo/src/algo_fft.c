@@ -25,12 +25,33 @@ static size_t g_max_fft_size = 0;
 void algo_fft_init(size_t max_fft_size)
 {
     if (g_fft_initialized) {
+        ALGO_LOGW("fft", "FFT already initialized");
         return; // Already initialized
     }
     
-    // For now, just set the flag and size
+    // Validate FFT size
+    if (max_fft_size == 0) {
+        ALGO_LOGE("fft", "Invalid FFT size: 0");
+        return;
+    }
+    
+    // Check if size is power of 2
+    if ((max_fft_size & (max_fft_size - 1)) != 0) {
+        ALGO_LOGW("fft", "FFT size %zu is not power of 2, rounding up", max_fft_size);
+        // Find next power of 2
+        size_t next_pow2 = 1;
+        while (next_pow2 < max_fft_size) {
+            next_pow2 <<= 1;
+        }
+        max_fft_size = next_pow2;
+        ALGO_LOGI("fft", "Using FFT size: %zu", max_fft_size);
+    }
+    
+    // Set the flag and size
     g_max_fft_size = max_fft_size;
     g_fft_initialized = true;
+    
+    ALGO_LOGI("fft", "FFT initialized with max size: %zu", max_fft_size);
 }
 
 void algo_fft_execute(const float *input, size_t n, float *work_buf, float *output)

@@ -12,6 +12,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <math.h>
+#include <stdarg.h>
 
 // Include the full definition of imu_raw_data_t
 #include "algo_pdm.h"
@@ -19,6 +20,47 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ========================================================================= *
+ * INTERNAL LOGGING MACROS (Safe, NULL-checked)
+ * ========================================================================= */
+
+// Forward declaration of internal logging function
+void _algo_log_internal(algo_log_level_t level, const char *tag, 
+                        const char *fmt, ...);
+
+/**
+ * @brief Internal logging macro with NULL safety
+ * @details Expands to safe logging call only if logging callback is registered
+ */
+#define ALGO_LOG_INTERNAL(level, tag, fmt, ...) \
+    do { \
+        _algo_log_internal(level, tag, fmt, ##__VA_ARGS__); \
+    } while (0)
+
+/**
+ * @brief Error logging macro
+ */
+#define ALGO_LOGE(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_ERROR, tag, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Warning logging macro
+ */
+#define ALGO_LOGW(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_WARN, tag, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Info logging macro
+ */
+#define ALGO_LOGI(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_INFO, tag, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief Debug logging macro
+ */
+#define ALGO_LOGD(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_DEBUG, tag, fmt, ##__VA_ARGS__)
 
 /* ========================================================================= *
  * 1. DATA INGESTION UTILITIES

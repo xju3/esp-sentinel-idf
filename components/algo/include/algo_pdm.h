@@ -9,6 +9,7 @@
  * 2. Zero dynamic memory allocation - All buffers allocated by caller
  * 3. Hardware acceleration priority - Use esp-dsp for FFT, FIR/IIR
  * 4. Efficient data ingestion - Handle packed big-endian int16_t DMA data
+ * 5. Zero hardcoded logging - All logging via callback injection
  */
 
 #ifndef ALGO_PDM_H
@@ -18,13 +19,38 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <math.h>
+#include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* ========================================================================= *
- * 1. PHYSICAL LAYER DATA DEFINITIONS
+ * 1. LOGGING SYSTEM DEFINITIONS
+ * ========================================================================= */
+
+/**
+ * @brief Logging levels for algorithm library
+ */
+typedef enum {
+    ALGO_LOG_ERROR = 0,     // Error conditions
+    ALGO_LOG_WARN  = 1,     // Warning conditions
+    ALGO_LOG_INFO  = 2,     // Informational messages
+    ALGO_LOG_DEBUG = 3      // Debug-level messages
+} algo_log_level_t;
+
+/**
+ * @brief Logging callback function type
+ * @param level Log level
+ * @param tag Log tag (module identifier)
+ * @param fmt Format string (printf-style)
+ * @param args Variable arguments list
+ */
+typedef void (*algo_log_cb_t)(algo_log_level_t level, const char *tag, 
+                              const char *fmt, va_list args);
+
+/* ========================================================================= *
+ * 2. PHYSICAL LAYER DATA DEFINITIONS
  * ========================================================================= */
 
 // imu_raw_data_t is defined in algo_types.h
@@ -81,7 +107,20 @@ typedef struct {
 } algo_fft_ctx_t;
 
 /* ========================================================================= *
- * 3. TOP-LEVEL API FUNCTIONS (Application Interface Layer)
+ * 3. GLOBAL CONFIGURATION
+ * ========================================================================= */
+
+/**
+ * @brief Global algorithm library configuration
+ * @note All fields are optional. If log_cb is NULL, logging is silently ignored.
+ */
+typedef struct {
+    algo_log_cb_t log_cb;           // Logging callback function (optional)
+    // Future configuration fields can be added here
+} algo_config_t;
+
+/* ========================================================================= *
+ * 4. TOP-LEVEL API FUNCTIONS (Application Interface Layer)
  * ========================================================================= */
 
 /**
@@ -125,6 +164,22 @@ void algo_welford_update(algo_welford_ctx_t *ctx,
  */
 void algo_welford_get_stats(const algo_welford_ctx_t *ctx,
                             float *mean, float *variance, float *std_dev);
+
+/**
+ * @brief [WELFORD] Get all statistics as separate values
+ * @param ctx Welford context
+ * @param count Output: sample count
+ * @param mean Output: current mean value
+ * @param std_dev Output: current standard deviation
+ * @param min_val Output: minimum value observed
+ * @param max_val Output: maximum value observed
+ */
+void algo_welford_get_all_stats(const algo_welford_ctx_t *ctx,
+                                uint32_t *count,
+                                float *mean,
+                                float *std_dev,
+                                float *min_val,
+                                float *max_val);
 
 /**
  * @brief [RMS] Calculate Root Mean Square of float array
@@ -186,6 +241,20 @@ void algo_fft_init(size_t max_fft_size);
  * @param output Magnitude spectrum output (length N/2 float)
  */
 void algo_fft_execute(const float *input, size_t n, float *work_buf, float *output);
+
+/* ========================================================================= *
+ * 5. MODULE INITIALIZATION
+ * ========================================================================= */
+
+/**
+ * @brief Initialize the algorithm library with global configuration
+ * @details This is the ONLY initialization interface for the algorithm library.
+ *          Must be called once before using any algorithm functions.
+ *          Uses static storage for configuration - zero malloc.
+ * @param config Configuration structure (can be NULL for default config)
+ * @return 0 on success, negative error code on failure
+ */
+int algo_pdm_init(const algo_config_t *config);
 
 #ifdef __cplusplus
 }
