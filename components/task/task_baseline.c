@@ -13,8 +13,12 @@
 #include <stdlib.h>
 #include <math.h>
 #include "daq_icm_42688_p.h"
+#include "algo_types.h"
 
 #define LSB_TO_G (16.0f / 32768.0f)
+
+// Define global baseline variable
+vib_baseline_t g_baseline = {0};
 
 // 1. 专属的业务数据处理算子
 static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)

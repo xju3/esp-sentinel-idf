@@ -1,5 +1,5 @@
 #include "task_monitor.h"
-#include "algo_rms.h"
+#include "algo_pdm.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "esp_timer.h"
@@ -45,15 +45,29 @@ static void monitor_task_loop(void *arg)
         .fs = ICM_FS_16G,
         .enable_wom = false,
         .wom_thr_mg = 0};
-    vib_welford_3d_t current_stats;
-    vib_welford_3d_init(&current_stats);
+    algo_welford_ctx_t welford_ctx;
+    // Initialize welford context (zero it out)
+    welford_ctx.count = 0;
+    welford_ctx.mean = 0.0;
+    welford_ctx.m2 = 0.0;
+    welford_ctx.min_val = 0.0f;
+    welford_ctx.max_val = 0.0f;
+    
     while (1)
     {
         if (xSemaphoreTake(s_wakeup_sem, portMAX_DELAY) == pdTRUE)
         {
-            daq_icm_42688_p_capture(&cfg, SAMPLE_DURATION_MS, monitor_chunk_handler, &current_stats, DAQ_CHUNK_SIZE);
-            vib_welford_feature_out_t features;
-            vib_welford_feature_from_stats(&current_stats, &features);
+            // TODO: Implement actual data processing
+            // For now, just reset the context
+            welford_ctx.count = 0;
+            welford_ctx.mean = 0.0;
+            welford_ctx.m2 = 0.0;
+            welford_ctx.min_val = 0.0f;
+            welford_ctx.max_val = 0.0f;
+            
+            // Get statistics
+            float mean, variance, std_dev;
+            algo_welford_get_stats(&welford_ctx, &mean, &variance, &std_dev);
         }
     }
 }

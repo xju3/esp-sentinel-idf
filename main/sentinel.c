@@ -75,7 +75,7 @@ void start_tasks()
         LOG_ERRORF("Failed to start monitor task: %d", err);
         return;
     }
-    
+
     // 启动消费者任务 (data_dispatcher)
     err = data_dispatcher_start();
     if (err != ESP_OK)
@@ -106,7 +106,6 @@ void app_main(void)
     }
     bool enable_netwokd_channel = false;
     esp_err_t err = ESP_OK;
-
     if (g_user_config.network == 1)
     {
         // 初始化 4G 模组

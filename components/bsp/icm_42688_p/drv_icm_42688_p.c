@@ -19,7 +19,7 @@
 #define ICM_REG_FIFO_DATA       0x30
 
 // SPI 引脚定义 (需根据实际硬件原理图修改)
-#define PIN_NUM_MISO GPIO_NUM_13
+#define PIN_NUM_MISO GPIO_NUM_9
 #define PIN_NUM_MOSI GPIO_NUM_11
 #define PIN_NUM_CLK  GPIO_NUM_12
 #define PIN_NUM_CS   GPIO_NUM_10

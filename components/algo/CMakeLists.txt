@@ -1,24 +1,22 @@
+# ESP-IDF Component for Predictive Maintenance Algorithms
+# Pure DSP library with zero external dependencies (except esp-dsp)
+
 idf_component_register(
-    # Legacy sources kept for backward compatibility (still referenced by monitor/task_monitor.c)
-    # You can remove them after migrating upper-layer call sites.
     SRCS
-        algo_rms.c
-        algo_fft_core.cpp
-        iso_10816.cpp
+        "src/algo_ingest.c"
+        "src/algo_dsp_utils.c"
+        "src/algo_welford.c"
+        "src/algo_rms.c"
+        "src/algo_kurtosis.c"
+        "src/algo_envelope.c"
+        "src/algo_fft.c"
 
-        # New modular vibration algorithm library (pure C, no malloc)
-        algo_biquad.c
-        algo_fft.c
+    INCLUDE_DIRS
+        "include"
 
-        algo_baseline.c
+    PRIV_INCLUDE_DIRS
+        "private_include"
 
-        algo_welford_feature.c
-        algo_accel_to_velocity.c
-        algo_iso10816.c
-        algo_fft_analyzer.c
-        algo_kurtosis.c
-        algo_envelope.c
-
-    INCLUDE_DIRS include .
-    REQUIRES esp-dsp config logger fs_utils
+    REQUIRES
+        esp-dsp
 )
