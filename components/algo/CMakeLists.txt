@@ -20,5 +20,5 @@ idf_component_register(
         algo_envelope.c
 
     INCLUDE_DIRS include .
-    REQUIRES esp-dsp icm_42688_p config logger fs_utils
+    REQUIRES esp-dsp config logger fs_utils
 )

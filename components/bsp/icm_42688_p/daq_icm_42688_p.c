@@ -17,11 +17,11 @@ esp_err_t daq_icm_42688_p_init(void)
     return drv_icm42688_init();
 }
 // 永远不变的底层私有抽水机
-static void daq_internal_dma_callback(const icm_raw_data_t *data, size_t count)
+static void daq_internal_dma_callback(const imu_raw_data_t *data, size_t count)
 {
     if (s_daq_stream)
     {
-        xStreamBufferSend(s_daq_stream, data, count * sizeof(icm_raw_data_t), 0);
+        xStreamBufferSend(s_daq_stream, data, count * sizeof(imu_raw_data_t), 0);
     }
 }
 
@@ -45,28 +45,28 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg,
     }
 
     if (s_last_chunck_count == 0) {
-        s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(icm_raw_data_t) * chunck_count);
+        s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(imu_raw_data_t) * chunck_count);
         if (s_daq_stream == NULL) {
             LOG_WARN("Fatal Error: Failed to create DAQ stream!");
             return ESP_ERR_NO_MEM;
         }
     } else if (s_last_chunck_count != chunck_count)
     {
-        xStreamBufferSetTriggerLevel(s_daq_stream, sizeof(icm_raw_data_t) * chunck_count);
+        xStreamBufferSetTriggerLevel(s_daq_stream, sizeof(imu_raw_data_t) * chunck_count);
     }
     s_last_chunck_count = chunck_count; // 记住当前状态
 
     drv_icm42688_start_stream(daq_internal_dma_callback);
 
     int64_t end_time_us = esp_timer_get_time() + (int64_t)duration_ms * 1000;
-    icm_raw_data_t rx_buf[chunck_count];
+    imu_raw_data_t rx_buf[chunck_count];
 
     while (esp_timer_get_time() < end_time_us)
     {
         size_t bytes = xStreamBufferReceive(s_daq_stream, rx_buf, sizeof(rx_buf), pdMS_TO_TICKS(100));
         if (bytes > 0)
         {
-            size_t count = bytes / sizeof(icm_raw_data_t);
+            size_t count = bytes / sizeof(imu_raw_data_t);
             handler(rx_buf, count, user_ctx);
         }
     }

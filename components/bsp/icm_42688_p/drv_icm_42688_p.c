@@ -34,7 +34,7 @@
 // DMA 每次搬运的字节数 (必须是 6 的倍数，因为每组数据 6 字节)
 // 1024 个点 * 6 字节 = 6144 字节。根据内部 SRAM 剩余情况可调整。
 #define DMA_CHUNK_SAMPLES 128
-#define DMA_CHUNK_BYTES   (DMA_CHUNK_SAMPLES * sizeof(icm_raw_data_t))
+#define DMA_CHUNK_BYTES   (DMA_CHUNK_SAMPLES * sizeof(imu_raw_data_t))
 
 /* ========================================================================= *
  * 内部静态状态变量
@@ -263,7 +263,7 @@ static TaskHandle_t  s_dma_task_handle = NULL;
         
         if (ret == ESP_OK && s_stream_running && s_data_cb) {
             // 将纯净的数据抛给上层 (此时数据绝对不会是 -1 了)
-            s_data_cb((const icm_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
+            s_data_cb((const imu_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
         }
     }
 

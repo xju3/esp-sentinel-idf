@@ -7,7 +7,7 @@
 #define FFT_CHUNCK_SIZE  128
 
 
-static void fft_chunk_handler(const icm_raw_data_t *data, size_t count, void *ctx)
+static void fft_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
     fft_capture_ctx_t *fft_ctx = (fft_capture_ctx_t *)ctx;
     

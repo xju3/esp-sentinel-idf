@@ -17,7 +17,7 @@
 #define LSB_TO_G (16.0f / 32768.0f)
 
 // 1. 专属的业务数据处理算子
-static void baseline_chunk_handler(const icm_raw_data_t *data, size_t count, void *ctx)
+static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
     vib_welford_3d_t *welford_st = (vib_welford_3d_t *)ctx;
     for (size_t i = 0; i < count; i++)

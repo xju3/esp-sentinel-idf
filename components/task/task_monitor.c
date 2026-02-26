@@ -27,7 +27,7 @@ static esp_timer_handle_t s_timer = NULL;
 
 
 // 专属的日常巡检处理算子
-static void monitor_chunk_handler(const icm_raw_data_t *data, size_t count, void *ctx)
+static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
     // vib_welford_3d_t *current_stats = (vib_welford_3d_t *)ctx;
     // ... 大小端转换并塞入 current_stats ...

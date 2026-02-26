@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "algo_types.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -23,23 +24,8 @@ extern "C"
      * 1. 核心数据结构定义 (纯数据，无业务逻辑)
      * ========================================================================= */
 
-    /**
-     * @brief 三轴加速度原始数据 (Raw Data)
-     * @note 必须保持为 int16_t 以最小化 DMA 搬运带宽和 PSRAM 占用
-     * __attribute__((packed)), 结构体上加了这个修饰符。
-     * 因为 C 语言编译器有时会为了内存对齐而在结构体里塞入空白字节（Padding）。
-     * 加了强制紧凑修饰后，确保结构体大小永远是绝对的 6 个字节（X,Y,Z 各 2 字节）。
-     * 这对于 DMA 直接把 SPI 硬件流映射到内存结构体至关重要，哪怕错位 1 个字节，整个波形就全毁了。
-     */
-
-    typedef struct
-    {
-        uint8_t header; // 包头 (标识数据有效性等)
-        int16_t x;      // 原始 X 轴 (注意：内部为大端模式)
-        int16_t y;      // 原始 Y 轴
-        int16_t z;      // 原始 Z 轴
-        int8_t temp;    // 8位截断温度辅助数据
-    } __attribute__((packed)) icm_raw_data_t;
+    // Note: imu_raw_data_t is now defined in algo_types.h
+    // This allows the algorithm layer to be independent of hardware-specific types
 
     /**
      * @brief 采样率 (ODR) 枚举
@@ -85,10 +71,10 @@ extern "C"
      * @note 该回调运行在极高优先级任务或 ISR 上下文中，严禁在此执行 printf 或大运算！
      * 上层只需将 data 块 memcpy 到 PSRAM 的 RingBuffer 中即可。
      * 明确告诉上层业务逻辑：
-     * 这个由驱动底层传上来的 DMA 内存块是“只读”的，
+     * 这个由驱动底层传上来的 DMA 内存块是"只读"的，
      * 上层（如 task_monitor）只能把它 Copy 走，绝对不能在这块极速交替的内存里原地做修改。
      */
-    typedef void (*icm_data_cb_t)(const icm_raw_data_t *data, size_t count);
+    typedef void (*icm_data_cb_t)(const imu_raw_data_t *data, size_t count);
 
     /* ========================================================================= *
      * 3. 驱动层 API (三阶段状态机)
