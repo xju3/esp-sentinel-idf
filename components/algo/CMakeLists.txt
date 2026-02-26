@@ -3,22 +3,22 @@ idf_component_register(
     # You can remove them after migrating upper-layer call sites.
     SRCS
         algo_rms.c
-        fft_core.cpp
+        algo_fft_core.cpp
         iso_10816.cpp
 
         # New modular vibration algorithm library (pure C, no malloc)
-        vib_biquad.c
-        vib_fft.c
+        algo_biquad.c
+        algo_fft.c
 
-        vib_baseline.c
+        algo_baseline.c
 
-        vib_welford_feature.c
-        vib_accel_to_velocity.c
-        vib_iso10816.c
-        vib_fft_analyzer.c
-        vib_kurtosis.c
-        vib_envelope.c
+        algo_welford_feature.c
+        algo_accel_to_velocity.c
+        algo_iso10816.c
+        algo_fft_analyzer.c
+        algo_kurtosis.c
+        algo_envelope.c
 
     INCLUDE_DIRS include .
-    REQUIRES esp-dsp icm42688p config logger fs_utils app
+    REQUIRES esp-dsp icm42688p config logger fs_utils
 )

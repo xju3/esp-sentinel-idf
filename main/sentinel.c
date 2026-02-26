@@ -11,10 +11,10 @@
 #include "web_server.h"
 #include "logger.h"
 #include "sdkconfig.h"
-#include "app_baseline.h"
+#include "task_baseline.h"
 #include "task_monitor.h"
 #include "data_dispatcher.h"
-#include "drv_icm_42688_p.h"
+#include "daq_icm_42688_p.h"
 
 extern esp_err_t ppp_4g_init(void);
 
@@ -47,6 +47,16 @@ void start_tasks()
         LOG_WARNF("ICM42688P initialization failed: %d", err);
         return;
     }
+
+    // 初始化 data acquisition engine.
+    err = daq_icm_42688_p_init();
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("System DAQ initialization failed: %d", err);
+        return;
+    }
+
+    // 获取设备 ID
     const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
     // 获取设备的基准姿态
     err = set_device_baseline(1000, device_id);
@@ -62,10 +72,6 @@ void start_tasks()
     {
         LOG_ERRORF("Failed to start monitor task: %d", err);
         return;
-    }
-    else
-    {
-        LOG_INFO("Monitor task started successfully");
     }
     
     // 启动消费者任务 (data_dispatcher)

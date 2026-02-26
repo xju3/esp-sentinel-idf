@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "sentinel.c"
     INCLUDE_DIRS "."
-    REQUIRES algo config network web nvs_flash logger icm42688p app dispatcher
+    REQUIRES algo config network web nvs_flash logger icm42688p task dispatcher
 )

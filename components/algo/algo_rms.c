@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
-#include "vib_baseline.h"
+#include "algo_baseline.h"
 
 // esp-dsp: biquad 硬件加速 (ESP32-S3)
 #include "dsps_biquad.h"

@@ -24,7 +24,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdbool.h>
-#include "vib_baseline.h"
+#include "algo_baseline.h"
 
 #ifdef __cplusplus
 extern "C" {
