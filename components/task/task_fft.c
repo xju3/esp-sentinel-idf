@@ -1,4 +1,3 @@
-#include "app_baseline.h"
 #include "drv_icm_42688_p.h"
 #include "daq_icm_42688_p.h"
 #include "app_fft.h"

@@ -17,5 +17,6 @@ void ppp_init_4g(void);
 
 #ifdef __cplusplus
 }
+#endif
 
 #endif /* PPP_4G_H_ */

@@ -6,13 +6,11 @@
 #include "esp_random.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
-#include "network_manager.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "logger.h"
-#include "../web/include/web_server.h"
 
 // 声明 captive DNS 函数（在 captive_dns.c 中定义）
 void captive_dns_start(void);

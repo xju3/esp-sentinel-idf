@@ -6,8 +6,9 @@
 #include "lwip/sockets.h"
 
 #include "nvs_flash.h"
-#include "wifi.h"
-#include "mqtt_client.h"
+#include "core_wifi.h"
+#include "ppp_4g.h"
+#include "mqtt_proxy.h"
 #include "config_manager.h"
 #include "web_server.h"
 #include "logger.h"

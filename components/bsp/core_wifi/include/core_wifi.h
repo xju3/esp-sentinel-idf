@@ -1,5 +1,5 @@
-#ifndef WIFI_H_
-#define WIFI_H_
+#ifndef CORE_WIFI_H
+#define CORE_WIFI_H
 
 #include "esp_err.h"
 #include "esp_event.h"
@@ -60,5 +60,6 @@ esp_err_t wifi_common_init(bool create_ap, bool create_sta);
 
 #ifdef __cplusplus
 }
+#endif
 
-#endif /* WIFI_H_ */
+#endif /* CORE_WIFI_H */
