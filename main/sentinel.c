@@ -17,6 +17,7 @@
 #include "task_monitor.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
+#include "task_baseline.h"
 
 extern esp_err_t ppp_4g_init(void);
 

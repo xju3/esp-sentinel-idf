@@ -33,6 +33,16 @@ static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, voi
     }
 }
 
+static void print_baseline()
+{
+    LOG_DEBUGF("baseline: %f, %f, %f, %f, %f, %f",
+               g_baseline.x.val,
+               g_baseline.y.val,
+               g_baseline.z.val,
+               g_baseline.x.offset,
+               g_baseline.y.offset,
+               g_baseline.z.offset);
+}
 
 static bool load_existing(const char *device_id, vib_baseline_t *out)
 {
@@ -155,10 +165,10 @@ static void append_entry(const char *device_id, const vib_baseline_t *p)
 
 esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
 {
-
     bool existing = load_existing(device_id, &g_baseline);
     if (existing)
     {
+        print_baseline();
         return ESP_OK;
     }
 
@@ -193,7 +203,6 @@ esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
         return ESP_ERR_INVALID_STATE;
     }
     append_entry(device_id, &g_baseline);
-    LOG_DEBUGF(" device baseline value: %f, %f, %f", g_baseline.x.val, g_baseline.y.val, g_baseline.z.val);
-    LOG_DEBUGF("device baseline offset: %f, %f, %f", g_baseline.x.offset, g_baseline.y.offset, g_baseline.z.offset);
+    print_baseline();
     return ESP_OK;
 }
