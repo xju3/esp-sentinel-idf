@@ -1,7 +1,7 @@
+#include "mqtt_proxy.h"
 #include "mqtt_client.h"
 #include "config_manager.h"
 #include "logger.h"
-#include "mqtt_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
