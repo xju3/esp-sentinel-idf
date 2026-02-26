@@ -1,5 +1,5 @@
-#ifndef NET_MANAGER_H_
-#define NET_MANAGER_H_
+#ifndef PPP_4G_H_
+#define PPP_4G_H_
 
 #include "esp_err.h"
 #include "esp_event.h"
@@ -8,80 +8,14 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Forward declaration for MQTT client handle
-typedef struct esp_mqtt_client *esp_mqtt_client_handle_t;
-
-/**
- * @brief 初始化并启动 Wi-Fi SoftAP (热点) 模式
- * * 用于设备初次配网或本地无网环境下的 Web 界面访问。
- * 默认 IP 通常为 192.168.4.1
- */
-void wifi_init_softap(void);
-
-
-/**
- * 扫描网络
- */
-esp_err_t scan_wifi(void);
-
-/**
- * @brief 初始化并连接到指定的 Wi-Fi 路由器 (STA 模式)
- * * @param ssid 路由器的 SSID
- * @param pass 路由器的密码
- * @param connected_cb Wi-Fi连接成功后的回调函数（可选，可为NULL）
- * @return esp_err_t 返回 ESP_OK 表示连接成功
- */
-esp_err_t wifi_init_sta(const char *ssid, const char *pass, void (*connected_cb)(void));
-
 /**
  * @brief 初始化 4G 模组并启动 PPP 拨号
  * * 用于在没有 Wi-Fi 环境时，通过蜂窝网络上报数据。
  */
 void ppp_init_4g(void);
 
-/**
- * @brief Wi-Fi 扫描完成标志
- * * 当 Wi-Fi 扫描完成时设置为 true
- */
-extern volatile bool s_scan_done;
-
-/**
- * @brief Wi-Fi 扫描开始标志
- * * 当 Wi-Fi 扫描开始时设置为 true
- */
-extern volatile bool s_scan_started;
-
-/**
- * @brief Wi-Fi 事件处理函数
- * * 处理 Wi-Fi 事件，包括扫描完成事件
- */
-void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                        int32_t event_id, void *event_data);
-
-/**
- * @brief 公共的 WiFi 初始化函数
- * * @param create_ap 是否创建 AP 网络接口
- * * @param create_sta 是否创建 STA 网络接口
- * * @return esp_err_t 返回 ESP_OK 表示初始化成功
- */
-esp_err_t wifi_common_init(bool create_ap, bool create_sta);
-
-/**
- * @brief 初始化 MQTT 客户端
- * * 在网络连接成功后调用，启动 MQTT 客户端
- * * @return esp_err_t 返回 ESP_OK 表示初始化成功
- */
-esp_err_t mqtt_client_init(void);
-
-/**
- * @brief 全局 MQTT 客户端句柄
- * * 用于其他模块发送 MQTT 消息
- */
-extern esp_mqtt_client_handle_t g_mqtt_client;
 
 #ifdef __cplusplus
 }
-#endif
 
-#endif /* NET_MANAGER_H_ */
+#endif /* PPP_4G_H_ */
