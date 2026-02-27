@@ -95,9 +95,9 @@ static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void
     }
     for (size_t i = 0; i < count; i++)
     {
-        float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
-        float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
-        float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
+        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
+        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
+        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
         vib_welford_3d_update(w, x_g, y_g, z_g);
     }
 }
