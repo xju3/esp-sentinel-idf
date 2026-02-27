@@ -1,6 +1,5 @@
 #include "task_monitor.h"
 #include "algo_pdm.h"
-#include "algo_stats.h"
 #include "daq_icm_42688_p.h"
 #include "drv_icm_42688_p.h"
 #include "config_manager.h"
@@ -26,7 +25,7 @@ typedef struct
     float welford_threshold;
     int8_t warning_count;
     esp_timer_handle_t s_timer;
-    vib_welford_3d_t welford_st;
+    vib_welford_t welford_st;
 } task_monitor_params_t;
 
 QueueHandle_t g_monitor_message_queue = NULL;
@@ -35,7 +34,7 @@ monitor_mode_t g_monitor_mode = MONITOR_MODE_PATROLLING;
 
 static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
-    vib_welford_3d_t *welford_st = (vib_welford_3d_t *)ctx;
+    vib_welford_t *welford_st = (vib_welford_3d_t *)ctx;
     for (size_t i = 0; i < count; i++)
     {
         float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
@@ -115,69 +114,79 @@ static void monitor_task_loop(void *arg)
 
         // 召唤引擎！把配置、时间和自己的处理函数传进去
         esp_err_t err = daq_icm_42688_p_capture(params->cfg, 1000, monitor_chunk_handler, &params->welford_st, DAQ_CHUNK_SIZE);
-        if (err == ESP_OK)
-        {
-            params->rms.rms_x = vib_welford_1d_mean(&params->welford_st.x);
-            params->rms.rms_y = vib_welford_1d_mean(&params->welford_st.y);
-            params->rms.rms_z = vib_welford_1d_mean(&params->welford_st.z);
-            
-            LOG_DEBUGF("rms(g) origin: 3d=%f, x=%f, y=%f, z=%f",
-                       params->rms.rms_3d, params->rms.rms_x,
-                       params->rms.rms_y, params->rms.rms_z);
-            
-            params->rms.rms_x-= g_baseline.x.val;
-            params->rms.rms_y-= g_baseline.y.val;
-            params->rms.rms_z-= g_baseline.z.val;
 
-            params->rms.rms_3d = vib_3d_norm(params->rms.rms_x,
-                                             params->rms.rms_y,
-                                             params->rms.rms_z);
-            if (fabsf(params->rms.rms_x) < fabsf(g_baseline.x.offset))
-            {
-                params->rms.rms_x = 0.0f;
-            }
+        // This calculates: Delta = Raw_RMS - Baseline_Offset
+        algo_welford_finish(&params->welford_st, &g_baseline,
+                            &params->rms.rms_x,
+                            &params->rms.rms_y,
+                            &params->rms.rms_z);
 
-            if (fabsf(params->rms.rms_y) < fabsf(g_baseline.y.offset))
-            {
-                params->rms.rms_y = 0.0f;
-            }
+        LOG_DEBUGF("rms(g) origin: 3d=%f, x=%f, y=%f, z=%f",
+                   params->rms.rms_3d, params->rms.rms_x,
+                   params->rms.rms_y, params->rms.rms_z);
+        // if (err == ESP_OK)
+        // {
+        //     params->rms.rms_x = vib_welford_1d_mean(&params->welford_st.x);
+        //     params->rms.rms_y = vib_welford_1d_mean(&params->welford_st.y);
+        //     params->rms.rms_z = vib_welford_1d_mean(&params->welford_st.z);
 
-            if (fabsf(params->rms.rms_z) < fabsf(g_baseline.z.offset))
-            {
-                params->rms.rms_z = 0.0f;
-            }
+        //     LOG_DEBUGF("rms(g) origin: 3d=%f, x=%f, y=%f, z=%f",
+        //                params->rms.rms_3d, params->rms.rms_x,
+        //                params->rms.rms_y, params->rms.rms_z);
 
-            bool warning = (params->rms.rms_x >= params->welford_threshold ||
-                            params->rms.rms_y >= params->welford_threshold ||
-                            params->rms.rms_z >= params->welford_threshold);
-            if (warning)
-            {
-                params->warning_count++;
-                LOG_WARNF("warning: 3d=%f, x=%f, y=%f, z=%f",
-                          params->rms.rms_3d, params->rms.rms_x,
-                          params->rms.rms_y, params->rms.rms_z);
+        //     params->rms.rms_x-= g_baseline.x.val;
+        //     params->rms.rms_y-= g_baseline.y.val;
+        //     params->rms.rms_z-= g_baseline.z.val;
 
-                // 检查是否达到最大警告次数
-                if (params->warning_count >= MAX_WARNING)
-                {
-                    LOG_ERROR("Maximum warning count reached, taking action");
-                    // TODO: 这里应该触发某种动作，比如发送警报或停止设备
-                    params->warning_count = 0; // 重置计数
-                }
-            }
-            else
-            {
-                // 如果没有警告，逐渐减少计数（但不能低于0）
-                if (params->warning_count > 0)
-                {
-                    params->warning_count--;
-                }
-            }
-        }
-        else
-        {
-            LOG_WARN("dma data capture failed.");
-        }
+        //     params->rms.rms_3d = vib_3d_norm(params->rms.rms_x,
+        //                                      params->rms.rms_y,
+        //                                      params->rms.rms_z);
+        //     if (fabsf(params->rms.rms_x) < fabsf(g_baseline.x.offset))
+        //     {
+        //         params->rms.rms_x = 0.0f;
+        //     }
+
+        //     if (fabsf(params->rms.rms_y) < fabsf(g_baseline.y.offset))
+        //     {
+        //         params->rms.rms_y = 0.0f;
+        //     }
+
+        //     if (fabsf(params->rms.rms_z) < fabsf(g_baseline.z.offset))
+        //     {
+        //         params->rms.rms_z = 0.0f;
+        //     }
+
+        //     bool warning = (params->rms.rms_x >= params->welford_threshold ||
+        //                     params->rms.rms_y >= params->welford_threshold ||
+        //                     params->rms.rms_z >= params->welford_threshold);
+        //     if (warning)
+        //     {
+        //         params->warning_count++;
+        //         LOG_WARNF("warning: 3d=%f, x=%f, y=%f, z=%f",
+        //                   params->rms.rms_3d, params->rms.rms_x,
+        //                   params->rms.rms_y, params->rms.rms_z);
+
+        //         // 检查是否达到最大警告次数
+        //         if (params->warning_count >= MAX_WARNING)
+        //         {
+        //             LOG_ERROR("Maximum warning count reached, taking action");
+        //             // TODO: 这里应该触发某种动作，比如发送警报或停止设备
+        //             params->warning_count = 0; // 重置计数
+        //         }
+        //     }
+        //     else
+        //     {
+        //         // 如果没有警告，逐渐减少计数（但不能低于0）
+        //         if (params->warning_count > 0)
+        //         {
+        //             params->warning_count--;
+        //         }
+        //     }
+        // }
+        // else
+        // {
+        //     LOG_WARN("dma data capture failed.");
+        // }
     }
 }
 

@@ -16,8 +16,8 @@
 #define VIB_WELFORD_FEATURE_H
 
 #include "algo_err.h"
-#include "algo_stats.h"
 #include "algo_baseline.h"
+#include <math.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,7 +38,7 @@ typedef struct {
     uint32_t count;
     double m2_x, m2_y, m2_z;
     double mean_x, mean_y, mean_z;
-} algo_welford_t;
+} vib_welford_t;
 
 typedef struct {
     uint32_t n;
@@ -114,7 +114,22 @@ static inline float vib_3d_norm(float x, float y, float z)
 }
 
 void algo_welford_init(algo_welford_t *ctx);
-void algo_welford_update(algo_welford_t *ctx, float x, float y, float z);
+
+/**
+ * @brief [WELFORD] 流式统计更新
+ * @details 直接处理原始数据，无需中间float数组。
+ *          极高的内存效率 - O(1)空间复杂度。
+ * @param ctx Welford上下文（必须用零初始化）
+ * @param src 原始IMU数据数组
+ * @param count 要处理的样本数
+ * @param axis 要处理的轴
+ * @param sensitivity 灵敏度系数
+ */
+void algo_welford_update(algo_welford_ctx_t *ctx, 
+                         const imu_raw_data_t *src, 
+                         size_t count, 
+                         algo_axis_t axis, 
+                         float sensitivity);
 
 // Baseline-corrected accel RMS feature (your existing logic):
 // out = max(0, sqrt(var + (mean-base_mean)^2) - base_offset)

@@ -18,7 +18,6 @@
 
 #include "algo_pdm.h"
 #include "algo_welford.h"
-#include "algo_stats.h"
 #include "config_manager.h"
 #include "daq_icm_42688_p.h"
 #include "data_dispatcher.h"

@@ -4,7 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "cJSON.h"
 #include "esp_err.h"
 #include "algo_welford.h"
 #include "freertos/FreeRTOS.h"

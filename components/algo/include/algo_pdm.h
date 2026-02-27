@@ -197,21 +197,6 @@ void algo_ingest_axis(const imu_raw_data_t *src,
                       float sensitivity, 
                       float *out_buf);
 
-/**
- * @brief [WELFORD] 流式统计更新
- * @details 直接处理原始数据，无需中间float数组。
- *          极高的内存效率 - O(1)空间复杂度。
- * @param ctx Welford上下文（必须用零初始化）
- * @param src 原始IMU数据数组
- * @param count 要处理的样本数
- * @param axis 要处理的轴
- * @param sensitivity 灵敏度系数
- */
-void algo_welford_update(algo_welford_ctx_t *ctx, 
-                         const imu_raw_data_t *src, 
-                         size_t count, 
-                         algo_axis_t axis, 
-                         float sensitivity);
 
 /**
  * @brief [WELFORD] 获取当前统计信息
