@@ -37,7 +37,7 @@ void run_fft_diagnosis(void)
     fft_ctx.write_index = 0; // 游标清零
 
     icm_cfg_t cfg = { .odr = ICM_ODR_16KHZ, .fs = ICM_FS_16G };
-    daq_icm_42688_p_capture(&cfg, 70, fft_chunk_handler, &fft_ctx, 128);
+    daq_icm_42688_p_capture(&cfg, 70, fft_chunk_handler, &fft_ctx, 128, 0);
 
     if (fft_ctx.write_index >= FFT_POINTS) {
         LOG_DEBUG("FFT Buffer full! Starting DSP calculation...");

@@ -206,8 +206,7 @@ typedef struct {
  * @param variance 输出：当前方差
  * @param std_dev 输出：当前标准差
  */
-void algo_welford_get_stats(const algo_welford_ctx_t *ctx,
-                            float *mean, float *variance, float *std_dev);
+// Deprecated/removed helper接口已删，仅保留 algo_welford_ctx_t 结构兼容
 
 /**
  * @brief [RMS] 计算float数组的均方根

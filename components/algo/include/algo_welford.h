@@ -53,25 +53,9 @@ void algo_welford_init(vib_welford_t *ctx);
  * @param axis 要处理的轴
  * @param sensitivity 灵敏度系数
  */
-void algo_welford_update(algo_welford_ctx_t *ctx, 
-                         const imu_raw_data_t *src, 
-                         size_t count, 
-                         algo_axis_t axis, 
-                         float sensitivity);
-
-// Baseline-corrected accel RMS feature (your existing logic):
-// out = max(0, sqrt(var + (mean-base_mean)^2) - base_offset)
-void algo_welford_finish(const vib_welford_t *ctx,
-                         const vib_baseline_t *baseline,
-                         float *out_x, float *out_y, float *out_z);
-
 // 计算三轴 Welford baseline 校正特征
-// 参数：
-//  - stats: 已对窗口做过 update 的 Welford 状态
-//  - baseline: 可为NULL；NULL时 base_mean=0 base_offset=0
-//  - out: 输出
-vib_algo_err_t vib_welford_feature_from_stats(const vib_welford_3d_t *stats,
-                                             vib_welford_feature_out_t *out);
+vib_algo_err_t vib_welford_baseline_rms_from_stats(const vib_welford_3d_t *stats,
+                                                   vib_welford_feature_out_t *out);
 
 
 #ifdef __cplusplus

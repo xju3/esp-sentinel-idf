@@ -1,6 +1,7 @@
 #include "task_monitor.h"
 #include "algo_pdm.h"
 #include "algo_stash.h"
+#include "algo_welford.h"
 #include "daq_icm_42688_p.h"
 #include "drv_icm_42688_p.h"
 #include "config_manager.h"
@@ -16,15 +17,11 @@
 
 #define MONITOR_QUEUE_SIZE 10
 #define DAQ_CHUNK_SIZE 128
-#define MAX_WARNING 5
-#define WELFORD_WARNING_THRESHOLD 0.1f
-
+#define SAMPLE_DURATION_MS 1000
 typedef struct
 {
     icm_cfg_t *cfg;
     imu_rms_data_t rms;
-    float welford_threshold;
-    int8_t warning_count;
     esp_timer_handle_t s_timer;
     vib_welford_3d_t welford_st;
 } task_monitor_params_t;
@@ -33,18 +30,6 @@ QueueHandle_t g_monitor_message_queue = NULL;
 SemaphoreHandle_t g_wakeup_sem = NULL;
 monitor_mode_t g_monitor_mode = MONITOR_MODE_PATROLLING;
 
-static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
-{
-    vib_welford_3d_t *welford_st = (vib_welford_3d_t *)ctx;
-    for (size_t i = 0; i < count; i++)
-    {
-        float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
-        float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
-        float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
-        // LOG_DEBUGF("x=%f, y=%f, z=%f", x_g, y_g, z_g);
-        vib_welford_3d_update(welford_st, x_g, y_g, z_g);
-    }
-}
 
 static void monitor_timer_cb(void *arg)
 {
@@ -100,9 +85,27 @@ static void cleanup(task_monitor_params_t *params)
     LOG_DEBUG("Monitor resources cleaned up");
 }
 
+
+static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
+{
+    vib_welford_3d_t *w = (vib_welford_3d_t *)ctx;
+    if (!w || !data)
+    {
+        return;
+    }
+    for (size_t i = 0; i < count; i++)
+    {
+        float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
+        float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
+        float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
+        vib_welford_3d_update(w, x_g, y_g, z_g);
+    }
+}
+
 static void monitor_task_loop(void *arg)
 {
     task_monitor_params_t *params = (task_monitor_params_t *)arg;
+
     while (1)
     {
         if (xSemaphoreTake(g_wakeup_sem, portMAX_DELAY) != pdTRUE)
@@ -110,74 +113,44 @@ static void monitor_task_loop(void *arg)
             continue;
         }
 
-        // 重置Welford统计，开始新的采样周期
         vib_welford_3d_init(&params->welford_st);
+        esp_err_t err = daq_icm_42688_p_capture(params->cfg,
+                                                SAMPLE_DURATION_MS,
+                                                monitor_chunk_handler,
+                                                &params->welford_st,
+                                                DAQ_CHUNK_SIZE);
 
-        // 召唤引擎！把配置、时间和自己的处理函数传进去
-        esp_err_t err = daq_icm_42688_p_capture(params->cfg, 1000, monitor_chunk_handler, &params->welford_st, DAQ_CHUNK_SIZE);
-        if (err == ESP_OK)
-        {
-            params->rms.rms_x = vib_welford_1d_mean(&params->welford_st.x);
-            params->rms.rms_y = vib_welford_1d_mean(&params->welford_st.y);
-            params->rms.rms_z = vib_welford_1d_mean(&params->welford_st.z);
-            
-            LOG_DEBUGF("rms(g) origin: 3d=%f, x=%f, y=%f, z=%f",
-                       params->rms.rms_3d, params->rms.rms_x,
-                       params->rms.rms_y, params->rms.rms_z);
-            
-            params->rms.rms_x-= g_baseline.x.val;
-            params->rms.rms_y-= g_baseline.y.val;
-            params->rms.rms_z-= fabsf(g_baseline.z.val);
-
-            params->rms.rms_3d = vib_3d_norm(params->rms.rms_x,
-                                             params->rms.rms_y,
-                                             params->rms.rms_z);
-            if (fabsf(params->rms.rms_x) < fabsf(g_baseline.x.offset))
-            {
-                params->rms.rms_x = 0.0f;
-            }
-
-            if (fabsf(params->rms.rms_y) < fabsf(g_baseline.y.offset))
-            {
-                params->rms.rms_y = 0.0f;
-            }
-
-            if (fabsf(params->rms.rms_z) < fabsf(g_baseline.z.offset))
-            {
-                params->rms.rms_z = 0.0f;
-            }
-
-            bool warning = (params->rms.rms_x >= params->welford_threshold ||
-                            params->rms.rms_y >= params->welford_threshold ||
-                            params->rms.rms_z >= params->welford_threshold);
-            if (warning)
-            {
-                params->warning_count++;
-                LOG_WARNF("warning: 3d=%f, x=%f, y=%f, z=%f",
-                          params->rms.rms_3d, params->rms.rms_x,
-                          params->rms.rms_y, params->rms.rms_z);
-
-                // 检查是否达到最大警告次数
-                if (params->warning_count >= MAX_WARNING)
-                {
-                    LOG_ERROR("Maximum warning count reached, taking action");
-                    // TODO: 这里应该触发某种动作，比如发送警报或停止设备
-                    params->warning_count = 0; // 重置计数
-                }
-            }
-            else
-            {
-                // 如果没有警告，逐渐减少计数（但不能低于0）
-                if (params->warning_count > 0)
-                {
-                    params->warning_count--;
-                }
-            }
-        }
-        else
+        if (err != ESP_OK)
         {
             LOG_WARN("dma data capture failed.");
+            continue;
         }
+
+        vib_welford_feature_out_t feat = {0};
+        vib_welford_feature_from_stats(&params->welford_st, &feat);
+
+        params->rms.timestamp = time(NULL);
+        params->rms.rms_x = feat.fx;
+        params->rms.rms_y = feat.fy;
+        params->rms.rms_z = feat.fz;
+        params->rms.rms_3d = feat.f3d;
+
+        LOG_DEBUGF("Detect: Samples=%d, RMS(X,Y,Z)=%.3f, %.3f, %.3f",
+                   (int)params->welford_st.x.n,
+                   params->rms.rms_x,
+                   params->rms.rms_y,
+                   params->rms.rms_z);
+
+        // if (g_monitor_message_queue)
+        // {
+        //     if (uxQueueSpacesAvailable(g_monitor_message_queue) == 0)
+        //     {
+        //         imu_rms_data_t dummy;
+        //         xQueueReceive(g_monitor_message_queue, &dummy, 0);
+        //         LOG_WARN("Queue full, dropped oldest msg");
+        //     }
+        //     xQueueSend(g_monitor_message_queue, &params->rms, 0);
+        // }
     }
 }
 
@@ -222,13 +195,11 @@ esp_err_t task_monitor_start(void)
 
     // 初始化参数
     memset(params, 0, sizeof(task_monitor_params_t));
-    params->welford_threshold = WELFORD_WARNING_THRESHOLD;
-    params->warning_count = 0;
     params->s_timer = NULL;
     params->cfg = cfg;
 
     icm_odr_t odr = ICM_ODR_4KHZ;
-    // icm_odr_t odr = calculate_patrol_odr(g_user_config.rpm);
+    icm_odr_t odr = calculate_patrol_odr(g_user_config.rpm);
     switch (odr)
     {
 
@@ -292,7 +263,7 @@ esp_err_t task_monitor_start(void)
     int16_t interval_min = g_user_config.detect;
     if (interval_min <= 0)
         interval_min = 1; // 如果无效，默认1分钟
-    uint64_t interval_us = (uint64_t)interval_min * 2ULL * 1000000ULL;
+    uint64_t interval_us = (uint64_t)interval_min * 3ULL * 1000000ULL;
     err = esp_timer_start_periodic(params->s_timer, interval_us);
     if (err != ESP_OK)
     {

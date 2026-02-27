@@ -30,7 +30,8 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg, // sensor configuration dynami
                           uint32_t duration_ms, // sampling time ms
                           daq_data_handler_t handler, // callback
                           void *user_ctx, // inbound parameters, will return back in unchanged status, by handler.
-                          int16_t chunck_size //chouck size.
+                          int16_t chunck_size, //chouck size.
+                          uint32_t skip_ms // skip initial samples (ms) before delivering
                         )
 {
     if (!cfg || !handler)
@@ -59,7 +60,9 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg, // sensor configuration dynami
 
     drv_icm42688_start_stream(daq_internal_dma_callback);
 
-    int64_t end_time_us = esp_timer_get_time() + (int64_t)duration_ms * 1000;
+    int64_t start_time_us = esp_timer_get_time();
+    int64_t end_time_us = start_time_us + (int64_t)duration_ms * 1000;
+    int64_t skip_until_us = start_time_us + (int64_t)skip_ms * 1000;
     imu_raw_data_t rx_buf[chunck_size];
 
     while (esp_timer_get_time() < end_time_us)
@@ -68,7 +71,11 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg, // sensor configuration dynami
         if (bytes > 0)
         {
             size_t count = bytes / sizeof(imu_raw_data_t);
-            handler(rx_buf, count, user_ctx);
+            int64_t now = esp_timer_get_time();
+            if (now >= skip_until_us)
+            {
+                handler(rx_buf, count, user_ctx);
+            }
         }
     }
     drv_icm42688_stop_stream();

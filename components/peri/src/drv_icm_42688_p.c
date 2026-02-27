@@ -62,6 +62,45 @@ icm_odr_t calculate_patrol_odr(float rpm)
     return ICM_ODR_200HZ; // 低速设备用低频采样，省 RAM
 }
 
+float icm_odr_to_hz(icm_odr_t odr)
+{
+    switch (odr)
+    {
+    case ICM_ODR_32KHZ:
+        return 32000.0f;
+    case ICM_ODR_16KHZ:
+        return 16000.0f;
+    case ICM_ODR_8KHZ:
+        return 8000.0f;
+    case ICM_ODR_4KHZ:
+        return 4000.0f;
+    case ICM_ODR_2KHZ:
+        return 2000.0f;
+    case ICM_ODR_1KHZ:
+        return 1000.0f;
+    case ICM_ODR_500HZ:
+        return 500.0f;
+    case ICM_ODR_200HZ:
+        return 200.0f;
+    case ICM_ODR_100HZ:
+        return 100.0f;
+    case ICM_ODR_50HZ:
+        return 50.0f;
+    case ICM_ODR_25HZ:
+        return 25.0f;
+    case ICM_ODR_12_5HZ:
+        return 12.5f;
+    case ICM_ODR_6_25HZ:
+        return 6.25f;
+    case ICM_ODR_3_125HZ:
+        return 3.125f;
+    case ICM_ODR_1_5625HZ:
+        return 1.5625f;
+    default:
+        return 0.0f;
+    }
+}
+
 /* ========================================================================= *
  * 底层 SPI 读写辅助函数
  * ========================================================================= */

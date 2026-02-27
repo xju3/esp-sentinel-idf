@@ -11,307 +11,54 @@
 #include <math.h>
 #include <string.h>
 
+// 初始化三轴 Welford 累计器
 void algo_welford_init(vib_welford_t *ctx)
 {
     if (ctx)
         memset(ctx, 0, sizeof(vib_welford_t));
 }
 
-static float one_axis_feature(const vib_welford_1d_t *s, float base_mean, float base_offset)
-{
-    // out = max(0, sqrt(var + (mean-base_mean)^2) - base_offset)
-    float mean = vib_welford_1d_mean(s);
-    float var = vib_welford_1d_var_sample(s);
-    float dm = mean - base_mean;
-    float raw = var + dm * dm;
-    if (raw < 0.0f)
-        raw = 0.0f;
-    float rms = sqrtf(raw);
-    float out = rms - base_offset;
-    return (out > 0.0f) ? out : 0.0f;
-}
-
+// 在线更新三轴均值/方差（样本方差统计）
 void algo_welford_update_1(vib_welford_t *ctx, float x, float y, float z)
 {
     if (!ctx)
         return;
     ctx->count++;
 
-    // X Axis
-    double delta_x = x - ctx->mean_x;
-    ctx->mean_x += delta_x / ctx->count;
-    ctx->m2_x += delta_x * (x - ctx->mean_x);
+    double dx = x - ctx->mean_x;
+    ctx->mean_x += dx / ctx->count;
+    ctx->m2_x += dx * (x - ctx->mean_x);
 
-    // Y Axis
-    double delta_y = y - ctx->mean_y;
-    ctx->mean_y += delta_y / ctx->count;
-    ctx->m2_y += delta_y * (y - ctx->mean_y);
+    double dy = y - ctx->mean_y;
+    ctx->mean_y += dy / ctx->count;
+    ctx->m2_y += dy * (y - ctx->mean_y);
 
-    // Z Axis
-    double delta_z = z - ctx->mean_z;
-    ctx->mean_z += delta_z / ctx->count;
-    ctx->m2_z += delta_z * (z - ctx->mean_z);
+    double dz = z - ctx->mean_z;
+    ctx->mean_z += dz / ctx->count;
+    ctx->m2_z += dz * (z - ctx->mean_z);
 }
 
-void algo_welford_finish(const vib_welford_t *ctx, const vib_baseline_t *baseline,
-                         float *out_x, float *out_y, float *out_z)
+// 单轴基线校正后特征：max(0, sqrt(var+(mean-base)^2)-offset)
+static float one_axis_feature(const vib_welford_1d_t *s, float base_mean, float base_offset)
 {
-    if (!ctx || !out_x || !out_y || !out_z)
-        return;
-
-    if (ctx->count < 2)
-    {
-        *out_x = *out_y = *out_z = 0.0f;
-        return;
-    }
-
-    // 1. Calculate Standard Deviation (AC RMS)
-    // Variance = M2 / (n-1)
-    float raw_rms_x = sqrt(ctx->m2_x / (ctx->count - 1));
-    float raw_rms_y = sqrt(ctx->m2_y / (ctx->count - 1));
-    float raw_rms_z = sqrt(ctx->m2_z / (ctx->count - 1));
-
-    // 2. Subtract Baseline Offset to get Delta
-    if (baseline)
-    {
-        *out_x = (raw_rms_x > baseline->x.offset) ? (raw_rms_x - baseline->x.offset) : 0.0f;
-        *out_y = (raw_rms_y > baseline->y.offset) ? (raw_rms_y - baseline->y.offset) : 0.0f;
-        *out_z = (raw_rms_z > baseline->z.offset) ? (raw_rms_z - baseline->z.offset) : 0.0f;
-    }
-    else
-    {
-        *out_x = raw_rms_x;
-        *out_y = raw_rms_y;
-        *out_z = raw_rms_z;
-    }
+    float mean = vib_welford_1d_mean(s);
+    float var = vib_welford_1d_var_sample(s);
+    float dm = mean - base_mean;
+    float raw = var + dm * dm;
+    float rms = sqrtf(raw < 0.0f ? 0.0f : raw);
+    float out = rms - base_offset;
+    return (out > 0.0f) ? out : 0.0f;
 }
 
-/* ========================================================================= *
- * PUBLIC API IMPLEMENTATION
- * ========================================================================= */
-
-void algo_welford_update(algo_welford_ctx_t *ctx,
-                         const imu_raw_data_t *src,
-                         size_t count,
-                         algo_axis_t axis,
-                         float sensitivity)
-{
-    if (ctx == NULL || src == NULL || count == 0)
-    {
-        return;
-    }
-
-    // Convert enum to integer axis index
-    int axis_idx = (int)axis;
-    if (axis_idx < 0 || axis_idx > 2)
-    {
-        axis_idx = 2; // Default to Z-axis
-    }
-
-    // Process each sample
-    for (size_t i = 0; i < count; i++)
-    {
-        // Extract and convert raw value
-        int16_t raw_val = algo_extract_axis_raw(&src[i], axis_idx);
-        float sample = algo_scale_raw_to_float(raw_val, sensitivity);
-
-        // Update min/max
-        if (ctx->count == 0)
-        {
-            ctx->min_val = sample;
-            ctx->max_val = sample;
-        }
-        else
-        {
-            if (sample < ctx->min_val)
-                ctx->min_val = sample;
-            if (sample > ctx->max_val)
-                ctx->max_val = sample;
-        }
-
-        // Welford's algorithm for online mean and variance
-        ctx->count++;
-
-        double delta = sample - ctx->mean;
-        ctx->mean += delta / ctx->count;
-        double delta2 = sample - ctx->mean;
-        ctx->m2 += delta * delta2;
-    }
-}
-
-void algo_welford_get_stats(const algo_welford_ctx_t *ctx,
-                            float *mean, float *variance, float *std_dev)
-{
-    if (ctx == NULL)
-    {
-        if (mean)
-            *mean = 0.0f;
-        if (variance)
-            *variance = 0.0f;
-        if (std_dev)
-            *std_dev = 0.0f;
-        return;
-    }
-
-    if (ctx->count == 0)
-    {
-        if (mean)
-            *mean = 0.0f;
-        if (variance)
-            *variance = 0.0f;
-        if (std_dev)
-            *std_dev = 0.0f;
-        return;
-    }
-
-    if (mean)
-        *mean = (float)ctx->mean;
-
-    if (variance || std_dev)
-    {
-        double var = (ctx->count > 1) ? (ctx->m2 / (ctx->count - 1)) : 0.0;
-        if (variance)
-            *variance = (float)var;
-        if (std_dev)
-            *std_dev = (float)sqrt(var);
-    }
-}
-
-/* ========================================================================= *
- * HELPER FUNCTIONS
- * ========================================================================= */
-
-/**
- * @brief Reset Welford context to initial state
- */
-void algo_welford_reset(algo_welford_ctx_t *ctx)
-{
-    if (ctx == NULL)
-    {
-        return;
-    }
-
-    ctx->count = 0;
-    ctx->mean = 0.0;
-    ctx->m2 = 0.0;
-    ctx->min_val = 0.0f;
-    ctx->max_val = 0.0f;
-}
-
-/**
- * @brief Combine statistics from multiple Welford contexts
- * @details Useful for parallel processing or distributed computation
- */
-void algo_welford_combine(algo_welford_ctx_t *result,
-                          const algo_welford_ctx_t *a,
-                          const algo_welford_ctx_t *b)
-{
-    if (result == NULL || a == NULL || b == NULL)
-    {
-        return;
-    }
-
-    if (a->count == 0)
-    {
-        *result = *b;
-        return;
-    }
-
-    if (b->count == 0)
-    {
-        *result = *a;
-        return;
-    }
-
-    // Combine counts
-    uint32_t total_count = a->count + b->count;
-
-    // Combine means using Chan's formula
-    double delta = b->mean - a->mean;
-    double mean = a->mean + delta * b->count / total_count;
-
-    // Combine M2 using Chan's formula
-    double m2 = a->m2 + b->m2 + delta * delta * a->count * b->count / total_count;
-
-    // Combine min/max
-    float min_val = (a->min_val < b->min_val) ? a->min_val : b->min_val;
-    float max_val = (a->max_val > b->max_val) ? a->max_val : b->max_val;
-
-    // Store results
-    result->count = total_count;
-    result->mean = mean;
-    result->m2 = m2;
-    result->min_val = min_val;
-    result->max_val = max_val;
-}
-
-/**
- * @brief Get current statistics as individual values (for debugging)
- * @details Provides all statistics as separate output parameters
- */
-void algo_welford_get_all_stats(const algo_welford_ctx_t *ctx,
-                                uint32_t *count,
-                                float *mean,
-                                float *std_dev,
-                                float *min_val,
-                                float *max_val)
-{
-    if (ctx == NULL)
-    {
-        if (count)
-            *count = 0;
-        if (mean)
-            *mean = 0.0f;
-        if (std_dev)
-            *std_dev = 0.0f;
-        if (min_val)
-            *min_val = 0.0f;
-        if (max_val)
-            *max_val = 0.0f;
-        return;
-    }
-
-    if (count)
-        *count = ctx->count;
-    if (min_val)
-        *min_val = ctx->min_val;
-    if (max_val)
-        *max_val = ctx->max_val;
-
-    if (ctx->count == 0)
-    {
-        if (mean)
-            *mean = 0.0f;
-        if (std_dev)
-            *std_dev = 0.0f;
-        return;
-    }
-
-    if (mean)
-        *mean = (float)ctx->mean;
-
-    if (std_dev)
-    {
-        double var = (ctx->count > 1) ? (ctx->m2 / (ctx->count - 1)) : 0.0;
-        *std_dev = (float)sqrt(var);
-    }
-}
-
-vib_algo_err_t vib_welford_feature_from_stats(const vib_welford_3d_t *stats,
-                                              vib_welford_feature_out_t *out)
+// 将已累积的三轴统计转成基线校正 RMS（fx/fy/fz/f3d）
+vib_algo_err_t vib_welford_baseline_rms_from_stats(const vib_welford_3d_t *stats,
+                                                   vib_welford_feature_out_t *out)
 {
     if (!stats || !out)
         return VIB_ALGO_BAD_ARGS;
 
-    float bx = 0.0f, by = 0.0f, bz = 0.0f;
-    float ox = 0.0f, oy = 0.0f, oz = 0.0f;
-
-    bx = g_baseline.x.val;
-    by = g_baseline.y.val;
-    bz = g_baseline.z.val;
-    ox = g_baseline.x.offset;
-    oy = g_baseline.y.offset;
-    oz = g_baseline.z.offset;
+    float bx = g_baseline.x.val, by = g_baseline.y.val, bz = g_baseline.z.val;
+    float ox = g_baseline.x.offset, oy = g_baseline.y.offset, oz = g_baseline.z.offset;
 
     out->fx = one_axis_feature(&stats->x, bx, ox);
     out->fy = one_axis_feature(&stats->y, by, oy);

@@ -112,7 +112,7 @@ static void monitor_task_loop(void *arg)
         algo_welford_init(&params->welford_st);
 
         // 召唤引擎！把配置、时间和自己的处理函数传进去
-        esp_err_t err = daq_icm_42688_p_capture(params->cfg, 1000, monitor_chunk_handler, &params->welford_st, DAQ_CHUNK_SIZE);
+        esp_err_t err = daq_icm_42688_p_capture(params->cfg, 1000, monitor_chunk_handler, &params->welford_st, DAQ_CHUNK_SIZE, 0);
 
         if (err != ESP_OK)
             continue;

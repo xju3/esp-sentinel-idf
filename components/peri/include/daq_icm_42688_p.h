@@ -13,5 +13,6 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg,
                           uint32_t duration_ms, 
                           daq_data_handler_t handler, 
                           void *user_ctx, 
-                          int16_t chunck_count);
+                          int16_t chunck_count,
+                          uint32_t skip_ms);
 #endif // DAQ_ICM_42688_P_H_

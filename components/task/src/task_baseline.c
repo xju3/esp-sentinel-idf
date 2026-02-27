@@ -173,13 +173,14 @@ esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
     }
 
     // 3. 配置传感器
-    icm_cfg_t cfg = {.odr = ICM_ODR_1KHZ, .fs = ICM_FS_16G};
+    // Align baseline sampling with monitor (4 kHz, ±16g) to match v2 behavior
+    icm_cfg_t cfg = {.odr = ICM_ODR_4KHZ, .fs = ICM_FS_16G};
 
     vib_welford_3d_t welford_st;
     vib_welford_3d_init(&welford_st);
 
     // 召唤引擎！把配置、时间和自己的处理函数传进去
-    esp_err_t err = daq_icm_42688_p_capture(&cfg, duration_ms, baseline_chunk_handler, &welford_st, 128);
+    esp_err_t err = daq_icm_42688_p_capture(&cfg, duration_ms, baseline_chunk_handler, &welford_st, 128, 0);
     if (err == ESP_OK)
     {
         // ==============================================================

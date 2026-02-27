@@ -129,6 +129,8 @@ extern "C"
      * 巡逻阶段的ODR
      */
     icm_odr_t calculate_patrol_odr(float rpm);
+    // 将寄存器枚举转换为实际采样率（Hz）
+    float icm_odr_to_hz(icm_odr_t odr);
 #ifdef __cplusplus
 }
 #endif
