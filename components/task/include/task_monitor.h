@@ -7,38 +7,57 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
+#include "esp_timer.h"
 #include "esp_err.h"
-#include "data_dispatcher.h"
+#include <time.h>
+#include <string.h>
+#include <math.h>
 
-#ifdef __cplusplus
-extern "C" {
+#include "algo_pdm.h"
+#include "algo_welford.h"
+#include "algo_stats.h"
+#include "config_manager.h"
+#include "daq_icm_42688_p.h"
+#include "data_dispatcher.h"
+#include "drv_icm_42688_p.h"
+#include "logger.h"
+#include "iso_10816.h"
+#include "algo_baseline.h"
+
 #endif
 
-// Monitor operating modes
-typedef enum {
-    MONITOR_MODE_NORMAL = 0,        // Normal periodic monitoring
-    MONITOR_MODE_FFT_DIAGNOSIS = 1  // FFT diagnosis in progress
-} monitor_mode_t;
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
-// Global Queue Handle (created by task_monitor_start)
-extern QueueHandle_t g_monitor_message_queue;
+    // Monitor operating modes
+    typedef enum
+    {
+        MONITOR_MODE_PATROLLING = 0,       // Normal periodic monitoring
+        MONITOR_MODE_DIAGNOSIS = 1 // FFT diagnosis in progress
+    } monitor_mode_t;
 
-// Wakeup semaphore for monitor task
-extern SemaphoreHandle_t g_wakeup_sem;
 
-// Current monitor mode
-extern monitor_mode_t g_monitor_mode;
+    // Global Queue Handle (created by task_monitor_start)
+    extern QueueHandle_t g_monitor_message_queue;
 
-// Start the monitor task
-esp_err_t task_monitor_start(void);
+    // Wakeup semaphore for monitor task
+    extern SemaphoreHandle_t g_wakeup_sem;
 
-// Control functions for FFT coordination
-void task_monitor_pause_for_fft(void);
-void task_monitor_resume_after_fft(void);
+    // Current monitor mode
+    extern monitor_mode_t g_monitor_mode;
+
+    // Start the monitor task
+    esp_err_t task_monitor_start(void);
+
+    // Control functions for FFT coordination
+    void task_monitor_pause(void);
+    void task_monitor_resume(void);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif // TASK_MONITOR_H

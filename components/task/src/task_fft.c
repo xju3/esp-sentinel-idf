@@ -31,7 +31,7 @@ void run_fft_diagnosis(void)
     LOG_DEBUG("Starting FFT diagnosis...");
     
     // 1. 暂停监控任务的定时唤醒
-    task_monitor_pause_for_fft();
+    task_monitor_pause();
     
     fft_capture_ctx_t fft_ctx;
     fft_ctx.write_index = 0; // 游标清零
@@ -45,7 +45,7 @@ void run_fft_diagnosis(void)
     }
     
     // 2. FFT诊断完成，恢复监控任务的定时唤醒
-    task_monitor_resume_after_fft();
+    task_monitor_resume();
     
     LOG_DEBUG("FFT diagnosis completed, monitor resumed");
 }

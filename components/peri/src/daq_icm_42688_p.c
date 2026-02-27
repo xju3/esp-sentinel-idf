@@ -26,11 +26,12 @@ static void daq_internal_dma_callback(const imu_raw_data_t *data, size_t count)
 }
 
 // 终极抽象引擎
-esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg,
-                          uint32_t duration_ms,
-                          daq_data_handler_t handler,
-                          void *user_ctx,
-                          int16_t chunck_count)
+esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg, // sensor configuration dynamically
+                          uint32_t duration_ms, // sampling time ms
+                          daq_data_handler_t handler, // callback
+                          void *user_ctx, // inbound parameters, will return back in unchanged status, by handler.
+                          int16_t chunck_size //chouck size.
+                        )
 {
     if (!cfg || !handler)
         return ESP_ERR_INVALID_ARG;
@@ -45,21 +46,21 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg,
     }
 
     if (s_last_chunck_count == 0) {
-        s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(imu_raw_data_t) * chunck_count);
+        s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(imu_raw_data_t) * chunck_size);
         if (s_daq_stream == NULL) {
             LOG_WARN("Fatal Error: Failed to create DAQ stream!");
             return ESP_ERR_NO_MEM;
         }
-    } else if (s_last_chunck_count != chunck_count)
+    } else if (s_last_chunck_count != chunck_size)
     {
-        xStreamBufferSetTriggerLevel(s_daq_stream, sizeof(imu_raw_data_t) * chunck_count);
+        xStreamBufferSetTriggerLevel(s_daq_stream, sizeof(imu_raw_data_t) * chunck_size);
     }
-    s_last_chunck_count = chunck_count; // 记住当前状态
+    s_last_chunck_count = chunck_size; // 记住当前状态
 
     drv_icm42688_start_stream(daq_internal_dma_callback);
 
     int64_t end_time_us = esp_timer_get_time() + (int64_t)duration_ms * 1000;
-    imu_raw_data_t rx_buf[chunck_count];
+    imu_raw_data_t rx_buf[chunck_size];
 
     while (esp_timer_get_time() < end_time_us)
     {

@@ -324,7 +324,7 @@ static TaskHandle_t  s_dma_task_handle = NULL;
         1
     );
 
-    LOG_INFO("ICM-42688-P DMA Stream Started.");
+    // LOG_INFO("ICM-42688-P DMA Stream Started.");
     return ESP_OK;
 }
 
@@ -343,8 +343,7 @@ esp_err_t drv_icm42688_stop_stream(void) {
     while (s_dma_task_handle != NULL && timeout-- > 0) {
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-
     s_data_cb = NULL;
-    LOG_INFO("ICM-42688-P DMA Stream Stopped.");
+    // LOG_INFO("ICM-42688-P DMA Stream Stopped.");
     return ESP_OK;
 }

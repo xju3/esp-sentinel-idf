@@ -7,7 +7,6 @@
 #include "cJSON.h"
 #include "esp_err.h"
 #include "algo_baseline.h"
-#include "algo_welford_feature.h"
 
 #ifdef __cplusplus
 extern "C" {

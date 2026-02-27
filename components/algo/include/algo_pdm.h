@@ -128,6 +128,7 @@ typedef struct {
     float rms_x;
     float rms_y;
     float rms_z;
+    float rms_3d;
 } imu_rms_data_t;
 
 /**

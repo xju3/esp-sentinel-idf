@@ -1,5 +1,5 @@
-#ifndef APP_FFT_H
-#define APP_FFT_H
+#ifndef TASK_FFT_H
+#define TASK_FFT_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,4 +21,4 @@ void run_fft_diagnosis(void);
 }
 #endif
 
-#endif // APP_FFT_H
+#endif // TASK_FFT_H

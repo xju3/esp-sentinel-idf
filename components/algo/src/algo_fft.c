@@ -17,7 +17,7 @@
 
 // Global FFT initialization flag
 static bool g_fft_initialized = false;
-static size_t g_max_fft_size = 0;
+// static size_t g_max_fft_size = 0;
 
 /* ========================================================================= *
  * PUBLIC API IMPLEMENTATION

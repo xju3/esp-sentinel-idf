@@ -1,4 +1,33 @@
 #include "iso_10816.h"
+#include "algo_dsp_utils.h"
+#include <math.h>
+#include <string.h>
+
+static void iso10816_design_if_needed(iso10816_state_t *st, float fs) {
+    // 如果采样率变化超过容差，重新设计滤波器系数
+    if (fabsf(st->fs - fs) > st->fs_tol_hz) {
+        st->fs = fs;
+        
+        // 设计加速度带通滤波器：10Hz高通 + 低通
+        algo_biquad_init_hp(&st->hp10_x, fs, 10.0f, 0.7071f);
+        algo_biquad_init_hp(&st->hp10_y, fs, 10.0f, 0.7071f);
+        algo_biquad_init_hp(&st->hp10_z, fs, 10.0f, 0.7071f);
+        
+        // 设计低通滤波器
+        float fc_lp = st->fc_lp_hz;
+        if (fc_lp > 0.45f * fs) {
+            fc_lp = 0.45f * fs; // 避免混叠
+        }
+        algo_biquad_init_lp(&st->lp_x, fs, fc_lp, 0.7071f);
+        algo_biquad_init_lp(&st->lp_y, fs, fc_lp, 0.7071f);
+        algo_biquad_init_lp(&st->lp_z, fs, fc_lp, 0.7071f);
+        
+        // 设计速度高通滤波器：1Hz
+        algo_biquad_init_hp(&st->hp1_vx, fs, 1.0f, 0.7071f);
+        algo_biquad_init_hp(&st->hp1_vy, fs, 1.0f, 0.7071f);
+        algo_biquad_init_hp(&st->hp1_vz, fs, 1.0f, 0.7071f);
+    }
+}
 
 void iso10816_init(iso10816_state_t *st) {
     if (!st) return;
@@ -44,7 +73,7 @@ void iso10816_compute(iso10816_state_t *st,
 
     int skip = 0;
     if (st->skip_seconds > 0.0f) {
-        skip = (int)lroundf(st->skip_seconds * fs);
+        skip = (int)roundf(st->skip_seconds * fs);
         if (skip < 0) skip = 0;
         if (skip > N) skip = N;
     }

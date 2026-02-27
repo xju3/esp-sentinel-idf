@@ -2,21 +2,11 @@
 #define VIB_ALGO_ISO_10816_H
 
 #include <stdint.h>
+#include "algo_dsp_utils.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef enum
-{
-    ISO_ZONE_A = 0,
-    ISO_ZONE_B = 1,
-    ISO_ZONE_C = 2,
-    ISO_ZONE_D = 3
-} iso_severity_zone_t;
-
-iso_severity_zone_t get_iso_status(iso_machine_class_t machine_cls, float rms_velocity);
-const char *get_zone_name(iso_severity_zone_t zone);
-
 
 // Machine classes (ISO 10816-3 legacy thresholds)
 typedef enum
@@ -27,16 +17,16 @@ typedef enum
     ISO_CLASS_IV = 3
 } iso_machine_class_t;
 
+typedef enum
+{
+    ISO_ZONE_A = 0,
+    ISO_ZONE_B = 1,
+    ISO_ZONE_C = 2,
+    ISO_ZONE_D = 3
+} iso_severity_zone_t;
 
-typedef struct {
-    // esp-dsp biquad 系数格式：b0,b1,b2,a1,a2 (假设 a0=1)
-    // 这里用数组存放，便于直接调用 dsps_biquad_f32（ESP32-S3 有硬件优化实现）。
-    float coef[5];
-
-    // esp-dsp biquad 延迟线 w0,w1（Direct Form II）
-    // 注意：该状态与 DF2T 的 s1/s2 定义不同，但两者实现的是同一差分方程。
-    float w[2];
-} algo_biquad_t;
+iso_severity_zone_t get_iso_status(iso_machine_class_t machine_cls, float rms_velocity);
+const char *get_zone_name(iso_severity_zone_t zone);
 
 typedef struct {
     float vx_rms;

@@ -12,6 +12,7 @@ idf_component_register(
         "src/algo_envelope.c"
         "src/algo_fft.c"
         "src/algo_math.c"
+        "src/iso_10816.c"
 
     INCLUDE_DIRS
         "include"

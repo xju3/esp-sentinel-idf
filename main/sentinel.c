@@ -17,7 +17,6 @@
 #include "task_monitor.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
-#include "task_baseline.h"
 
 extern esp_err_t ppp_4g_init(void);
 
@@ -37,16 +36,11 @@ void start_tasks()
 #endif
 
     // 网络连接成功后，初始化 MQTT 客户端
-    LOG_INFO("Network connected, initializing MQTT client...");
     err = mqtt_client_init();
     if (err != ESP_OK)
     {
         LOG_WARNF("MQTT client initialization failed: %d", err);
         // MQTT 初始化失败不影响设备运行，数据会存储在队列中等待网络恢复
-    }
-    else
-    {
-        LOG_INFO("MQTT client initialized successfully");
     }
 
     // 初始化硬件底层 (只调用一次)
@@ -75,6 +69,7 @@ void start_tasks()
         return;
     }
 
+    LOG_DEBUG("准备执行任务.");
     // 启动传感器监控任务
     err = task_monitor_start();
     if (err != ESP_OK)
@@ -95,7 +90,6 @@ void start_tasks()
 void app_main(void)
 {
     // 初始化 NVS (Wi-Fi 驱动必须用到)
-    LOG_INFO("starting device...");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -113,7 +107,6 @@ void app_main(void)
     }
     bool enable_netwokd_channel = false;
     esp_err_t err = ESP_OK;
-
     if (g_user_config.network == 1)
     {
         // 初始化 4G 模组
