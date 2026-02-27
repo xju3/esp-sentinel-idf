@@ -50,6 +50,7 @@ typedef struct {
     char device_type[LEN_MAX_DEVICE_TYPE];
     char host[LEN_MAX_HOST];
     int32_t rpm;
+    float threshold;
     int8_t network;
     int16_t months;
     int16_t battery;

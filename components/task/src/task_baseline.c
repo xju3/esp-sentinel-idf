@@ -1,21 +1,20 @@
 #include "task_baseline.h"
 #include "drv_icm_42688_p.h"
+#include "daq_icm_42688_p.h"
 #include "fs_utils.h"
+#include "logger.h"
+#include "algo_pdm.h"
 #include "config_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "esp_timer.h"
-#include "esp_log.h"
-#include "logger.h"
 #include "cJSON.h"
 #include "esp_timer.h"
+#include "esp_timer.h"
+#include "esp_log.h"
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
-#include "daq_icm_42688_p.h"
-#include "algo_pdm.h"
 
-#define LSB_TO_G (16.0f / 32768.0f)
 
 // Define global baseline variable
 vib_baseline_t g_baseline = {0};

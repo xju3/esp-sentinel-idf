@@ -49,6 +49,18 @@ static uint8_t *s_dma_pong = NULL;
 
 static bool icm_42688_p_initialized = false;
 
+// 根据设置转速度, 计算巡逻阶段的ODR
+icm_odr_t calculate_patrol_odr(float rpm)
+{
+    float f_max = (rpm / 60.0f) * 10.0f; // 至少覆盖 10 倍频
+    if (f_max > 2000.0f)
+        return ICM_ODR_8KHZ;
+    if (f_max > 500.0f)
+        return ICM_ODR_4KHZ;
+    if (f_max > 100.0f)
+        return ICM_ODR_1KHZ;
+    return ICM_ODR_200HZ; // 低速设备用低频采样，省 RAM
+}
 
 /* ========================================================================= *
  * 底层 SPI 读写辅助函数

@@ -30,12 +30,25 @@ extern "C"
     /**
      * @brief 采样率 (ODR) 枚举
      */
+    // ACCEL_ODR[3:0] 寄存器位定义 (Bank 0, 地址 0x50)
     typedef enum
     {
-        ICM_ODR_1KHZ = 0x06, // 修复：官方手册 0x06 才是 1kHz
-        ICM_ODR_4KHZ = 0x04,
-        ICM_ODR_8KHZ = 0x03,
-        ICM_ODR_16KHZ = 0x02
+        ICM_ODR_RESERVED = 0x00, // 保留
+        ICM_ODR_32KHZ = 0x01,    // 32 kHz (LN mode)
+        ICM_ODR_16KHZ = 0x02,    // 16 kHz (LN mode)
+        ICM_ODR_8KHZ = 0x03,     // 8 kHz (LN mode)
+        ICM_ODR_4KHZ = 0x04,     // 4 kHz (LN mode)
+        ICM_ODR_2KHZ = 0x05,     // 2 kHz (LN mode)
+        ICM_ODR_1KHZ = 0x06,     // 1 kHz (LN mode, 默认值)
+        ICM_ODR_500HZ = 0x0F,    // 500 Hz (LP or LN mode)
+        ICM_ODR_200HZ = 0x07,    // 200 Hz (LP or LN mode)
+        ICM_ODR_100HZ = 0x08,    // 100 Hz (LP or LN mode)
+        ICM_ODR_50HZ = 0x09,     // 50 Hz (LP or LN mode)
+        ICM_ODR_25HZ = 0x0A,     // 25 Hz (LP or LN mode)
+        ICM_ODR_12_5HZ = 0x0B,   // 12.5 Hz (LP or LN mode)
+        ICM_ODR_6_25HZ = 0x0C,   // 6.25 Hz (LP mode only)
+        ICM_ODR_3_125HZ = 0x0D,  // 3.125 Hz (LP mode only)
+        ICM_ODR_1_5625HZ = 0x0E, // 1.5625 Hz (LP mode only)
     } icm_odr_t;
 
     /**
@@ -112,6 +125,10 @@ extern "C"
      */
     esp_err_t drv_icm42688_stop_stream(void);
 
+    /**
+     * 巡逻阶段的ODR
+     */
+    icm_odr_t calculate_patrol_odr(float rpm);
 #ifdef __cplusplus
 }
 #endif
