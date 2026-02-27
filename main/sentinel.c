@@ -30,6 +30,12 @@ void enable_config_service()
 void start_tasks()
 {
     esp_err_t err = ESP_OK;
+
+#ifdef CONFIG_DEV_MODE
+    // 开发模式下仍保留 Web 调试入口
+    ESP_ERROR_CHECK(web_server_start());
+#endif
+
     // 网络连接成功后，初始化 MQTT 客户端
     LOG_INFO("Network connected, initializing MQTT client...");
     err = mqtt_client_init();
@@ -108,7 +114,6 @@ void app_main(void)
     bool enable_netwokd_channel = false;
     esp_err_t err = ESP_OK;
 
-
     if (g_user_config.network == 1)
     {
         // 初始化 4G 模组
@@ -136,9 +141,4 @@ void app_main(void)
         enable_config_service();
         return;
     }
-
-#ifdef CONFIG_DEV_MODE
-    // 开发模式下仍保留 Web 调试入口
-    ESP_ERROR_CHECK(web_server_start());
-#endif
 }

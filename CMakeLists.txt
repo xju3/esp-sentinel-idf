@@ -7,17 +7,7 @@ set(EXTRA_COMPONENT_DIRS "components")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # 告诉构建系统：除了 components/ 下的直接子目录，还要搜索 components/group1/ 下的子目录作为组件
-set(EXTRA_COMPONENT_DIRS 
-    components/bsp/icm_42688_p 
-    components/bsp/ppp 
-    components/bsp/core_wifi 
-    components/network/dispatcher
-    components/network/mqtt_proxy
-    components/network/web
-    components/utility/fs_utils
-    components/utility/config
-    components/utility/logger
-    )
+# set(EXTRA_COMPONENT_DIRS "" )
 project(sentinel)
 
 # 在创建SPIFFS镜像前的预处理

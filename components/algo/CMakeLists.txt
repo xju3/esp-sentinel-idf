@@ -17,7 +17,7 @@ idf_component_register(
         "include"
 
     PRIV_INCLUDE_DIRS
-        "private_include"
+        "private"
 
     REQUIRES
         esp-dsp
