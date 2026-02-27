@@ -6,8 +6,37 @@
  */
 
 #include "algo_pdm.h"
+#include "algo_welford.h"
 #include "algo_dsp_utils.h"
 #include <math.h>
+
+
+void algo_welford_finish(const algo_welford_t *ctx, const icm_freq_profile_t *baseline, 
+                         float *out_x, float *out_y, float *out_z) {
+    if (!ctx || !out_x || !out_y || !out_z) return;
+
+    if (ctx->count < 2) {
+        *out_x = *out_y = *out_z = 0.0f;
+        return;
+    }
+
+    // 1. Calculate Standard Deviation (AC RMS)
+    // Variance = M2 / (n-1)
+    float raw_rms_x = sqrt(ctx->m2_x / (ctx->count - 1));
+    float raw_rms_y = sqrt(ctx->m2_y / (ctx->count - 1));
+    float raw_rms_z = sqrt(ctx->m2_z / (ctx->count - 1));
+
+    // 2. Subtract Baseline Offset to get Delta
+    if (baseline) {
+        *out_x = (raw_rms_x > baseline->x.offset) ? (raw_rms_x - baseline->x.offset) : 0.0f;
+        *out_y = (raw_rms_y > baseline->y.offset) ? (raw_rms_y - baseline->y.offset) : 0.0f;
+        *out_z = (raw_rms_z > baseline->z.offset) ? (raw_rms_z - baseline->z.offset) : 0.0f;
+    } else {
+        *out_x = raw_rms_x;
+        *out_y = raw_rms_y;
+        *out_z = raw_rms_z;
+    }
+}
 
 /* ========================================================================= *
  * PUBLIC API IMPLEMENTATION

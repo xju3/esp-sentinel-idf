@@ -24,28 +24,10 @@
 #include <math.h>
 #include <string.h>
 #include <stdbool.h>
-#include "algo_baseline.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// ---------------- Welford ----------------
-
-typedef struct {
-    uint32_t count;
-    double m2_x, m2_y, m2_z;
-    double mean_x, mean_y, mean_z;
-} algo_welford_t;
-
-void algo_welford_init(algo_welford_t *ctx);
-void algo_welford_update(algo_welford_t *ctx, float x, float y, float z);
-
-// Baseline-corrected accel RMS feature (your existing logic):
-// out = max(0, sqrt(var + (mean-base_mean)^2) - base_offset)
-void algo_welford_finish(const algo_welford_t *ctx,
-                         const vib_baseline_t *baseline,
-                         float *out_x, float *out_y, float *out_z);
 
 // ---------------- ISO10816/20816 velocity RMS ----------------
 
