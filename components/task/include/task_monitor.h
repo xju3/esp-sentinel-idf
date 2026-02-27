@@ -16,6 +16,7 @@
 #include <string.h>
 #include <math.h>
 
+#include "algo_baseline.h"
 #include "algo_pdm.h"
 #include "algo_welford.h"
 #include "config_manager.h"
@@ -24,7 +25,6 @@
 #include "drv_icm_42688_p.h"
 #include "logger.h"
 #include "iso_10816.h"
-#include "algo_baseline.h"
 
 #endif
 

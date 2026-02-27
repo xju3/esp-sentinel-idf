@@ -1,6 +1,6 @@
 /*
  * algo_welford.c - Welford's Online Algorithm for Streaming Statistics
- * 
+ *
  * O(1) space complexity algorithm for computing mean and variance incrementally.
  * Processes raw IMU data directly without intermediate float arrays.
  */
@@ -9,8 +9,13 @@
 #include "algo_welford.h"
 #include "algo_dsp_utils.h"
 #include <math.h>
+#include <string.h>
 
-
+void algo_welford_init(vib_welford_t *ctx)
+{
+    if (ctx)
+        memset(ctx, 0, sizeof(vib_welford_t));
+}
 
 static float one_axis_feature(const vib_welford_1d_t *s, float base_mean, float base_offset)
 {
@@ -26,11 +31,36 @@ static float one_axis_feature(const vib_welford_1d_t *s, float base_mean, float 
     return (out > 0.0f) ? out : 0.0f;
 }
 
-void algo_welford_finish(const algo_welford_t *ctx, const vib_baseline_t*baseline, 
-                         float *out_x, float *out_y, float *out_z) {
-    if (!ctx || !out_x || !out_y || !out_z) return;
+void algo_welford_update_1(vib_welford_t *ctx, float x, float y, float z)
+{
+    if (!ctx)
+        return;
+    ctx->count++;
 
-    if (ctx->count < 2) {
+    // X Axis
+    double delta_x = x - ctx->mean_x;
+    ctx->mean_x += delta_x / ctx->count;
+    ctx->m2_x += delta_x * (x - ctx->mean_x);
+
+    // Y Axis
+    double delta_y = y - ctx->mean_y;
+    ctx->mean_y += delta_y / ctx->count;
+    ctx->m2_y += delta_y * (y - ctx->mean_y);
+
+    // Z Axis
+    double delta_z = z - ctx->mean_z;
+    ctx->mean_z += delta_z / ctx->count;
+    ctx->m2_z += delta_z * (z - ctx->mean_z);
+}
+
+void algo_welford_finish(const vib_welford_t *ctx, const vib_baseline_t *baseline,
+                         float *out_x, float *out_y, float *out_z)
+{
+    if (!ctx || !out_x || !out_y || !out_z)
+        return;
+
+    if (ctx->count < 2)
+    {
         *out_x = *out_y = *out_z = 0.0f;
         return;
     }
@@ -42,11 +72,14 @@ void algo_welford_finish(const algo_welford_t *ctx, const vib_baseline_t*baselin
     float raw_rms_z = sqrt(ctx->m2_z / (ctx->count - 1));
 
     // 2. Subtract Baseline Offset to get Delta
-    if (baseline) {
+    if (baseline)
+    {
         *out_x = (raw_rms_x > baseline->x.offset) ? (raw_rms_x - baseline->x.offset) : 0.0f;
         *out_y = (raw_rms_y > baseline->y.offset) ? (raw_rms_y - baseline->y.offset) : 0.0f;
         *out_z = (raw_rms_z > baseline->z.offset) ? (raw_rms_z - baseline->z.offset) : 0.0f;
-    } else {
+    }
+    else
+    {
         *out_x = raw_rms_x;
         *out_y = raw_rms_y;
         *out_z = raw_rms_z;
@@ -57,40 +90,48 @@ void algo_welford_finish(const algo_welford_t *ctx, const vib_baseline_t*baselin
  * PUBLIC API IMPLEMENTATION
  * ========================================================================= */
 
-void algo_welford_update(algo_welford_ctx_t *ctx, 
-                         const imu_raw_data_t *src, 
-                         size_t count, 
-                         algo_axis_t axis, 
+void algo_welford_update(algo_welford_ctx_t *ctx,
+                         const imu_raw_data_t *src,
+                         size_t count,
+                         algo_axis_t axis,
                          float sensitivity)
 {
-    if (ctx == NULL || src == NULL || count == 0) {
+    if (ctx == NULL || src == NULL || count == 0)
+    {
         return;
     }
-    
+
     // Convert enum to integer axis index
     int axis_idx = (int)axis;
-    if (axis_idx < 0 || axis_idx > 2) {
+    if (axis_idx < 0 || axis_idx > 2)
+    {
         axis_idx = 2; // Default to Z-axis
     }
-    
+
     // Process each sample
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++)
+    {
         // Extract and convert raw value
         int16_t raw_val = algo_extract_axis_raw(&src[i], axis_idx);
         float sample = algo_scale_raw_to_float(raw_val, sensitivity);
-        
+
         // Update min/max
-        if (ctx->count == 0) {
+        if (ctx->count == 0)
+        {
             ctx->min_val = sample;
             ctx->max_val = sample;
-        } else {
-            if (sample < ctx->min_val) ctx->min_val = sample;
-            if (sample > ctx->max_val) ctx->max_val = sample;
         }
-        
+        else
+        {
+            if (sample < ctx->min_val)
+                ctx->min_val = sample;
+            if (sample > ctx->max_val)
+                ctx->max_val = sample;
+        }
+
         // Welford's algorithm for online mean and variance
         ctx->count++;
-        
+
         double delta = sample - ctx->mean;
         ctx->mean += delta / ctx->count;
         double delta2 = sample - ctx->mean;
@@ -101,26 +142,38 @@ void algo_welford_update(algo_welford_ctx_t *ctx,
 void algo_welford_get_stats(const algo_welford_ctx_t *ctx,
                             float *mean, float *variance, float *std_dev)
 {
-    if (ctx == NULL) {
-        if (mean) *mean = 0.0f;
-        if (variance) *variance = 0.0f;
-        if (std_dev) *std_dev = 0.0f;
+    if (ctx == NULL)
+    {
+        if (mean)
+            *mean = 0.0f;
+        if (variance)
+            *variance = 0.0f;
+        if (std_dev)
+            *std_dev = 0.0f;
         return;
     }
-    
-    if (ctx->count == 0) {
-        if (mean) *mean = 0.0f;
-        if (variance) *variance = 0.0f;
-        if (std_dev) *std_dev = 0.0f;
+
+    if (ctx->count == 0)
+    {
+        if (mean)
+            *mean = 0.0f;
+        if (variance)
+            *variance = 0.0f;
+        if (std_dev)
+            *std_dev = 0.0f;
         return;
     }
-    
-    if (mean) *mean = (float)ctx->mean;
-    
-    if (variance || std_dev) {
+
+    if (mean)
+        *mean = (float)ctx->mean;
+
+    if (variance || std_dev)
+    {
         double var = (ctx->count > 1) ? (ctx->m2 / (ctx->count - 1)) : 0.0;
-        if (variance) *variance = (float)var;
-        if (std_dev) *std_dev = (float)sqrt(var);
+        if (variance)
+            *variance = (float)var;
+        if (std_dev)
+            *std_dev = (float)sqrt(var);
     }
 }
 
@@ -133,10 +186,11 @@ void algo_welford_get_stats(const algo_welford_ctx_t *ctx,
  */
 void algo_welford_reset(algo_welford_ctx_t *ctx)
 {
-    if (ctx == NULL) {
+    if (ctx == NULL)
+    {
         return;
     }
-    
+
     ctx->count = 0;
     ctx->mean = 0.0;
     ctx->m2 = 0.0;
@@ -152,34 +206,37 @@ void algo_welford_combine(algo_welford_ctx_t *result,
                           const algo_welford_ctx_t *a,
                           const algo_welford_ctx_t *b)
 {
-    if (result == NULL || a == NULL || b == NULL) {
+    if (result == NULL || a == NULL || b == NULL)
+    {
         return;
     }
-    
-    if (a->count == 0) {
+
+    if (a->count == 0)
+    {
         *result = *b;
         return;
     }
-    
-    if (b->count == 0) {
+
+    if (b->count == 0)
+    {
         *result = *a;
         return;
     }
-    
+
     // Combine counts
     uint32_t total_count = a->count + b->count;
-    
+
     // Combine means using Chan's formula
     double delta = b->mean - a->mean;
     double mean = a->mean + delta * b->count / total_count;
-    
+
     // Combine M2 using Chan's formula
     double m2 = a->m2 + b->m2 + delta * delta * a->count * b->count / total_count;
-    
+
     // Combine min/max
     float min_val = (a->min_val < b->min_val) ? a->min_val : b->min_val;
     float max_val = (a->max_val > b->max_val) ? a->max_val : b->max_val;
-    
+
     // Store results
     result->count = total_count;
     result->mean = mean;
@@ -199,34 +256,46 @@ void algo_welford_get_all_stats(const algo_welford_ctx_t *ctx,
                                 float *min_val,
                                 float *max_val)
 {
-    if (ctx == NULL) {
-        if (count) *count = 0;
-        if (mean) *mean = 0.0f;
-        if (std_dev) *std_dev = 0.0f;
-        if (min_val) *min_val = 0.0f;
-        if (max_val) *max_val = 0.0f;
+    if (ctx == NULL)
+    {
+        if (count)
+            *count = 0;
+        if (mean)
+            *mean = 0.0f;
+        if (std_dev)
+            *std_dev = 0.0f;
+        if (min_val)
+            *min_val = 0.0f;
+        if (max_val)
+            *max_val = 0.0f;
         return;
     }
-    
-    if (count) *count = ctx->count;
-    if (min_val) *min_val = ctx->min_val;
-    if (max_val) *max_val = ctx->max_val;
-    
-    if (ctx->count == 0) {
-        if (mean) *mean = 0.0f;
-        if (std_dev) *std_dev = 0.0f;
+
+    if (count)
+        *count = ctx->count;
+    if (min_val)
+        *min_val = ctx->min_val;
+    if (max_val)
+        *max_val = ctx->max_val;
+
+    if (ctx->count == 0)
+    {
+        if (mean)
+            *mean = 0.0f;
+        if (std_dev)
+            *std_dev = 0.0f;
         return;
     }
-    
-    if (mean) *mean = (float)ctx->mean;
-    
-    if (std_dev) {
+
+    if (mean)
+        *mean = (float)ctx->mean;
+
+    if (std_dev)
+    {
         double var = (ctx->count > 1) ? (ctx->m2 / (ctx->count - 1)) : 0.0;
         *std_dev = (float)sqrt(var);
     }
 }
-
-
 
 vib_algo_err_t vib_welford_feature_from_stats(const vib_welford_3d_t *stats,
                                               vib_welford_feature_out_t *out)

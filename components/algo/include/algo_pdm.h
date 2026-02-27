@@ -144,17 +144,6 @@ typedef enum {
  * 3. 算法上下文结构（由调用方分配）
  * ========================================================================= */
 
-/**
- * @brief Welford在线统计上下文
- * O(1)空间复杂度，无需大数组
- */
-typedef struct {
-    uint32_t count;     // 已处理的样本数
-    double mean;        // 当前均值
-    double m2;          // 与均值差的平方和
-    float min_val;      // 观察到的最小值
-    float max_val;      // 观察到的最大值
-} algo_welford_ctx_t;
 
 /**
  * @brief 包络分析配置和状态
@@ -197,6 +186,18 @@ void algo_ingest_axis(const imu_raw_data_t *src,
                       float sensitivity, 
                       float *out_buf);
 
+
+/**
+ * @brief Welford在线统计上下文
+ * O(1)空间复杂度，无需大数组
+ */
+typedef struct {
+    uint32_t count;     // 已处理的样本数
+    double mean;        // 当前均值
+    double m2;          // 与均值差的平方和
+    float min_val;      // 观察到的最小值
+    float max_val;      // 观察到的最大值
+} algo_welford_ctx_t;
 
 /**
  * @brief [WELFORD] 获取当前统计信息

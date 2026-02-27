@@ -4,6 +4,7 @@
 #include "fs_utils.h"
 #include "logger.h"
 #include "algo_pdm.h"
+#include "algo_stash.h"
 #include "config_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"

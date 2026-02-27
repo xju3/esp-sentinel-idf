@@ -34,14 +34,13 @@ monitor_mode_t g_monitor_mode = MONITOR_MODE_PATROLLING;
 
 static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
-    vib_welford_t *welford_st = (vib_welford_3d_t *)ctx;
+    vib_welford_t *welford_st = (vib_welford_t *)ctx;
     for (size_t i = 0; i < count; i++)
     {
         float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
         float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
         float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
-        // LOG_DEBUGF("x=%f, y=%f, z=%f", x_g, y_g, z_g);
-        vib_welford_3d_update(welford_st, x_g, y_g, z_g);
+        algo_welford_update_1(welford_st, x_g, y_g, z_g);
     }
 }
 
@@ -109,8 +108,8 @@ static void monitor_task_loop(void *arg)
             continue;
         }
 
-        // 重置Welford统计，开始新的采样周期
-        vib_welford_3d_init(&params->welford_st);
+        // // 重置Welford统计，开始新的采样周期
+        // vib_welford_init(&params->welford_st);
 
         // 召唤引擎！把配置、时间和自己的处理函数传进去
         esp_err_t err = daq_icm_42688_p_capture(params->cfg, 1000, monitor_chunk_handler, &params->welford_st, DAQ_CHUNK_SIZE);
@@ -121,7 +120,7 @@ static void monitor_task_loop(void *arg)
                             &params->rms.rms_y,
                             &params->rms.rms_z);
 
-        LOG_DEBUGF("rms(g) origin: 3d=%f, x=%f, y=%f, z=%f",
+        LOG_DEBUGF("rms(g) origin: 3d=%3f, x=%3f, y=%3f, z=%3f",
                    params->rms.rms_3d, params->rms.rms_x,
                    params->rms.rms_y, params->rms.rms_z);
         // if (err == ESP_OK)
@@ -243,7 +242,7 @@ esp_err_t task_monitor_start(void)
     cfg->wom_thr_mg = 0;
 
     // 初始化Welford统计结构
-    vib_welford_3d_init(&params->welford_st);
+    algo_welford_init(&params->welford_st);
 
     // 创建消息队列
     g_monitor_message_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(imu_rms_data_t));
@@ -279,7 +278,7 @@ esp_err_t task_monitor_start(void)
     int16_t interval_min = g_user_config.detect;
     if (interval_min <= 0)
         interval_min = 1; // 如果无效，默认1分钟
-    uint64_t interval_us = (uint64_t)interval_min * 60ULL * 1000000ULL;
+    uint64_t interval_us = (uint64_t)interval_min * 5ULL * 1000000ULL;
     err = esp_timer_start_periodic(params->s_timer, interval_us);
     if (err != ESP_OK)
     {

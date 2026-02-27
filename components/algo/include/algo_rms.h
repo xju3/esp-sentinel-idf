@@ -21,8 +21,6 @@
 #define ALGO_RMS_H
 
 #include <stdint.h>
-#include <math.h>
-#include <string.h>
 #include <stdbool.h>
 
 #ifdef __cplusplus

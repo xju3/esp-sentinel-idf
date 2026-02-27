@@ -5,7 +5,6 @@
 #include <stddef.h>
 
 #include "esp_err.h"
-#include "algo_welford.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/stream_buffer.h"
