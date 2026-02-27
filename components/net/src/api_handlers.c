@@ -170,7 +170,6 @@ esp_err_t api_wifi_list_handler(httpd_req_t *req)
     
     if (!success)
     {
-        LOG_ERROR("failed to abtain wifi list.");
         cJSON_Delete(networks);
         free(ap_records);
         return send_json_string(req, "{\"status\":\"processing\"}");
