@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "daq_icm_42688_p.h"
-#include "algo_types.h"
+#include "algo_pdm.h"
 
 #define LSB_TO_G (16.0f / 32768.0f)
 

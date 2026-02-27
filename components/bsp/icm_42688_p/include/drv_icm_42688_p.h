@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "algo_types.h"
+#include "algo_pdm.h"
 
 #ifdef __cplusplus
 extern "C"

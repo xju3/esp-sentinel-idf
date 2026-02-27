@@ -1,5 +1,4 @@
 #include "data_dispatcher.h"
-#include "task_monitor.h"
 #include "config_manager.h"
 #include "logger.h"
 #include "cJSON.h"
@@ -21,7 +20,7 @@ static bool is_mqtt_connected(void) {
 }
 
 // 构建 JSON 消息
-static char* build_json_message(const monitor_rms_msg_t *msg) {
+static char* build_json_message(const dispatch_msg_t  *msg) {
     if (!msg) return NULL;
     
     cJSON *root = cJSON_CreateObject();
@@ -30,7 +29,7 @@ static char* build_json_message(const monitor_rms_msg_t *msg) {
     cJSON_AddStringToObject(root, "deviceId", g_user_config.device_id);
     cJSON_AddNumberToObject(root, "ts", (double)msg->payload.rms.timestamp);
     
-    if (msg->type == MONITOR_MSG_TYPE_RMS) {
+    if (msg->type == MSG_TYPE_RMS) {
         cJSON_AddStringToObject(root, "type", "rms");
         cJSON *data = cJSON_CreateObject();
         cJSON_AddNumberToObject(data, "x", msg->payload.rms.rms_x);
@@ -74,7 +73,7 @@ static bool send_to_mqtt(const char *topic, const char *json_str) {
 }
 
 static void dispatcher_task(void *arg) {
-    monitor_rms_msg_t msg;
+    dispatch_msg_t msg;
     char topic[128];
     
     // 构造 MQTT Topic: /device/{id}/data

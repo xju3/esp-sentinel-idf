@@ -1,15 +1,15 @@
 /* 
- * algo_pdm.h - Predictive Maintenance Algorithm Library
+ * algo_pdm.h - 预测性维护算法库顶层接口
  * 
- * Industrial-grade DSP library for vibration analysis on ESP32-S3/ESP32.
- * Pure mathematical functions with zero external dependencies (except esp-dsp).
+ * 工业级DSP库，用于ESP32-S3/ESP32上的振动分析。
+ * 纯数学函数，零外部依赖（除硬件隔离层外）。
  * 
- * Key Principles:
- * 1. Zero business coupling - No #include of project internal headers
- * 2. Zero dynamic memory allocation - All buffers allocated by caller
- * 3. Hardware acceleration priority - Use esp-dsp for FFT, FIR/IIR
- * 4. Efficient data ingestion - Handle packed big-endian int16_t DMA data
- * 5. Zero hardcoded logging - All logging via callback injection
+ * 核心架构原则：
+ * 1. 绝对零业务耦合 - 不包含任何项目内部头文件
+ * 2. 零动态内存分配 - 所有缓冲区由调用方分配
+ * 3. 硬件加速隔离 - 通过algo_math层路由到esp-dsp或纯C实现
+ * 4. 高效数据摄入 - 处理打包的大端int16_t DMA数据
+ * 5. 完全解耦的日志系统 - 通过回调注入日志
  */
 
 #ifndef ALGO_PDM_H
@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
-#include <math.h>
 #include <stdarg.h>
 
 #ifdef __cplusplus
@@ -26,38 +25,102 @@ extern "C" {
 #endif
 
 /* ========================================================================= *
- * 1. LOGGING SYSTEM DEFINITIONS
+ * 1. 日志系统定义（完全解耦）
  * ========================================================================= */
 
 /**
- * @brief Logging levels for algorithm library
+ * @brief 算法库日志级别
  */
 typedef enum {
-    ALGO_LOG_ERROR = 0,     // Error conditions
-    ALGO_LOG_WARN  = 1,     // Warning conditions
-    ALGO_LOG_INFO  = 2,     // Informational messages
-    ALGO_LOG_DEBUG = 3      // Debug-level messages
+    ALGO_LOG_ERROR = 0,     // 错误条件
+    ALGO_LOG_WARN  = 1,     // 警告条件
+    ALGO_LOG_INFO  = 2,     // 信息消息
+    ALGO_LOG_DEBUG = 3      // 调试消息
 } algo_log_level_t;
 
 /**
- * @brief Logging callback function type
- * @param level Log level
- * @param tag Log tag (module identifier)
- * @param fmt Format string (printf-style)
- * @param args Variable arguments list
+ * @brief 日志回调函数类型
+ * @param level 日志级别
+ * @param tag 日志标签（模块标识符）
+ * @param fmt 格式字符串（printf风格）
+ * @param args 可变参数列表
  */
 typedef void (*algo_log_cb_t)(algo_log_level_t level, const char *tag, 
                               const char *fmt, va_list args);
 
-/* ========================================================================= *
- * 2. PHYSICAL LAYER DATA DEFINITIONS
- * ========================================================================= */
 
-// imu_raw_data_t is defined in algo_types.h
-#include "algo_types.h"
 
 /**
- * @brief Axis selection for data processing
+ * @brief 算法库全局配置结构
+ * @note 所有字段都有合理的默认值，可以部分配置
+ */
+typedef struct {
+    /**
+     * @brief 日志回调函数
+     * @note 如果为NULL，则禁用所有日志输出
+     */
+    algo_log_cb_t log_cb;
+    
+    /**
+     * @brief 默认灵敏度系数（g/LSB）
+     * @note 用于未指定灵敏度的API调用
+     */
+    float default_sensitivity;
+    
+    /**
+     * @brief 默认采样频率（Hz）
+     * @note 用于需要采样频率但未指定的API调用
+     */
+    float default_fs_hz;
+    
+    /**
+     * @brief 性能优化标志
+     * @note 位掩码，控制各种优化选项
+     */
+    uint32_t optimization_flags;
+    
+    /**
+     * @brief 平台特定配置
+     * @note 用于存储平台特定的配置参数
+     */
+    void* platform_config;
+} algo_config_t;
+/**
+ * @brief 注册日志回调函数
+ * @param cb 日志回调函数指针（可为NULL，表示禁用日志）
+ * @note 这是算法库与外部日志系统解耦的唯一接口
+ */
+void algo_register_log_callback(algo_log_cb_t cb);
+
+/* ========================================================================= *
+ * 2. 物理层数据定义（与DMA结构完全一致）
+ * ========================================================================= */
+
+/**
+ * @brief 三轴加速度计原始数据结构（Raw Data）
+ * @note 必须保持为int16_t以最小化DMA传输带宽和PSRAM使用
+ * __attribute__((packed))确保结构体大小恰好为8字节。
+ * 这对于DMA直接将SPI硬件流映射到内存结构至关重要。
+ */
+typedef struct
+{
+    uint8_t header; // 数据包头
+    int16_t x;      // 原始X轴（注意：内部大端格式）
+    int16_t y;      // 原始Y轴
+    int16_t z;      // 原始Z轴
+    int8_t temp;    // 8位截断温度辅助数据
+} __attribute__((packed)) imu_raw_data_t;
+
+// RMS Data Structure
+typedef struct {
+    int64_t timestamp;
+    float rms_x;
+    float rms_y;
+    float rms_z;
+} imu_rms_data_t;
+
+/**
+ * @brief 数据处理的轴选择
  */
 typedef enum {
     ALGO_AXIS_X = 0,
@@ -66,72 +129,55 @@ typedef enum {
 } algo_axis_t;
 
 /* ========================================================================= *
- * 2. ALGORITHM CONTEXTS - Allocated by caller
+ * 3. 算法上下文结构（由调用方分配）
  * ========================================================================= */
 
 /**
- * @brief Welford online statistics context
- * O(1) space complexity, no large arrays needed
+ * @brief Welford在线统计上下文
+ * O(1)空间复杂度，无需大数组
  */
 typedef struct {
-    uint32_t count;     // Number of samples processed
-    double mean;        // Current mean value
-    double m2;          // Sum of squared differences from mean
-    float min_val;      // Minimum value observed
-    float max_val;      // Maximum value observed
+    uint32_t count;     // 已处理的样本数
+    double mean;        // 当前均值
+    double m2;          // 与均值差的平方和
+    float min_val;      // 观察到的最小值
+    float max_val;      // 观察到的最大值
 } algo_welford_ctx_t;
 
 /**
- * @brief Envelope analysis configuration and state
- * Uses esp-dsp biquad filters for high-pass and low-pass filtering
+ * @brief 包络分析配置和状态
+ * 使用硬件隔离层进行滤波
  */
 typedef struct {
-    float fs_hz;            // Sampling frequency (Hz)
-    float hp_cutoff_hz;     // High-pass cutoff frequency (Hz)
-    float lp_cutoff_hz;     // Low-pass cutoff frequency (Hz)
+    float fs_hz;            // 采样频率（Hz）
+    float hp_cutoff_hz;     // 高通截止频率（Hz）
+    float lp_cutoff_hz;     // 低通截止频率（Hz）
     
-    // Internal biquad filter states (for esp-dsp compatibility)
-    float hp_delay[2];      // High-pass filter delay line
-    float hp_coeffs[5];     // b0, b1, b2, a1, a2
-    
-    float lp_delay[2];      // Low-pass filter delay line  
-    float lp_coeffs[5];     // b0, b1, b2, a1, a2
+    // 内部滤波器状态（通过硬件隔离层管理）
+    void* hp_filter_state;  // 高通滤波器状态（不透明指针）
+    void* lp_filter_state;  // 低通滤波器状态（不透明指针）
 } algo_envelope_ctx_t;
 
 /**
- * @brief FFT context for hardware-accelerated frequency analysis
+ * @brief FFT上下文（硬件加速频率分析）
  */
 typedef struct {
-    size_t max_fft_size;    // Maximum FFT size supported
-    bool initialized;       // Whether FFT engine is initialized
+    size_t max_fft_size;    // 支持的最大FFT大小
+    void* fft_state;        // FFT引擎状态（不透明指针，通过硬件隔离层管理）
 } algo_fft_ctx_t;
 
 /* ========================================================================= *
- * 3. GLOBAL CONFIGURATION
+ * 4. 顶层API函数（应用接口层）
  * ========================================================================= */
 
 /**
- * @brief Global algorithm library configuration
- * @note All fields are optional. If log_cb is NULL, logging is silently ignored.
- */
-typedef struct {
-    algo_log_cb_t log_cb;           // Logging callback function (optional)
-    // Future configuration fields can be added here
-} algo_config_t;
-
-/* ========================================================================= *
- * 4. TOP-LEVEL API FUNCTIONS (Application Interface Layer)
- * ========================================================================= */
-
-/**
- * @brief [DATA INGESTION] Efficient raw data ingestion operator
- * @details Extracts specified axis -> big-endian to little-endian conversion -> 
- *          scaling by sensitivity -> stores in caller-provided float array
- * @param src Pointer to raw IMU data array
- * @param count Number of samples to process
- * @param axis Axis to extract (X, Y, or Z)
- * @param sensitivity Sensitivity factor (g/LSB or m/s²/LSB)
- * @param out_buf Caller-allocated output buffer (size >= count)
+ * @brief [数据摄入] 高效原始数据摄入算子
+ * @details 提取指定轴 -> 大端到小端转换 -> 乘以灵敏度系数 -> 存储到调用方提供的float数组
+ * @param src 原始IMU数据数组指针
+ * @param count 要处理的样本数
+ * @param axis 要提取的轴（X、Y或Z）
+ * @param sensitivity 灵敏度系数（g/LSB或m/s²/LSB）
+ * @param out_buf 调用方分配的输出缓冲区（大小 >= count）
  */
 void algo_ingest_axis(const imu_raw_data_t *src, 
                       size_t count, 
@@ -140,14 +186,14 @@ void algo_ingest_axis(const imu_raw_data_t *src,
                       float *out_buf);
 
 /**
- * @brief [WELFORD] Streaming statistical update
- * @details Directly processes raw data without intermediate float arrays.
- *          Extremely memory efficient - O(1) space complexity.
- * @param ctx Welford context (must be initialized with zeros)
- * @param src Raw IMU data array
- * @param count Number of samples to process
- * @param axis Axis to process
- * @param sensitivity Sensitivity factor
+ * @brief [WELFORD] 流式统计更新
+ * @details 直接处理原始数据，无需中间float数组。
+ *          极高的内存效率 - O(1)空间复杂度。
+ * @param ctx Welford上下文（必须用零初始化）
+ * @param src 原始IMU数据数组
+ * @param count 要处理的样本数
+ * @param axis 要处理的轴
+ * @param sensitivity 灵敏度系数
  */
 void algo_welford_update(algo_welford_ctx_t *ctx, 
                          const imu_raw_data_t *src, 
@@ -156,68 +202,54 @@ void algo_welford_update(algo_welford_ctx_t *ctx,
                          float sensitivity);
 
 /**
- * @brief [WELFORD] Get current statistics
- * @param ctx Welford context
- * @param mean Output: current mean value
- * @param variance Output: current variance
- * @param std_dev Output: current standard deviation
+ * @brief [WELFORD] 获取当前统计信息
+ * @param ctx Welford上下文
+ * @param mean 输出：当前均值
+ * @param variance 输出：当前方差
+ * @param std_dev 输出：当前标准差
  */
 void algo_welford_get_stats(const algo_welford_ctx_t *ctx,
                             float *mean, float *variance, float *std_dev);
 
 /**
- * @brief [WELFORD] Get all statistics as separate values
- * @param ctx Welford context
- * @param count Output: sample count
- * @param mean Output: current mean value
- * @param std_dev Output: current standard deviation
- * @param min_val Output: minimum value observed
- * @param max_val Output: maximum value observed
- */
-void algo_welford_get_all_stats(const algo_welford_ctx_t *ctx,
-                                uint32_t *count,
-                                float *mean,
-                                float *std_dev,
-                                float *min_val,
-                                float *max_val);
-
-/**
- * @brief [RMS] Calculate Root Mean Square of float array
- * @param data Input data array
- * @param count Number of samples
- * @return RMS value
+ * @brief [RMS] 计算float数组的均方根
+ * @param data 输入数据数组
+ * @param count 样本数
+ * @return RMS值
  */
 float algo_calc_rms(const float *data, size_t count);
 
 /**
- * @brief [KURTOSIS] Calculate kurtosis of float array
- * @param data Input data array
- * @param count Number of samples
- * @param mean Pre-calculated mean (can be from Welford)
- * @param std_dev Pre-calculated standard deviation (can be from Welford)
- * @return Kurtosis value (Normal distribution = 3.0)
+ * @brief [KURTOSIS] 计算float数组的峭度
+ * @param data 输入数据数组
+ * @param count 样本数
+ * @param mean 预计算的均值（可从Welford获取）
+ * @param std_dev 预计算的标准差（可从Welford获取）
+ * @return 峭度值（正态分布 = 3.0）
  */
 float algo_calc_kurtosis(const float *data, size_t count, float mean, float std_dev);
 
 /**
- * @brief [ENVELOPE] Initialize envelope analyzer
- * @param ctx Envelope context to initialize
- * @param fs Sampling frequency (Hz)
- * @param hp_freq High-pass cutoff frequency (Hz)
- * @param lp_freq Low-pass cutoff frequency (Hz)
+ * @brief [ENVELOPE] 初始化包络分析器
+ * @param ctx 要初始化的包络上下文
+ * @param fs 采样频率（Hz）
+ * @param hp_freq 高通截止频率（Hz）
+ * @param lp_freq 低通截止频率（Hz）
+ * @return 0表示成功，负数表示错误
+ * @note 内部使用硬件隔离层进行滤波器初始化
  */
-void algo_envelope_init(algo_envelope_ctx_t *ctx, float fs, float hp_freq, float lp_freq);
+int algo_envelope_init(algo_envelope_ctx_t *ctx, float fs, float hp_freq, float lp_freq);
 
 /**
- * @brief [ENVELOPE] Complete envelope analysis pipeline
- * @details Ingest -> High-pass filter -> Rectify -> Low-pass filter
- * @param ctx Initialized envelope context
- * @param raw_src Raw IMU data array
- * @param count Number of samples to process
- * @param axis Axis to process
- * @param sensitivity Sensitivity factor
- * @param work_buf Caller-allocated work buffer (size >= count)
- * @param out_buf Caller-allocated output buffer (size >= count)
+ * @brief [ENVELOPE] 完整的包络分析流水线
+ * @details 摄入 -> 高通滤波 -> 整流 -> 低通滤波
+ * @param ctx 已初始化的包络上下文
+ * @param raw_src 原始IMU数据数组
+ * @param count 要处理的样本数
+ * @param axis 要处理的轴
+ * @param sensitivity 灵敏度系数
+ * @param work_buf 调用方分配的工作缓冲区（大小 >= count）
+ * @param out_buf 调用方分配的输出缓冲区（大小 >= count）
  */
 void algo_envelope_process(algo_envelope_ctx_t *ctx,
                            const imu_raw_data_t *raw_src,
@@ -228,33 +260,83 @@ void algo_envelope_process(algo_envelope_ctx_t *ctx,
                            float *out_buf);
 
 /**
- * @brief [FFT] Initialize FFT engine (call once at startup)
- * @param max_fft_size Maximum FFT size to support (must be power of 2)
+ * @brief [FFT] 初始化FFT引擎
+ * @param ctx FFT上下文
+ * @param max_fft_size 支持的最大FFT大小（必须是2的幂）
+ * @return 0表示成功，负数表示错误
+ * @note 内部使用硬件隔离层进行FFT引擎初始化
  */
-void algo_fft_init(size_t max_fft_size);
+int algo_fft_init(algo_fft_ctx_t *ctx, size_t max_fft_size);
 
 /**
- * @brief [FFT] Execute real FFT and compute magnitude spectrum
- * @param input Real input signal (length N)
- * @param n FFT size (must be power of 2 and <= max_fft_size)
- * @param work_buf Work buffer (length 2*N float)
- * @param output Magnitude spectrum output (length N/2 float)
+ * @brief [FFT] 执行实数FFT并计算幅度谱
+ * @param ctx 已初始化的FFT上下文
+ * @param input 实数输入信号（长度N）
+ * @param n FFT大小（必须是2的幂且 <= max_fft_size）
+ * @param work_buf 工作缓冲区（长度2*N float）
+ * @param output 幅度谱输出（长度N/2 float）
  */
-void algo_fft_execute(const float *input, size_t n, float *work_buf, float *output);
+void algo_fft_execute(algo_fft_ctx_t *ctx,
+                      const float *input,
+                      size_t n,
+                      float *work_buf,
+                      float *output);
+
+/**
+ * @brief [FFT] 清理FFT引擎资源
+ * @param ctx FFT上下文
+ * @note 内部使用硬件隔离层进行资源清理
+ */
+void algo_fft_cleanup(algo_fft_ctx_t *ctx);
+
+/**
+ * @brief [ENVELOPE] 清理包络分析器资源
+ * @param ctx 包络上下文
+ * @note 内部使用硬件隔离层进行资源清理
+ */
+void algo_envelope_cleanup(algo_envelope_ctx_t *ctx);
 
 /* ========================================================================= *
- * 5. MODULE INITIALIZATION
+ * 5. 内部日志辅助函数和宏（安全、空指针检查）
  * ========================================================================= */
 
+// 前向声明内部日志函数
+void _algo_log_internal(algo_log_level_t level, const char *tag, const char *fmt, ...);
+
 /**
- * @brief Initialize the algorithm library with global configuration
- * @details This is the ONLY initialization interface for the algorithm library.
- *          Must be called once before using any algorithm functions.
- *          Uses static storage for configuration - zero malloc.
- * @param config Configuration structure (can be NULL for default config)
- * @return 0 on success, negative error code on failure
+ * @brief 内部日志宏（仅限算法库内部使用）
+ * @details 安全地调用注册的日志回调，处理空指针情况
  */
-int algo_pdm_init(const algo_config_t *config);
+#define ALGO_LOG_INTERNAL(level, tag, fmt, ...) \
+    do { \
+        _algo_log_internal(level, tag, fmt, ##__VA_ARGS__); \
+    } while (0)
+
+/**
+ * @brief 错误日志宏
+ */
+#define ALGO_LOGE(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_ERROR, tag, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief 警告日志宏
+ */
+#define ALGO_LOGW(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_WARN, tag, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief 信息日志宏
+ */
+#define ALGO_LOGI(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_INFO, tag, fmt, ##__VA_ARGS__)
+
+/**
+ * @brief 调试日志宏
+ */
+#define ALGO_LOGD(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_DEBUG, tag, fmt, ##__VA_ARGS__)
+#define ALGO_LOGD(tag, fmt, ...) \
+    ALGO_LOG_INTERNAL(ALGO_LOG_DEBUG, tag, fmt, ##__VA_ARGS__)
 
 #ifdef __cplusplus
 }

@@ -76,7 +76,7 @@ esp_err_t task_monitor_start(void)
 {
     if (g_monitor_message_queue != NULL)
         return ESP_OK; // Already started
-    g_monitor_message_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(monitor_msg_t));
+    g_monitor_message_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(imu_rms_data_t));
     s_wakeup_sem = xSemaphoreCreateBinary();
 
     // Create hardware timer for periodic wakeup

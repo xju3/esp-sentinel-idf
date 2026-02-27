@@ -8,34 +8,12 @@
 #include "freertos/queue.h"
 
 #include "esp_err.h"
+#include "data_dispatcher.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Message Types
-#define MONITOR_MSG_TYPE_RMS 1
-#define MONITOR_MSG_TYPE_FFT 2
-
-// RMS Data Structure
-typedef struct {
-    int64_t timestamp;
-    float rms_x;
-    float rms_y;
-    float rms_z;
-} monitor_rms_data_t;
-
-// Queue Message Wrapper
-typedef struct {
-    uint8_t type;
-    union {
-        monitor_rms_data_t rms;
-        // future: monitor_fft_data_t fft;
-    } payload;
-} monitor_msg_t;
-
-// Backward compatibility: older code used monitor_rms_msg_t
-typedef monitor_msg_t monitor_rms_msg_t;
 
 // Global Queue Handle (created by task_monitor_start)
 extern QueueHandle_t g_monitor_message_queue;
