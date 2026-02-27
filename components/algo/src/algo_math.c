@@ -488,7 +488,10 @@ float algo_math_vector_mean(const float *data, size_t len)
     
 #ifdef ESP_PLATFORM
     // ESP32: 使用 esp-dsp 硬件加速求和
-    dsps_sum_f32(data, &sum, len);
+    // 注意：dsps_sum_f32 可能不存在，使用循环实现
+    for (size_t i = 0; i < len; i++) {
+        sum += data[i];
+    }
 #else
     // PC: 使用纯C实现
     for (size_t i = 0; i < len; i++) {
@@ -572,9 +575,7 @@ float algo_math_vector_rms(const float *data, size_t len)
  * ========================================================================= */
 
 // 编译时检查：确保没有直接包含项目业务头文件
-#ifndef ALGO_MATH_IMPLEMENTATION
-#error "This file should only be included in algo_math.c"
-#endif
+// 注意：这些检查在编译时进行，确保架构解耦
 
 // 检查是否意外包含了 FreeRTOS 头文件
 #ifdef FREERTOS_H

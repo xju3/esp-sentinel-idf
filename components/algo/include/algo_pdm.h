@@ -85,12 +85,21 @@ typedef struct {
      */
     void* platform_config;
 } algo_config_t;
+
 /**
  * @brief 注册日志回调函数
  * @param cb 日志回调函数指针（可为NULL，表示禁用日志）
  * @note 这是算法库与外部日志系统解耦的唯一接口
  */
 void algo_register_log_callback(algo_log_cb_t cb);
+
+/**
+ * @brief 初始化算法库
+ * @param config 配置参数（可为NULL，使用默认配置）
+ * @return 0表示成功，负数表示错误
+ * @note 这是算法库的全局初始化函数，应在使用任何算法功能前调用
+ */
+int algo_pdm_init(const algo_config_t *config);
 
 /* ========================================================================= *
  * 2. 物理层数据定义（与DMA结构完全一致）

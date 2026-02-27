@@ -11,6 +11,7 @@ idf_component_register(
         "src/algo_kurtosis.c"
         "src/algo_envelope.c"
         "src/algo_fft.c"
+        "src/algo_math.c"
 
     INCLUDE_DIRS
         "include"

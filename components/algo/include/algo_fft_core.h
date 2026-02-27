@@ -2,8 +2,11 @@
 #define VIB_ALGO_FFT_CORE_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
-namespace Algo {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct
 {
@@ -20,6 +23,8 @@ bool fft_init(fft_context_t *ctx, uint16_t samples, float sample_rate);
 void fft_compute(fft_context_t *ctx, const float *input_data);
 void fft_deinit(fft_context_t *ctx);
 
-} // namespace Algo
+#ifdef __cplusplus
+}
+#endif
 
 #endif // VIB_ALGO_FFT_CORE_H
