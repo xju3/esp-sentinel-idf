@@ -118,7 +118,8 @@ static void monitor_task_loop(void *arg)
                                                 SAMPLE_DURATION_MS,
                                                 monitor_chunk_handler,
                                                 &params->welford_st,
-                                                DAQ_CHUNK_SIZE);
+                                                DAQ_CHUNK_SIZE,
+                                                0);
 
         if (err != ESP_OK)
         {
@@ -127,7 +128,7 @@ static void monitor_task_loop(void *arg)
         }
 
         vib_welford_feature_out_t feat = {0};
-        vib_welford_feature_from_stats(&params->welford_st, &feat);
+        vib_welford_baseline_rms_from_stats(&params->welford_st, &feat);
 
         params->rms.timestamp = time(NULL);
         params->rms.rms_x = feat.fx;
@@ -135,7 +136,7 @@ static void monitor_task_loop(void *arg)
         params->rms.rms_z = feat.fz;
         params->rms.rms_3d = feat.f3d;
 
-        LOG_DEBUGF("Detect: Samples=%d, RMS(X,Y,Z)=%.3f, %.3f, %.3f",
+        LOG_DEBUGF("Detect: Samples=%d, RMS(X,Y,Z)=%.4f, %.4f, %.4f",
                    (int)params->welford_st.x.n,
                    params->rms.rms_x,
                    params->rms.rms_y,
@@ -198,30 +199,8 @@ esp_err_t task_monitor_start(void)
     params->s_timer = NULL;
     params->cfg = cfg;
 
-    icm_odr_t odr = ICM_ODR_4KHZ;
-    icm_odr_t odr = calculate_patrol_odr(g_user_config.rpm);
-    switch (odr)
-    {
-
-    case ICM_ODR_1KHZ:
-        LOG_DEBUG("odr=1k");
-        break;
- 
-    case ICM_ODR_4KHZ:
-        LOG_DEBUG("odr=4k");
-        break;
-  
-    case ICM_ODR_8KHZ:
-        LOG_DEBUG("odr=8k");
-        break;
-    default:
-        break;
-    }
-    LOG_DEBUGF("odr=%d", odr);
-
-    
     // 初始化传感器配置
-    cfg->odr = odr;
+    cfg->odr = calculate_patrol_odr(g_user_config.rpm);
     cfg->fs = ICM_FS_16G;
     cfg->enable_wom = false;
     cfg->wom_thr_mg = 0;
@@ -263,7 +242,7 @@ esp_err_t task_monitor_start(void)
     int16_t interval_min = g_user_config.detect;
     if (interval_min <= 0)
         interval_min = 1; // 如果无效，默认1分钟
-    uint64_t interval_us = (uint64_t)interval_min * 3ULL * 1000000ULL;
+    uint64_t interval_us = (uint64_t)interval_min * 6ULL * 1000000ULL;
     err = esp_timer_start_periodic(params->s_timer, interval_us);
     if (err != ESP_OK)
     {
