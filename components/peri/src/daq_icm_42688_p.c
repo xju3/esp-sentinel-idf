@@ -8,8 +8,10 @@
 #define IMU_ODR_SIZE 16384
 static icm_cfg_t s_last_cfg = {.odr = 0xFF, .fs = 0xFF};
 static int16_t s_last_chunck_count = 0;
-
+// 定义 SPI 互斥锁
+static SemaphoreHandle_t s_spi_mutex = NULL;
 static StreamBufferHandle_t s_daq_stream = NULL;
+;
 esp_err_t daq_icm_42688_p_init(void)
 {
     // 将底层的 SPI 初始化、DMA 资源申请全部包装在这里
@@ -26,13 +28,13 @@ static void daq_internal_dma_callback(const imu_raw_data_t *data, size_t count)
 }
 
 // 终极抽象引擎
-esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg, // sensor configuration dynamically
-                          uint32_t duration_ms, // sampling time ms
-                          daq_data_handler_t handler, // callback
-                          void *user_ctx, // inbound parameters, will return back in unchanged status, by handler.
-                          int16_t chunck_size, //chouck size.
-                          uint32_t skip_ms // skip initial samples (ms) before delivering
-                        )
+esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg,             // sensor configuration dynamically
+                                  uint32_t duration_ms,       // sampling time ms
+                                  daq_data_handler_t handler, // callback
+                                  void *user_ctx,             // inbound parameters, will return back in unchanged status, by handler.
+                                  int16_t chunck_size,        // chouck size.
+                                  uint32_t skip_ms            // skip initial samples (ms) before delivering
+)
 {
     if (!cfg || !handler)
         return ESP_ERR_INVALID_ARG;
@@ -46,13 +48,16 @@ esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg, // sensor configuration dynami
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    if (s_last_chunck_count == 0) {
+    if (s_last_chunck_count == 0)
+    {
         s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(imu_raw_data_t) * chunck_size);
-        if (s_daq_stream == NULL) {
+        if (s_daq_stream == NULL)
+        {
             LOG_WARN("Fatal Error: Failed to create DAQ stream!");
             return ESP_ERR_NO_MEM;
         }
-    } else if (s_last_chunck_count != chunck_size)
+    }
+    else if (s_last_chunck_count != chunck_size)
     {
         xStreamBufferSetTriggerLevel(s_daq_stream, sizeof(imu_raw_data_t) * chunck_size);
     }

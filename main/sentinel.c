@@ -15,6 +15,7 @@
 #include "sdkconfig.h"
 #include "task_baseline.h"
 #include "task_monitor.h"
+#include "task_interrupt.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
 
@@ -77,13 +78,15 @@ void start_tasks()
         LOG_ERRORF("Failed to start monitor task: %d", err);
         return;
     }
+    // 启用中断监控.
+    imu_interrupt_init();
 
-    // 启动消费者任务 (data_dispatcher)
-    err = data_dispatcher_start();
-    if (err != ESP_OK)
-    {
-        LOG_ERRORF("Failed to start data dispatcher: %d", err);
-    }
+    // // 启动消费者任务 (data_dispatcher)
+    // err = data_dispatcher_start();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_ERRORF("Failed to start data dispatcher: %d", err);
+    // }
     LOG_INFO("System initialization complete. Device is now monitoring vibrations.");
 }
 

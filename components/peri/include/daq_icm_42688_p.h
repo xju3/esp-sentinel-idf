@@ -1,7 +1,7 @@
 #ifndef DAQ_ICM_42688_P_H_
 #define DAQ_ICM_42688_P_H_
-
 #include "drv_icm_42688_p.h"
+
 #include <stdint.h>
 // Data Acquisition
 // 定义业务层用来接收数据的"回调合同"

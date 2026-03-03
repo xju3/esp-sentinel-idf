@@ -14,6 +14,14 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "algo_pdm.h"
+#include "freertos/task.h"
+// WoM
+#define ICM42688P_REG_PWR_MGMT0 0x4E   // 电源管理寄存器 0
+#define ICM42688P_REG_INT_CONFIG 0x14  // 中断引脚配置
+#define ICM42688P_REG_INT_SOURCE0 0x65 // 基础中断路由 (DRDY, FIFO)
+#define ICM42688P_REG_INT_SOURCE1 0x66 // APEX/WoM 中断路由 <--- 必须是 0x66！
+#define ICM42688P_REG_WOM_CONFIG 0x56  // WoM 配置 (阈值与逻辑)
+#define ICM42688P_REG_SMD_CONFIG 0x57  // SMD & WoM 使能开关
 
 #ifdef __cplusplus
 extern "C"
@@ -110,27 +118,28 @@ extern "C"
      */
     esp_err_t drv_icm42688_config(const icm_cfg_t *cfg);
 
-    /**
-     * @brief 阶段三：开启异步数据流
-     * @details 清空 FIFO 残留，启动 SPI DMA 硬件无限循环搬运。
-     * @param cb 数据满水位的回调函数
-     * @return ESP_OK 成功
-     */
     esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb);
-
-    /**
-     * @brief 阶段三：停止异步数据流
-     * @details 停止 DMA 搬运，将 IMU 切入低功耗模式或 WoM 守卫模式。
-     * @return ESP_OK 成功
-     */
     esp_err_t drv_icm42688_stop_stream(void);
 
+    /**
+     * @brief 配置并启动 ICM-42688-P 的 Wake-on-Motion (WoM) 功能
+     * @param threshold_mg 唤醒阈值 (单位: 毫g, 范围建议 50 ~ 255)
+     * @return ESP_OK 成功; ESP_ERR_INVALID_ARG 参数错误; ESP_ERR_FAIL 配置失败
+     */
+    esp_err_t enable_icm42688p_wom(uint8_t threshold_mg);
+
+    esp_err_t disable_icm42688p_wom(void);
+
+    void drv_icm42688_clear_wom_interrupt(void);
     /**
      * 巡逻阶段的ODR
      */
     icm_odr_t calculate_patrol_odr(float rpm);
     // 将寄存器枚举转换为实际采样率（Hz）
     float icm_odr_to_hz(icm_odr_t odr);
+
+    // 用于保存数据处理任务的句柄
+    extern TaskHandle_t imu_task_handle;
 #ifdef __cplusplus
 }
 #endif
