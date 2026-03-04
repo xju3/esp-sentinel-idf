@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "algo_pdm.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 // WoM
 #define ICM42688P_REG_PWR_MGMT0 0x4E   // 电源管理寄存器 0
@@ -126,7 +127,7 @@ extern "C"
      * @param threshold_mg 唤醒阈值 (单位: 毫g, 范围建议 50 ~ 255)
      * @return ESP_OK 成功; ESP_ERR_INVALID_ARG 参数错误; ESP_ERR_FAIL 配置失败
      */
-    esp_err_t enable_icm42688p_wom(uint8_t threshold_mg);
+    esp_err_t enable_icm42688p_wom(uint16_t threshold_mg);
 
     esp_err_t disable_icm42688p_wom(void);
 

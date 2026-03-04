@@ -100,6 +100,7 @@ static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void
     }
 }
 
+
 static void monitor_task_loop(void *arg)
 {
     task_monitor_params_t *params = (task_monitor_params_t *)arg;
@@ -109,22 +110,23 @@ static void monitor_task_loop(void *arg)
         if (xSemaphoreTake(g_wakeup_sem, portMAX_DELAY) != pdTRUE)
             continue;
 
+        // 进入采样前先关 WoM（定时器触发的正常路径）
         disable_icm42688p_wom();
-        vib_welford_3d_init(&params->welford_st);
+        
+        // 清空 imu_task 在 WoM 期间积累的所有通知，防止采样结束后立刻被误唤醒
+        xTaskNotifyStateClear(imu_task_handle);
 
+        vib_welford_3d_init(&params->welford_st);
         esp_err_t err = daq_icm_42688_p_capture(params->cfg,
                                                 SAMPLE_DURATION_MS,
                                                 monitor_chunk_handler,
                                                 &params->welford_st,
                                                 DAQ_CHUNK_SIZE,
                                                 0);
-
         if (err != ESP_OK)
         {
             LOG_WARN("dma data capture failed.");
-            // 【修复】采样失败也要重新开 WoM，否则系统陷入死寂
-            enable_icm42688p_wom(124);
-
+            // enable_icm42688p_wom(124);
             continue;
         }
 
@@ -133,20 +135,14 @@ static void monitor_task_loop(void *arg)
         LOG_DEBUGF("samples=%d, x=%.3f, y=%.3f, z=%.3f",
                    (int)params->welford_st.x.n, feat.fx, feat.fy, feat.fz);
 
-        // 【修复】采样结束到 WoM 启用之间，给 MEMS 和信号路径一个缓冲
-        // daq_capture 内部调用了 stop_stream，但 ICM FIFO 仍可能有残留
-        vTaskDelay(pdMS_TO_TICKS(10)); // 让 drv 层 DMA 任务完全退出后再操作寄存器
-        enable_icm42688p_wom(124);
-        // 【修复】消除 enable 过程中产生的幽灵中断
-        // 先把信号量里可能已经被塞入的幽灵 token 抽干
-        // 清空 enable 过程中产生的幽灵中断
-        while (xSemaphoreTake(g_wakeup_sem, 0) == pdTRUE)
-        {
-            LOG_DEBUG("Discarding ghost wakeup signal");
-        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+        enable_icm42688p_wom(200);
+        // enable 完成后清空期间产生的幽灵信号量和通知
+        while (xSemaphoreTake(g_wakeup_sem, 0) == pdTRUE) {}
         xTaskNotifyStateClear(imu_task_handle);
     }
 }
+
 
 // Control function to pause monitor for FFT diagnosis
 void task_monitor_pause(void)
@@ -235,7 +231,7 @@ esp_err_t task_monitor_start(void)
     int16_t interval_min = g_user_config.detect;
     if (interval_min <= 0)
         interval_min = 1; // 如果无效，默认1分钟
-    uint64_t interval_us = (uint64_t)interval_min * 60ULL * 1000ULL;
+    uint64_t interval_us = (uint64_t)interval_min * 60ULL * 1000000ULL;
     err = esp_timer_start_periodic(params->s_timer, interval_us);
     if (err != ESP_OK)
     {

@@ -3,8 +3,7 @@
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+
 #include "logger.h"
 
 /* ========================================================================= *
@@ -135,102 +134,74 @@ void drv_icm42688_clear_wom_interrupt(void)
     // 读操作本身会 clear 所有 latch 标志，让 INT1 引脚恢复低电平
 }
 
-esp_err_t enable_icm42688p_wom(uint8_t threshold_mg)
+esp_err_t enable_icm42688p_wom(uint16_t threshold_mg)
 {
     esp_err_t err = ESP_OK;
 
     // Step1: 关闭引擎和所有路由
-    err |= icm_write_reg(ICM42688P_REG_SMD_CONFIG, 0x00);
-    err |= icm_write_reg(0x65, 0x00);
-    err |= icm_write_reg(0x66, 0x00);
+    err |= icm_write_reg(0x57, 0x00); // SMD_CONFIG: disable WoM engine
+    err |= icm_write_reg(0x65, 0x00); // INT_SOURCE0: clear all INT1 routes
+    err |= icm_write_reg(0x66, 0x00); // INT_SOURCE1: clear WoM routes
     err |= icm_write_reg(ICM_REG_FIFO_CONFIG, 0x00);
-    err |= icm_write_reg(0x4B, 0x02);
+    err |= icm_write_reg(0x4B, 0x02); // FIFO_FLUSH
     vTaskDelay(pdMS_TO_TICKS(5));
 
-    // Step2: LN → OFF → LP 状态机
-    err |= icm_write_reg(ICM42688P_REG_PWR_MGMT0, 0x00);
+    // Step2: 【修复 Bug4】先配置 ODR，再切换电源状态
+    err |= icm_write_reg(ICM_REG_PWR_MGMT0, 0x00); // 先关闭加速度计
     vTaskDelay(pdMS_TO_TICKS(1));
-    err |= icm_write_reg(ICM42688P_REG_PWR_MGMT0, 0x02);
-
-    uint8_t pwr_readback = 0;
-    icm_read_reg(ICM42688P_REG_PWR_MGMT0, &pwr_readback);
-    LOG_DEBUGF("WoM: PWR_MGMT0=0x%02X", pwr_readback);
-    if (pwr_readback != 0x02)
-    {
-        LOG_ERROR("WoM: Failed to enter LP mode!");
-        return ESP_FAIL;
-    }
-
-    // Step3: 等待 LP 模式稳定（5个ODR周期 @ 50Hz = 100ms）
+    // ✅ 先写好 ODR=50Hz (0x09), FS保持默认16G (AFS_SEL=0b000)
+    // ACCEL_CONFIG0: AFS_SEL[2:0]=000(16G), ACCEL_ODR[3:0]=0110(50Hz) → 0x06
+    err |= icm_write_reg(ICM_REG_ACCEL_CONFIG0, 0x06); // ✅ 50Hz, 16G
+    err |= icm_write_reg(ICM_REG_PWR_MGMT0, 0x02);    // 切入 LP 模式
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Step4: 【核心修复】循环抽干所有 DRDY 标志，直到连续读到 0x00
-    // 原理：每读一次会 clear latch，但加速度计每 20ms 产生一个新 DRDY
-    // 必须在两次 DRDY 之间的窗口内完成清零，所以要快速连读直到干净
+    // Step3: 抽干残留中断
     {
         uint8_t status = 0xFF;
-        int drain_count = 0;
-        // 最多抽 20 次，每次间隔 1ms（远小于 20ms ODR 周期）
-        // 目标：连续读到 0x00 就代表当前没有任何待处理中断
-        while (drain_count < 20)
-        {
-            icm_read_reg(0x2D, &status); // 读 INT_STATUS（自动 clear latch）
-            icm_read_reg(0x37, &status); // 读 INT_STATUS2
-            icm_read_reg(0x38, &status); // 读 INT_STATUS3
-            icm_read_reg(0x2D, &status); // 再读一次 INT_STATUS 确认已清
-            LOG_DEBUGF("WoM: drain[%d] final_status=0x%02X", drain_count, status);
-            if (status == 0x00)
-                break;
-            drain_count++;
+        for (int i = 0; i < 20; i++) {
+            icm_read_reg(0x2D, &status);
+            icm_read_reg(0x37, &status);
+            icm_read_reg(0x38, &status);
+            icm_read_reg(0x2D, &status);
+            if (status == 0x00) break;
             vTaskDelay(pdMS_TO_TICKS(1));
         }
-        // 在 DRDY 刚被清零后，下一个 DRDY 最快 20ms 后才来
-        // 我们在这个 20ms 窗口内完成 arm，来得及
-        LOG_DEBUGF("WoM: drained after %d iterations, status=0x%02X", drain_count, status);
     }
 
-    // Step5: 配置阈值（此时引擎仍关闭）
-    uint8_t threshold_val = threshold_mg / 4;
-    if (threshold_val > 31)
-        threshold_val = 31;
-    err |= icm_write_reg(ICM42688P_REG_WOM_CONFIG, (threshold_val << 3) | 0x05);
+    // Step4: 【修复 Bug1】正确换算阈值
+    // WoM 寄存器单位是 ADC LSB，换算公式：val = mg/1000 * (32768/FS_g)
+    // FS=16G → 1mg = 2.048 LSB
+    if (threshold_mg > 1000) threshold_mg = 1000;
+    
+    // ✅ 正确换算：threshold_mg / 1000.0 * (32768 / 16)
+    uint8_t threshold_val = (uint8_t)(threshold_mg * 2.048f);
+    if (threshold_val == 0) threshold_val = 1;
+    // 注意：8-bit 寄存器上限255，1000mg → 204，不会溢出
 
-    // Step6: 配置 INT1 为脉冲模式
-    err |= icm_write_reg(ICM42688P_REG_INT_CONFIG, 0x03);
+    // 切换 Bank 4 写入阈值
+    err |= icm_write_reg(0x76, 0x04);          // REG_BANK_SEL = Bank 4
+    err |= icm_write_reg(0x4A, threshold_val); // ACCEL_WOM_X_THR
+    err |= icm_write_reg(0x4B, threshold_val); // ACCEL_WOM_Y_THR
+    err |= icm_write_reg(0x4C, threshold_val); // ACCEL_WOM_Z_THR
+    err |= icm_write_reg(0x76, 0x00);          // REG_BANK_SEL = Bank 0
 
-    // Step7: 路由 WoM → INT1（此时 DRDY 路由仍断开，0x65 = 0x00）
-    err |= icm_write_reg(0x66, (1 << 2));
+    // Step5: 清除脏中断
+    drv_icm42688_clear_wom_interrupt();
 
-    // 在 Step8 开引擎之前，加这段诊断代码
-    // 直接从寄存器读加速度计原始值（不走FIFO）
-    int16_t ax, ay, az;
-    uint8_t hi, lo;
-    icm_read_reg(0x1F, &hi);
-    icm_read_reg(0x20, &lo);
-    ax = (int16_t)((hi << 8) | lo);
-    icm_read_reg(0x21, &hi);
-    icm_read_reg(0x22, &lo);
-    ay = (int16_t)((hi << 8) | lo);
-    icm_read_reg(0x23, &hi);
-    icm_read_reg(0x24, &lo);
-    az = (int16_t)((hi << 8) | lo);
-    LOG_DEBUGF("WoM: raw accel before arm: ax=%d, ay=%d, az=%d", ax, ay, az);
+    // Step6: 配置 INT1 引脚
+    err |= icm_write_reg(0x14, 0x07); // INT_CONFIG: Latch, Push-Pull, Active High
 
-    // 124mg @ 16G FS → LSB阈值 = 124/1000 * 32768/16 = 约254 LSB
-    // 如果任意轴绝对值 > 254，WoM引擎启动就会立刻触发
-    LOG_DEBUGF("WoM: threshold in LSB = %d", (int)(threshold_mg * 32768 / 16 / 1000));
+    // 【修复 Bug3】正确路由：WoM X/Y/Z → INT1 对应 Bit[4:2]
+    err |= icm_write_reg(0x66, 0x1C); // ✅ Bit4=WOM_Z, Bit3=WOM_Y, Bit2=WOM_X → INT1
 
-    // Step8: 开引擎（此时中断寄存器干净，引擎不会立即触发）
-    err |= icm_write_reg(ICM42688P_REG_SMD_CONFIG, 0x01);
+    // Step7: 【修复 Bug2】正确开启 WoM 引擎
+    // WOM_INT_MODE=1(前一样本比较), WOM_INT_DUR=0(OR逻辑), WOM_MODE=01(使能WoM)
+    err |= icm_write_reg(0x57, 0x05); // ✅ 0b00000101
 
-    LOG_INFOF("WoM armed. threshold=%dmg", threshold_mg);
-
-    // Step9: 开引擎
-    err |= icm_write_reg(ICM42688P_REG_SMD_CONFIG, 0x01);
-
-        LOG_INFOF("WoM armed. threshold=%dmg", threshold_mg);
+    LOG_INFOF("WoM armed. target=%dmg, reg_val=%d(LSB)", threshold_mg, threshold_val);
     return err;
 }
+
 
 esp_err_t disable_icm42688p_wom(void)
 {
@@ -360,7 +331,6 @@ esp_err_t drv_icm42688_config(const icm_cfg_t *cfg)
     // 5. WoM 唤醒守卫分支处理
     if (cfg->enable_wom)
     {
-        enable_icm42688p_wom(cfg->wom_thr_mg);
         LOG_INFOF("WoM Guard configured. Thr: %d mg", cfg->wom_thr_mg);
     }
 
