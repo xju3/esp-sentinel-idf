@@ -15,8 +15,9 @@
 
 float algo_calc_kurtosis(const float *data, size_t count, float mean, float std_dev)
 {
+    // Return normal distribution kurtosis for invalid input
     if (data == NULL || count < 4 || std_dev <= 0.0f) {
-        return 3.0f; // Return normal distribution kurtosis for invalid input
+        return 3.0f; 
     }
     
     // Calculate fourth central moment

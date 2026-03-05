@@ -16,11 +16,11 @@
 TaskHandle_t imu_task_handle = NULL;
 static volatile int64_t s_last_isr_time_us = 0;
 
-/* * 1. 中断服务例程 (ISR)
+/* 
+ * 1. 中断服务例程 (ISR)
  * 注意：必须使用 IRAM_ATTR 宏，确保代码链接到内部 RAM，防止因 Flash 缓存禁用导致崩溃
  */
-
- static void IRAM_ATTR imu_isr_handler(void *arg)
+static void IRAM_ATTR imu_isr_handler(void *arg)
 {
     int64_t now = esp_timer_get_time();
     
