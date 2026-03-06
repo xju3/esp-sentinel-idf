@@ -22,10 +22,6 @@
 #include "drv_icm_42688_p.h"
 #include "logger.h"
 
-#endif
-
-
-
 #ifdef __cplusplus
 extern "C"
 {
@@ -33,10 +29,12 @@ extern "C"
     // daq operating modes
     typedef enum
     {
-        TASK_MODE_PATROLING = 0, // Normal periodic daqing
-        TASK_MODE_DIAGNOSIS = 1  // FFT diagnosis in progress
+        TASK_MODE_PATROLING, // Normal periodic daqing
+        TASK_MODE_DIAGNOSIS  // FFT diagnosis in progress
     } task_mode_t;
 
 #ifdef __cplusplus
 }
-#endif // TASK_daq_H
+#endif 
+
+#endif // TASK_STASH_H

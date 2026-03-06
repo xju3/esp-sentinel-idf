@@ -1,10 +1,11 @@
 #include "task_rms.h"
 #include "algo_rms.h"
-#include "algo_iso.h"
+#include "iso_check.h"
 #include "logger.h"
 #include "config_manager.h"
 #include "data_dispatcher.h"
 #include "esp_timer.h"
+#include "task_fft.h"
 
 // 必须与 daq_worker.c 中的定义保持一致
 #define MAX_DAQ_SAMPLES 8192
@@ -36,19 +37,19 @@ static void rms_task_entry(void *arg)
             LOG_INFOF("[TASK_RMS] Result (mm/s): X=%.2f, Y=%.2f, Z=%.2f", rms.x, rms.y, rms.z);
 
             // 3. 将结果发送给数据分发器 (Data Dispatcher)
-            if (g_monitor_message_queue)
-            {
-                dispatch_msg_t msg = {
-                    .type = MSG_TYPE_RMS,
-                    .payload.rms = {
-                        .timestamp = (uint32_t)(esp_timer_get_time() / 1000), // ms
-                        .rms_x = rms.x,
-                        .rms_y = rms.y,
-                        .rms_z = rms.z
-                    }
-                };
-                xQueueSend(g_monitor_message_queue, &msg, 0);
-            }
+            // if (g_monitor_message_queue)
+            // {
+            //     dispatch_msg_t msg = {
+            //         .type = MSG_TYPE_RMS,
+            //         .payload.rms = {
+            //             .timestamp = (uint32_t)(esp_timer_get_time() / 1000), // ms
+            //             .rms_x = rms.x,
+            //             .rms_y = rms.y,
+            //             .rms_z = rms.z
+            //         }
+            //     };
+            //     xQueueSend(g_monitor_message_queue, &msg, 0);
+            // }
 
             // 4. 根据 ISO 10816 标准判断振动状态
             float max_v = (rms.x > rms.y) ? rms.x : rms.y;
@@ -73,13 +74,19 @@ static void rms_task_entry(void *arg)
                 }
                 // 状态不佳时，触发FFT分析
                 LOG_INFO("[TASK_RMS] Triggering advanced analysis (FFT) due to alarm...");
-                // TODO: 调用 algo_fft_calculate(x_ptr, job.length, ...);
+                if (g_fft_job_queue != NULL)
+                {
+                    xQueueSend(g_fft_job_queue, &job, 0);
+                }
             }
             else if (job.task_mode == TASK_MODE_DIAGNOSIS)
             {
                 // 即使状态良好，诊断模式也需要FFT
                 LOG_INFO("[TASK_RMS] Diagnosis mode: Triggering advanced analysis (FFT)...");
-                // TODO: 调用 algo_fft_calculate(x_ptr, job.length, ...);
+                if (g_fft_job_queue != NULL)
+                {
+                    xQueueSend(g_fft_job_queue, &job, 0);
+                }
             }
         }
     }

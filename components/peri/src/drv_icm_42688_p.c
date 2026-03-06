@@ -168,8 +168,10 @@ esp_err_t drv_icm42688_init(void) {
     ret = spi_bus_add_device(SPI2_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK) return ret;
 
-    s_dma_ping = (uint8_t *)heap_caps_malloc(DMA_CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    s_dma_pong = (uint8_t *)heap_caps_malloc(DMA_CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    // ESP32-S3 PSRAM DMA 限制：必须按 Cache Line (32字节) 对齐
+    // 使用 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT 确保分配在 PSRAM
+    s_dma_ping = (uint8_t *)heap_caps_aligned_alloc(32, DMA_CHUNK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_dma_pong = (uint8_t *)heap_caps_aligned_alloc(32, DMA_CHUNK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_dma_ping || !s_dma_pong) return ESP_ERR_NO_MEM;
 
     icm_write_reg(ICM_REG_DEVICE_CONFIG, 0x01);

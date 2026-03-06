@@ -24,7 +24,7 @@ esp_err_t algo_fft_init(void)
     esp_err_t ret = dsps_fft2r_init_fc32(NULL, MAX_FFT_SIZE);
     if (ret == ESP_OK) {
         s_fft_initialized = true;
-        LOG_INFO("FFT tables initialized");
+        ESP_LOGI(TAG, "FFT tables initialized");
     } else {
         ESP_LOGE(TAG, "Failed to init FFT tables: %d", ret);
     }

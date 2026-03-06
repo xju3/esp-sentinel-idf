@@ -8,7 +8,6 @@
 #include <math.h>
 #include "esp_attr.h"
 
-#define LSB_TO_G (1.0f / 2048.0f) // Assuming 16G FS: 32768/16 = 2048
 
 static DSP_Config_t patrol_config = {0};    
 static DSP_Config_t diagnosis_config = {0};    
@@ -19,7 +18,7 @@ esp_err_t start_patrolling_work();
 esp_err_t start_diagnosing_work();
 
 #define MAX_DAQ_SAMPLES 8192
-EXT_RAM_ATTR static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
+EXT_RAM_BSS_ATTR static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
 static uint32_t s_buffer_write_idx = 0;
 
 // 通用数据处理回调：将数据解交错并存入静态 Buffer

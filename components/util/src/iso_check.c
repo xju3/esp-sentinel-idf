@@ -1,4 +1,4 @@
-#include "algo_iso.h"
+#include "iso_check.h"
 #include <stddef.h>
 
 // ISO 10816-3 Vibration Severity Thresholds (mm/s RMS) for machine classes I-IV
@@ -42,6 +42,54 @@ iso_alarm_status_t iso10816_check(float rms_mm_s, const iso_config_t *config)
 
     const float* thresholds = iso_10816_thresholds[category_idx][foundation_idx];
     
+    if (rms_mm_s <= thresholds[1]) { // Below B/C boundary
+        return (rms_mm_s <= thresholds[0]) ? ISO_STATUS_GOOD : ISO_STATUS_SATISFACTORY;
+    } else { // Above B/C boundary
+        return (rms_mm_s <= thresholds[2]) ? ISO_STATUS_UNSATISFACTORY : ISO_STATUS_UNACCEPTABLE;
+    }
+}
+
+// ISO 20816-1 Vibration Severity Thresholds (mm/s RMS) for machine groups 1-4
+// Each row represents a machine group (1, 2, 3, 4)
+// Each column represents a foundation type (Rigid, Flexible)
+// The value is an array of 3 thresholds: [Zone A/B, Zone B/C, Zone C/D]
+static const float iso_20816_thresholds[4][2][3] = {
+    // Group 1: Corresponds to Class II from ISO 10816
+    {
+        {2.3f, 4.5f, 7.1f}, // Rigid Foundation
+        {3.5f, 7.1f, 11.0f} // Flexible Foundation
+    },
+    // Group 2: Corresponds to Class II from ISO 10816
+    {
+        {2.3f, 4.5f, 7.1f}, // Rigid Foundation
+        {3.5f, 7.1f, 11.0f} // Flexible Foundation
+    },
+    // Group 3: Corresponds to Class III from ISO 10816
+    {
+        {3.5f, 7.1f, 11.0f}, // Rigid Foundation
+        {5.6f, 11.0f, 18.0f} // Flexible Foundation
+    },
+    // Group 4: Corresponds to Class IV from ISO 10816
+    {
+        {5.6f, 11.0f, 18.0f}, // Rigid Foundation
+        {9.0f, 18.0f, 28.0f}  // Flexible Foundation
+    }
+};
+
+iso_alarm_status_t iso20816_check(float rms_mm_s, const iso_config_t *config)
+{
+    if (!config) return ISO_STATUS_INVALID_CONFIG;
+
+    // Validate group (1-4) and foundation (1-2) indices
+    int group_idx = config->category - 1;
+    int foundation_idx = config->foundation - 1;
+
+    if (group_idx < 0 || group_idx >= 4 || foundation_idx < 0 || foundation_idx >= 2) {
+        return ISO_STATUS_INVALID_CONFIG;
+    }
+
+    const float* thresholds = iso_20816_thresholds[group_idx][foundation_idx];
+
     if (rms_mm_s <= thresholds[1]) { // Below B/C boundary
         return (rms_mm_s <= thresholds[0]) ? ISO_STATUS_GOOD : ISO_STATUS_SATISFACTORY;
     } else { // Above B/C boundary

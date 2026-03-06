@@ -11,7 +11,20 @@
 #include "dsps_biquad.h"
 #include "dsps_biquad_gen.h"
 #include "dsps_math.h"
-#include "dsps_stats.h"
+
+static void dsps_rms_f32(const float *input, uint32_t len, float *result)
+{
+    float sum_sq = 0.0f;
+    for (int i = 0; i < len; i++) {
+        sum_sq += input[i] * input[i];
+    }
+    if (len > 0) {
+        *result = sqrtf(sum_sq / len);
+    } else {
+        *result = 0.0f;
+    }
+}
+
 
 static const char *TAG = "ALGO_RMS";
 
@@ -22,8 +35,8 @@ static const char *TAG = "ALGO_RMS";
 
 #define MAX_RMS_PROCESS_POINTS 8192
 // 定义静态暂存区，强制 16 字节对齐以满足 SIMD 指令要求
-EXT_RAM_ATTR static float s_scratch_buf[MAX_RMS_PROCESS_POINTS] __attribute__((aligned(16)));
-static SemaphoreHandle_t s_rms_mutex = NULL;
+EXT_RAM_BSS_ATTR static float s_scratch_buf[MAX_RMS_PROCESS_POINTS] __attribute__((aligned(16)));
+// static SemaphoreHandle_t s_rms_mutex = NULL;
 
 /**
  * @brief 处理单轴数据的内部辅助函数
@@ -44,7 +57,7 @@ static float process_axis(const float *input, uint32_t length, float sample_rate
     // 2. 单位转换与拷贝 (g -> mm/s^2)
     // dsps_mul_c_f32: output[i] = input[i * step_in] * C
     // 这里同时完成了数据从 const input 到 scratch buf 的拷贝
-    dsps_mul_c_f32(input, buf, length, G_TO_MM_S2, 1, 1);
+    dsps_mulc_f32(input, buf, length, G_TO_MM_S2, 1, 1);
 
     // 3. 第一级高通滤波 (HPF) - 去除重力分量 (DC)
     // 生成 2 阶 IIR Biquad 系数
@@ -101,5 +114,5 @@ vib_rms_t algo_rms_calculate(const float *x, const float *y, const float *z, uin
     if (z)
         result.z = process_axis(z, length, sample_rate);
 
-    return res
+    return result;
 }

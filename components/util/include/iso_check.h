@@ -1,5 +1,5 @@
-#ifndef ALGO_ISO_CHECK_H
-#define ALGO_ISO_CHECK_H
+#ifndef ISO_CHECK_H
+#define ISO_CHECK_H
 
 #include "config_manager.h" // For iso_config_t
 
@@ -28,6 +28,15 @@ typedef enum {
 iso_alarm_status_t iso10816_check(float rms_mm_s, const iso_config_t *config);
 
 /**
+ * @brief Checks the vibration RMS value against ISO 20816 standard.
+ * 
+ * @param rms_mm_s The vibration velocity RMS value in mm/s.
+ * @param config Pointer to the ISO configuration struct.
+ * @return iso_alarm_status_t The corresponding vibration severity zone.
+ */
+iso_alarm_status_t iso20816_check(float rms_mm_s, const iso_config_t *config);
+
+/**
  * @brief Converts an ISO alarm status enum to a human-readable string.
  */
 const char* iso_status_to_string(iso_alarm_status_t status);
@@ -36,4 +45,4 @@ const char* iso_status_to_string(iso_alarm_status_t status);
 }
 #endif
 
-#endif // ALGO_ISO_CHECK_H
+#endif // ISO_CHECK_H

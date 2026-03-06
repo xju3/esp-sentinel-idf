@@ -13,6 +13,8 @@
 #include "task_interruption.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
+#include "task_rms.h"
+#include "task_fft.h"
 
 extern esp_err_t ppp_4g_init(void);
 
@@ -56,7 +58,7 @@ void start_tasks()
     }
 
     // 获取设备 ID
-    const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
+    // const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
     // 获取设备的基准姿态
     // err = set_device_baseline(1000, device_id);
     // if (err != ESP_OK)
@@ -66,6 +68,9 @@ void start_tasks()
     // }
 
     LOG_DEBUG("准备执行任务.");
+    // 启动诊断任务
+    start_rms_diagnosis();
+    start_fft_task();
     // 启动传感器监控任务
     // err = task_monitor_start();
     // if (err != ESP_OK)
@@ -79,9 +84,9 @@ void start_tasks()
     // // 启动消费者任务 (data_dispatcher)
     // err = data_dispatcher_start();
     // if (err != ESP_OK)
-    // {
-    //     LOG_ERRORF("Failed to start data dispatcher: %d", err);
-    // }
+    {
+        LOG_ERRORF("Failed to start data dispatcher: %d", err);
+    }
     LOG_INFO("System initialization complete. Device is now monitoring vibrations.");
 }
 
