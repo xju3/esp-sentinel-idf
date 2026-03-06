@@ -28,9 +28,8 @@
 static TaskHandle_t patrol_task_handle = NULL;
 static TaskHandle_t diagnosis_task_handle = NULL;
 
-// 任务模式标志
-static volatile task_mode_t current_task_mode = TASK_MODE_PATROLING;
-static SemaphoreHandle_t task_mode_mutex = NULL;
+// 互斥锁，确保同一时间只有一个采集任务在运行
+static SemaphoreHandle_t s_daq_mutex = NULL;
 
 // FreeRTOS 软件定时器句柄
 static TimerHandle_t patrol_timer_handle = NULL;
@@ -40,7 +39,6 @@ static TimerHandle_t diagnosis_timer_handle = NULL;
 typedef struct {
     task_mode_t task_mode;
     const char *task_name;
-    bool is_priority;
 } task_context_t;
 
 /**
@@ -67,64 +65,27 @@ static void generic_task_handler(void *arg)
     
     while (1)
     {
-        // 等待通知
-        if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY))
+        // 等待定时器通知
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // 获取锁，如果当前有其他任务（如 Patrol）正在运行，Diagnosis 会在此阻塞等待
+        // 由于 Diagnosis 任务优先级更高，一旦锁释放，它会优先获得锁并立即执行
+        if (xSemaphoreTake(s_daq_mutex, portMAX_DELAY) == pdTRUE)
         {
-            if (ctx->is_priority)
+            LOG_INFOF("[TASK_DAQ] %s task triggered", ctx->task_name);
+            
+            daq_worker_param_t param = {
+                .rpm = g_user_config.rpm,
+                .task_mode = ctx->task_mode
+            };
+            
+            esp_err_t err = start_daq_worker(&param);
+            if (err != ESP_OK)
             {
-                // 优先级任务（诊断）：设置当前任务模式为诊断
-                if (xSemaphoreTake(task_mode_mutex, portMAX_DELAY) == pdTRUE)
-                {
-                    task_mode_t previous_mode = current_task_mode;
-                    current_task_mode = ctx->task_mode;
-                    xSemaphoreGive(task_mode_mutex);
-                    
-                    LOG_INFOF("[TASK_DAQ] %s task triggered (priority)", ctx->task_name);
-                    
-                    // 准备参数并直接调用 start_daq_worker
-                    daq_worker_param_t param = {
-                        .rpm = g_user_config.rpm,
-                        .task_mode = ctx->task_mode
-                    };
-                    
-                    esp_err_t err = start_daq_worker(&param);
-                    if (err != ESP_OK)
-                    {
-                        LOG_ERRORF("[TASK_DAQ] %s work failed: %s", ctx->task_name, esp_err_to_name(err));
-                    }
-                    
-                    // 恢复之前的任务模式
-                    if (xSemaphoreTake(task_mode_mutex, portMAX_DELAY) == pdTRUE)
-                    {
-                        current_task_mode = previous_mode;
-                        xSemaphoreGive(task_mode_mutex);
-                    }
-                }
+                LOG_ERRORF("[TASK_DAQ] %s work failed: %s", ctx->task_name, esp_err_to_name(err));
             }
-            else
-            {
-                // 非优先级任务（巡逻）：检查当前是否有优先级任务在执行
-                if (xSemaphoreTake(task_mode_mutex, pdMS_TO_TICKS(10)) == pdTRUE)
-                {
-                    if (current_task_mode == ctx->task_mode)
-                    {
-                        LOG_INFOF("[TASK_DAQ] %s task triggered", ctx->task_name);
-                        
-                        // 准备参数并直接调用 start_daq_worker
-                        daq_worker_param_t param = {
-                            .rpm = g_user_config.rpm,
-                            .task_mode = ctx->task_mode
-                        };
-                        
-                        esp_err_t err = start_daq_worker(&param);
-                        if (err != ESP_OK)
-                        {
-                            LOG_ERRORF("[TASK_DAQ] %s work failed: %s", ctx->task_name, esp_err_to_name(err));
-                        }
-                    }
-                    xSemaphoreGive(task_mode_mutex);
-                }
-            }
+            
+            xSemaphoreGive(s_daq_mutex);
         }
     }
 }
@@ -196,25 +157,23 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
  void start_task_daq(void) {
     LOG_INFO("[TASK_DAQ] Starting DAQ tasks...");
     
-    // 创建互斥锁
-    task_mode_mutex = xSemaphoreCreateMutex();
-    if (task_mode_mutex == NULL)
+    // 创建互斥锁 (Mutex)
+    s_daq_mutex = xSemaphoreCreateMutex();
+    if (s_daq_mutex == NULL)
     {
         LOG_ERROR("[TASK_DAQ] Failed to create mutex");
         return;
     }
     
-    // 创建任务上下文
-    task_context_t patrol_ctx = {
+    // 创建任务上下文 (必须是 static 或堆内存，因为任务会长期引用)
+    static task_context_t patrol_ctx = {
         .task_mode = TASK_MODE_PATROLING,
-        .task_name = "Patrol",
-        .is_priority = false
+        .task_name = "Patrol"
     };
     
-    task_context_t diagnosis_ctx = {
+    static task_context_t diagnosis_ctx = {
         .task_mode = TASK_MODE_DIAGNOSIS,
-        .task_name = "Diagnosis",
-        .is_priority = true
+        .task_name = "Diagnosis"
     };
     
     // 创建巡逻任务
@@ -230,7 +189,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     if (result != pdPASS)
     {
         LOG_ERROR("[TASK_DAQ] Failed to create patrol task");
-        vSemaphoreDelete(task_mode_mutex);
+        vSemaphoreDelete(s_daq_mutex);
         return;
     }
     
@@ -248,7 +207,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     {
         LOG_ERROR("[TASK_DAQ] Failed to create diagnosis task");
         vTaskDelete(patrol_task_handle);
-        vSemaphoreDelete(task_mode_mutex);
+        vSemaphoreDelete(s_daq_mutex);
         return;
     }
     
