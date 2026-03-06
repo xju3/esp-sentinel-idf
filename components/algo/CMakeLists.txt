@@ -3,8 +3,10 @@
 
 idf_component_register(
     SRCS
-        "src/algo_sampling.c"
-
+        "src/algo_welford.c"
+        "src/algo_rms.c"
+        "src/algo_iso_c" 
+        "src/algo_fft.c"
     INCLUDE_DIRS
         "include"
 

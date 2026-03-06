@@ -4,6 +4,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <stdlib.h> // for malloc/free
+#include "esp_heap_caps.h"
 
 #define IMU_ODR_SIZE 16384
 static int16_t s_last_chunck_count = 0;
@@ -54,7 +55,7 @@ esp_err_t daq_icm_42688_p_capture(
     int64_t skip_until_us = start_time_us + (int64_t)skip_ms * 1000;
     
     // 从系统堆分配接收缓冲
-    imu_raw_data_t *rx_buf = malloc(sizeof(imu_raw_data_t) * chunck_size);
+    imu_raw_data_t *rx_buf = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * chunck_size, MALLOC_CAP_SPIRAM);
     if (!rx_buf) {
         drv_icm42688_stop_stream();
         return ESP_ERR_NO_MEM;
@@ -73,7 +74,7 @@ esp_err_t daq_icm_42688_p_capture(
         }
     }
     
-    free(rx_buf);
+    heap_caps_free(rx_buf);
     drv_icm42688_stop_stream();
     return ESP_OK;
 }

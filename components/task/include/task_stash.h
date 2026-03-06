@@ -24,6 +24,8 @@
 
 #endif
 
+
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -32,7 +34,7 @@ extern "C"
     typedef enum
     {
         TASK_MODE_PATROLING = 0, // Normal periodic daqing
-        TASK_MODE_DIAGNOSIS = 1   // FFT diagnosis in progress
+        TASK_MODE_DIAGNOSIS = 1  // FFT diagnosis in progress
     } task_mode_t;
 
 #ifdef __cplusplus

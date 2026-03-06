@@ -8,7 +8,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#define LSB_TO_G (16.0f / 32768.0f);
 // 任务上下文结构体
 typedef struct {
     int32_t rpm;
@@ -18,23 +18,6 @@ typedef struct {
 
 esp_err_t start_daq_worker(daq_worker_param_t *param);
 
-/**
- * @brief 启动巡逻工作
- * 
- * @param rpm 设备转速 (RPM)
- * @return true 成功启动
- * @return false 启动失败
- */
-bool start_patrolling_work(int32_t rpm);
-
-/**
- * @brief 启动诊断工作
- * 
- * @param rpm 设备转速 (RPM)
- * @return true 成功启动
- * @return false 启动失败
- */
-bool start_diagnosing_work(int32_t rpm);
 
 #ifdef __cplusplus
 }

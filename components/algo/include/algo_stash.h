@@ -1,17 +1,16 @@
-#ifndef TASK_DAQ_H
-#define TASK_DAQ_H
+#ifndef ALGO_STASH_H
+#define ALGO_STASH_H
 
 #include <stdint.h>
 #include <stdbool.h>
-#endif
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-void start_task_daq(void);
-
 #ifdef __cplusplus
 }
-#endif // TASK_daq_H
+#endif
+
+#endif // ALGO_STASH_H

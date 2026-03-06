@@ -28,14 +28,12 @@ typedef struct {
  */
 typedef struct {
     char name[32]; // 传感器名称，如 "IIS3DWB" 或 "LIS2DW12"
-    
     /**
      * @brief 硬件 ODR 配置回调函数
      * @param ideal_odr 算法层期望的最低理想采样率 (Hz)
      * @return float    传感器实际配置成功的采样率 (Hz)
      */
     float (*config_hardware_odr)(float ideal_odr);
-    
 } SensorDriver_t;
 
 
