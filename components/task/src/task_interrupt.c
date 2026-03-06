@@ -8,7 +8,7 @@
 #include "task_monitor.h"
 #include "esp_timer.h"
 
-#define WOM_DEBOUNCE_US  50000 
+#define WOM_DEBOUNCE_US 50000
 // 假设 ICM-42688-P 的 INT1 连接到 ESP32 的 GPIO 4`
 #define IMU_INT1_PIN GPIO_NUM_4
 #define ESP_INTR_FLAG_DEFAULT 0
@@ -16,23 +16,25 @@
 TaskHandle_t imu_task_handle = NULL;
 static volatile int64_t s_last_isr_time_us = 0;
 
-/* 
+/*
  * 1. 中断服务例程 (ISR)
  * 注意：必须使用 IRAM_ATTR 宏，确保代码链接到内部 RAM，防止因 Flash 缓存禁用导致崩溃
  */
 static void IRAM_ATTR imu_isr_handler(void *arg)
 {
     int64_t now = esp_timer_get_time();
-    
+
     // 去抖：50ms 内的重复触发全部丢弃
-    if (now - s_last_isr_time_us < WOM_DEBOUNCE_US) {
+    if (now - s_last_isr_time_us < WOM_DEBOUNCE_US)
+    {
         return;
     }
     s_last_isr_time_us = now;
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     vTaskNotifyGiveFromISR(imu_task_handle, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken == pdTRUE) {
+    if (xHigherPriorityTaskWoken == pdTRUE)
+    {
         portYIELD_FROM_ISR();
     }
 }
@@ -43,22 +45,18 @@ void imu_data_processing_task(void *pvParameters)
     {
         if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY))
         {
-            // 加一点延时让引脚电平稳定
             vTaskDelay(pdMS_TO_TICKS(5));
             int level = gpio_get_level(IMU_INT1_PIN);
-            if (level == 0) {
-                // 电平已经是低，是振铃幽灵，直接丢弃
-           //     LOG_DEBUG("Ghost interrupt discarded.");
+            if (level == 0)
+            {
                 continue;
             }
-                interrupt_count++;
-                LOG_INFOF("IMU Interrupt received! Total count: %u", interrupt_count);
-            // 真实中断，清寄存器
+            interrupt_count++;
+            LOG_INFOF("IMU Interrupt received! Total count: %u", interrupt_count);
             drv_icm42688_clear_wom_interrupt();
         }
     }
 }
-
 
 /* * 3. 硬件与系统初始化
  */

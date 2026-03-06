@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "src/httpd_setup.c" "src/api_handlers.c" "src/mqtt_proxy.c" "src/data_dispatcher.c"
     INCLUDE_DIRS "include"
-    REQUIRES esp_http_server esp_netif esp_wifi mqtt lwip spiffs net util bsp
+    REQUIRES esp_http_server esp_netif esp_wifi mqtt lwip spiffs net util bsp peri
 )

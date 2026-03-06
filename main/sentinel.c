@@ -1,19 +1,15 @@
-#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_wifi.h"
-#include "esp_log.h"
-#include "lwip/sockets.h"
-
 #include "nvs_flash.h"
-#include "core_wifi.h"
-#include "ppp_4g.h"
+#include "sdkconfig.h"
+#include <string.h>
+
 #include "mqtt_proxy.h"
 #include "config_manager.h"
 #include "web_server.h"
 #include "logger.h"
-#include "sdkconfig.h"
-#include "task_baseline.h"
+#include "core_wifi.h"
+#include "ppp_4g.h"
 #include "task_monitor.h"
 #include "task_interrupt.h"
 #include "data_dispatcher.h"
@@ -63,23 +59,23 @@ void start_tasks()
     // 获取设备 ID
     const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
     // 获取设备的基准姿态
-    err = set_device_baseline(1000, device_id);
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("Baseline capture failed: %d", err);
-        return;
-    }
+    // err = set_device_baseline(1000, device_id);
+    // if (err != ESP_OK)
+    // {
+    //     LOG_WARNF("Baseline capture failed: %d", err);
+    //     return;
+    // }
 
     LOG_DEBUG("准备执行任务.");
     // 启动传感器监控任务
-    err = task_monitor_start();
-    if (err != ESP_OK)
-    {
-        LOG_ERRORF("Failed to start monitor task: %d", err);
-        return;
-    }
-    // 启用中断监控.
-    imu_interrupt_init();
+    // err = task_monitor_start();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_ERRORF("Failed to start monitor task: %d", err);
+    //     return;
+    // }
+    // // 启用中断监控.
+    // imu_interrupt_init();
 
     // // 启动消费者任务 (data_dispatcher)
     // err = data_dispatcher_start();

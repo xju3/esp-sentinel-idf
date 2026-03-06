@@ -1,7 +1,4 @@
 #include "task_monitor.h"
-#include "algo_pdm.h"
-#include "algo_stash.h"
-#include "algo_welford.h"
 #include "daq_icm_42688_p.h"
 #include "drv_icm_42688_p.h"
 #include "config_manager.h"
@@ -15,16 +12,30 @@
 #include <math.h>
 #include <stdbool.h>
 
+ /**
+ * @file task_monitor.c
+ * @author Aeons Team
+ * @date 2024-06-01
+ * @version 1.
+ * @brief 任务：定时采样，数据分发及异常检测
+ *
+ * 该模块负责定时采集数据，并将数据分发给两路任务：
+ * 1. Welford算法与RMS检查机械状态，如转子不平衡, 固定螺丝松𥁧, 
+ * 2. 进行峭度, 包络解调, FFT, 检测内部的轴承, 叶轮异常
+ * 
+ * 数据收集:
+ * 1. 低频信息用于检测目标的转速和载荷状态，
+ * 2. 高频信息用于检测轴承等部件的异常
+ * 3. 因此采样频率至少要覆盖 10 倍的转速频率，同时又要兼顾内存和处理能力的限制
+ * 4. 动态计算采集数据时间: 由于转速不同, 需要充分收集到时域特征数据, 采样时长至少要覆盖 1000ms 的连续数据
+ *
+0
+ */
+
 #define MONITOR_QUEUE_SIZE 10
 #define DAQ_CHUNK_SIZE 64
 #define SAMPLE_DURATION_MS 1000
-typedef struct
-{
-    icm_cfg_t *cfg;
-    imu_rms_data_t rms;
-    esp_timer_handle_t s_timer;
-    vib_welford_3d_t welford_st;
-} task_monitor_params_t;
+icm_cfg_t *cfg;
 
 QueueHandle_t g_monitor_message_queue = NULL;
 SemaphoreHandle_t g_wakeup_sem = NULL;
@@ -86,18 +97,7 @@ static void cleanup(task_monitor_params_t *params)
 
 static void monitor_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
-    vib_welford_3d_t *w = (vib_welford_3d_t *)ctx;
-    if (!w || !data)
-    {
-        return;
-    }
-    for (size_t i = 0; i < count; i++)
-    {
-        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
-        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
-        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
-        vib_welford_3d_update(w, x_g, y_g, z_g);
-    }
+   
 }
 
 
@@ -115,12 +115,10 @@ static void monitor_task_loop(void *arg)
         
         // 清空 imu_task 在 WoM 期间积累的所有通知，防止采样结束后立刻被误唤醒
         xTaskNotifyStateClear(imu_task_handle);
-
-        vib_welford_3d_init(&params->welford_st);
         esp_err_t err = daq_icm_42688_p_capture(params->cfg,
                                                 SAMPLE_DURATION_MS,
                                                 monitor_chunk_handler,
-                                                &params->welford_st,
+                                                &params,
                                                 DAQ_CHUNK_SIZE,
                                                 0);
         if (err != ESP_OK)
@@ -129,11 +127,6 @@ static void monitor_task_loop(void *arg)
             // enable_icm42688p_wom(124);
             continue;
         }
-
-        vib_welford_feature_out_t feat = {0};
-        vib_welford_baseline_rms_from_stats(&params->welford_st, &feat);
-        LOG_DEBUGF("samples=%d, x=%.3f, y=%.3f, z=%.3f",
-                   (int)params->welford_st.x.n, feat.fx, feat.fy, feat.fz);
 
         vTaskDelay(pdMS_TO_TICKS(10));
         enable_icm42688p_wom(200);
@@ -189,14 +182,10 @@ esp_err_t task_monitor_start(void)
     params->cfg = cfg;
 
     // 初始化传感器配置
-    cfg->odr = calculate_patrol_odr(g_user_config.rpm);
-    cfg->fs = ICM_FS_16G;
-    cfg->enable_wom = false;
-    cfg->wom_thr_mg = 0;
-
-    // 初始化Welford统计结构
-    vib_welford_3d_init(&params->welford_st);
-
+    // cfg->odr = calculate_patrol_odr(g_user_config.rpm);
+    // cfg->fs = ICM_FS_16G;
+    // cfg->enable_wom = false;
+    // cfg->wom_thr_mg = 0;
     // 创建消息队列
     g_monitor_message_queue = xQueueCreate(MONITOR_QUEUE_SIZE, sizeof(imu_rms_data_t));
     if (!g_monitor_message_queue)

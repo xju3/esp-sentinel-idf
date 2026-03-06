@@ -3,7 +3,6 @@
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-
 #include "logger.h"
 
 /* ========================================================================= *
@@ -202,7 +201,6 @@ esp_err_t enable_icm42688p_wom(uint16_t threshold_mg)
     return err;
 }
 
-
 esp_err_t disable_icm42688p_wom(void)
 {
     esp_err_t err = ESP_OK;
@@ -391,7 +389,8 @@ static void icm_dma_worker_task(void *arg)
         if (ret == ESP_OK && s_stream_running && s_data_cb)
         {
             // 将纯净的数据抛给上层 (此时数据绝对不会是 -1 了)
-            s_data_cb((const imu_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
+            //TODO: 这里可以直接调用回调，也可以发消息通知 task_monitor 来处理，后者更灵活一些。
+            //s_data_cb((const imu_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
         }
     }
 

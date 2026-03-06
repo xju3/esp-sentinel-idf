@@ -13,7 +13,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "algo_pdm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 // WoM
@@ -71,6 +70,23 @@ extern "C"
         ICM_FS_2G = 0x03 // 适合纯姿态/微小位移监控
     } icm_fs_t;
 
+    typedef struct
+    {
+        int64_t timestamp;
+        float rms_x;
+        float rms_y;
+        float rms_z;
+        float rms_3d;
+    } imu_rms_data_t;
+
+    typedef struct
+    {
+        uint8_t header; // 数据包头
+        int16_t x;      // 原始X轴（注意：内部大端格式）
+        int16_t y;      // 原始Y轴
+        int16_t z;      // 原始Z轴
+        int8_t temp;    // 8位截断温度辅助数据
+    } __attribute__((packed)) imu_raw_data_t;
     /**
      * @brief 驱动动态配置参数
      */

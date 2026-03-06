@@ -16,16 +16,11 @@
 #include <string.h>
 #include <math.h>
 
-#include "algo_baseline.h"
-#include "algo_pdm.h"
-#include "algo_welford.h"
 #include "config_manager.h"
 #include "daq_icm_42688_p.h"
 #include "data_dispatcher.h"
 #include "drv_icm_42688_p.h"
 #include "logger.h"
-#include "iso_10816.h"
-
 
 #endif
 
@@ -37,10 +32,16 @@ extern "C"
     // Monitor operating modes
     typedef enum
     {
-        MONITOR_MODE_PATROLLING = 0,       // Normal periodic monitoring
-        MONITOR_MODE_DIAGNOSIS = 1 // FFT diagnosis in progress
+        MONITOR_MODE_PATROLLING = 0, // Normal periodic monitoring
+        MONITOR_MODE_DIAGNOSIS = 1   // FFT diagnosis in progress
     } monitor_mode_t;
 
+    typedef struct
+    {
+        icm_cfg_t *cfg;
+        imu_rms_data_t rms;
+        esp_timer_handle_t s_timer;
+    } task_monitor_params_t;
 
     // Global Queue Handle (created by task_monitor_start)
     extern QueueHandle_t g_monitor_message_queue;
