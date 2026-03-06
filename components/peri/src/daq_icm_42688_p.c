@@ -3,86 +3,77 @@
 #include "freertos/stream_buffer.h"
 #include "esp_timer.h"
 #include "esp_log.h"
-#include "logger.h"
+#include <stdlib.h> // for malloc/free
 
 #define IMU_ODR_SIZE 16384
-static icm_cfg_t s_last_cfg = {.odr = 0xFF, .fs = 0xFF};
 static int16_t s_last_chunck_count = 0;
-// 定义 SPI 互斥锁
-static SemaphoreHandle_t s_spi_mutex = NULL;
 static StreamBufferHandle_t s_daq_stream = NULL;
-;
-esp_err_t daq_icm_42688_p_init(void)
-{
-    // 将底层的 SPI 初始化、DMA 资源申请全部包装在这里
-    // 如果以后换了传感器，只需要改这里，外面的 app_main 完全不用动
+
+esp_err_t daq_icm_42688_p_init(void) {
     return drv_icm42688_init();
 }
-// 永远不变的底层私有抽水机
-static void daq_internal_dma_callback(const imu_raw_data_t *data, size_t count)
-{
-    if (s_daq_stream)
-    {
+
+// 底层私有抽水机 (由 DMA Worker 触发)
+static void daq_internal_dma_callback(const imu_raw_data_t *data, size_t count) {
+    if (s_daq_stream) {
         xStreamBufferSend(s_daq_stream, data, count * sizeof(imu_raw_data_t), 0);
     }
 }
 
-// 终极抽象引擎
-esp_err_t daq_icm_42688_p_capture(icm_cfg_t *cfg,             // sensor configuration dynamically
-                                  uint32_t duration_ms,       // sampling time ms
-                                  daq_data_handler_t handler, // callback
-                                  void *user_ctx,             // inbound parameters, will return back in unchanged status, by handler.
-                                  int16_t chunck_size,        // chouck size.
-                                  uint32_t skip_ms            // skip initial samples (ms) before delivering
-)
+// 终极采集引擎：按块将平滑数据回调给上层算法
+esp_err_t daq_icm_42688_p_capture(
+    icm_cfg_t *cfg,             
+    uint32_t duration_ms,       
+    daq_data_handler_t handler, 
+    void *user_ctx,             
+    int16_t chunck_size,        
+    uint32_t skip_ms)           
 {
-    if (!cfg || !handler)
-        return ESP_ERR_INVALID_ARG;
+    if (!cfg || !handler) return ESP_ERR_INVALID_ARG;
 
-    if (cfg->odr != s_last_cfg.odr || cfg->fs != s_last_cfg.fs)
-    {
-        LOG_DEBUG("Hardware config changed! Re-configuring sensor...");
-        drv_icm42688_config(cfg);
-        s_last_cfg.odr = cfg->odr;
-        s_last_cfg.fs = cfg->fs;
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
+    // 下发 FS / WoM 等配置 (不干扰 ODR)
+    drv_icm42688_config(cfg);
+    vTaskDelay(pdMS_TO_TICKS(20)); // 给硬件配置生效留出稳定时间
 
-    if (s_last_chunck_count == 0)
-    {
+    // 动态调整 StreamBuffer 的触发水位
+    if (s_last_chunck_count == 0) {
         s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(imu_raw_data_t) * chunck_size);
-        if (s_daq_stream == NULL)
-        {
-            LOG_WARN("Fatal Error: Failed to create DAQ stream!");
+        if (s_daq_stream == NULL) {
             return ESP_ERR_NO_MEM;
         }
-    }
-    else if (s_last_chunck_count != chunck_size)
-    {
+    } else if (s_last_chunck_count != chunck_size) {
         xStreamBufferSetTriggerLevel(s_daq_stream, sizeof(imu_raw_data_t) * chunck_size);
     }
-    s_last_chunck_count = chunck_size; // 记住当前状态
+    s_last_chunck_count = chunck_size; 
 
+    // 启动底层硬件 DMA 自动流水线
     drv_icm42688_start_stream(daq_internal_dma_callback);
 
     int64_t start_time_us = esp_timer_get_time();
     int64_t end_time_us = start_time_us + (int64_t)duration_ms * 1000;
     int64_t skip_until_us = start_time_us + (int64_t)skip_ms * 1000;
-    imu_raw_data_t rx_buf[chunck_size];
+    
+    // 从系统堆分配接收缓冲
+    imu_raw_data_t *rx_buf = malloc(sizeof(imu_raw_data_t) * chunck_size);
+    if (!rx_buf) {
+        drv_icm42688_stop_stream();
+        return ESP_ERR_NO_MEM;
+    }
 
-    while (esp_timer_get_time() < end_time_us)
-    {
-        size_t bytes = xStreamBufferReceive(s_daq_stream, rx_buf, sizeof(rx_buf), pdMS_TO_TICKS(100));
-        if (bytes > 0)
-        {
+    // 在预期时长内循环汲取数据并抛给算法处理
+    while (esp_timer_get_time() < end_time_us) {
+        size_t bytes = xStreamBufferReceive(s_daq_stream, rx_buf, sizeof(imu_raw_data_t) * chunck_size, pdMS_TO_TICKS(100));
+        if (bytes > 0) {
             size_t count = bytes / sizeof(imu_raw_data_t);
             int64_t now = esp_timer_get_time();
-            if (now >= skip_until_us)
-            {
+            // 过滤掉硬件启动初期的不稳定暂态
+            if (now >= skip_until_us) {
                 handler(rx_buf, count, user_ctx);
             }
         }
     }
+    
+    free(rx_buf);
     drv_icm42688_stop_stream();
     return ESP_OK;
 }

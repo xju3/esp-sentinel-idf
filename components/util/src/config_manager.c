@@ -90,10 +90,17 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         safe_copy(cfg->host, sizeof(cfg->host), item->valuestring);
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(root, "modelType");
+    item = cJSON_GetObjectItemCaseSensitive(root, "deviceType");
     if (cJSON_IsString(item))
     {
+        // device_type 现在是字符串类型
         safe_copy(cfg->device_type, sizeof(cfg->device_type), item->valuestring);
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "motorType");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->motor_type = (int8_t)item->valueint;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
@@ -102,10 +109,10 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         cfg->rpm = (int32_t)item->valueint;
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(root, "detect");
+    item = cJSON_GetObjectItemCaseSensitive(root, "diagnosis");
     if (cJSON_IsNumber(item))
     {
-        cfg->detect = (int32_t)item->valueint;
+        cfg->diagnosis = (int16_t)item->valueint;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "report");
@@ -320,10 +327,11 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
 
     cJSON_AddStringToObject(root, "deviceId", cfg->device_id);
     cJSON_AddStringToObject(root, "deviceName", cfg->device_name);
-    cJSON_AddStringToObject(root, "modelType", cfg->device_type);
+    cJSON_AddStringToObject(root, "deviceType", cfg->device_type);
+    cJSON_AddNumberToObject(root, "motorType", cfg->motor_type);
     cJSON_AddNumberToObject(root, "months", cfg->months);
     cJSON_AddStringToObject(root, "host", cfg->host);
-    cJSON_AddNumberToObject(root, "detect", cfg->detect);
+    cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
     cJSON_AddNumberToObject(root, "report", cfg->report);
     cJSON_AddNumberToObject(root, "battery", cfg->battery);
     cJSON_AddNumberToObject(root, "rpm", cfg->rpm);

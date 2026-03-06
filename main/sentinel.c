@@ -10,8 +10,7 @@
 #include "logger.h"
 #include "core_wifi.h"
 #include "ppp_4g.h"
-#include "task_monitor.h"
-#include "task_interrupt.h"
+#include "task_interruption.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
 

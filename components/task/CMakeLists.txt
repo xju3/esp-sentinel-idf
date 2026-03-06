@@ -1,4 +1,4 @@
-idf_component_register(SRCS "src/task_monitor.c" "src/task_interrupt.c"
+idf_component_register(SRCS "src/task_daq.c" "src/task_interruption.c"
                        INCLUDE_DIRS "include"
                        REQUIRES esp-dsp driver peri net util algo)
 

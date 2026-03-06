@@ -9,6 +9,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// RMS 数据结构体
+typedef struct {
+    uint32_t timestamp;  // 时间戳
+    float rms_x;         // X轴RMS值
+    float rms_y;         // Y轴RMS值
+    float rms_z;         // Z轴RMS值
+} imu_rms_data_t;
+
 // Message Types
 #define MSG_TYPE_RMS 1
 #define MSG_TYPE_FFT 2

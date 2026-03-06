@@ -1,11 +1,10 @@
-#include "task_interrupt.h"
+#include "task_interruption.h"
 #include <stdio.h>
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 
 #include "logger.h"
 #include "drv_icm_42688_p.h"
-#include "task_monitor.h"
 #include "esp_timer.h"
 
 #define WOM_DEBOUNCE_US 50000
