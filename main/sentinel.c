@@ -56,6 +56,12 @@ void start_tasks()
         LOG_WARNF("System DAQ initialization failed: %d", err);
         return;
     }
+    
+    err = ppp_4g_init();
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("4G module initialization failed: %d", err);  
+    }
 
     // 获取设备 ID
     // const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
@@ -69,8 +75,8 @@ void start_tasks()
 
     LOG_DEBUG("准备执行任务.");
     // 启动诊断任务
-    start_rms_diagnosis();
-    start_fft_task();
+    // start_rms_diagnosis();
+    // start_fft_task();
     // 启动传感器监控任务
     // err = task_monitor_start();
     // if (err != ESP_OK)
