@@ -4,7 +4,7 @@ idf_component_register(
         "src/daq_worker.c" 
         "src/task_rms.c" 
         "src/task_fft.c"
-        "src/wom_lis2dh20.c" 
+        "src/wom_lis2dh12.c" 
         "src/wom_icm_42688.c" 
     INCLUDE_DIRS 
         "include" 

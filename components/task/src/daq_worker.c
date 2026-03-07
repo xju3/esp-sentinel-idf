@@ -1,6 +1,7 @@
 #include "daq_worker.h"
 #include "drv_icm_42688_p.h"
 #include "daq_icm_42688_p.h"
+#include "drv_lis2dh12.h" // <-- Added
 #include "imu_config.h"
 #include "logger.h"
 #include "esp_err.h"
@@ -23,6 +24,8 @@ static uint32_t s_buffer_write_idx = 0;
 
 // 通用数据处理回调：将数据解交错并存入静态 Buffer
 static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx);
+static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count);
+
 
 /**
  * @brief 启动巡逻工作
@@ -43,14 +46,22 @@ esp_err_t start_patrolling_work()
     }
 
     s_buffer_write_idx = 0; // 重置写入索引
-    icm_cfg_t capture_cfg = { .fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0 };
     
     // 计算采集时长 (ms)
     uint32_t duration_ms = (uint32_t)(patrol_config.actual_time * 1000.0f);
     if (duration_ms == 0) duration_ms = 1000;
     
     // 此处使用LIS2DH12采集数据，因为它支持更低的采样率，且巡逻工作不需要高频数据
+    LOG_INFOF("[DAQ_WORKER] Starting LIS2DH12 capture for %lu ms", duration_ms);
+    esp_err_t ret = drv_lis2dh12_capture(duration_ms, daq_buffer_handler_lis);
 
+    if (ret != ESP_OK) {
+        LOG_ERRORF("[DAQ_WORKER] Patrol capture failed: %d", ret);
+        return ret;
+    }
+    LOG_INFOF("[DAQ_WORKER] Patrol complete. Samples: %lu", s_buffer_write_idx);
+    
+    // TODO: Add job to queue for processing patrol data
     
     return ESP_OK;
 }
@@ -111,14 +122,17 @@ void init_config(daq_worker_param_t *param)
             LOG_INFO("[DAQ_WORKER] Patrol config already initialized");
             return;
         }
+        // Use LIS2DH12 driver for patrolling
         patrol_config = IMU_Calculate_DSP_Config(
-            &icm42688_driver,
+            &lis2dh12_driver,
             (float)param->rpm,
             10.0f,   // C
             10.0f,   // H
             1000.0f, // F_env
             1.0f     // delta_f_max
         );
+        LOG_INFOF("[DAQ_WORKER] Patrol config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
+                  patrol_config.actual_odr, patrol_config.actual_time, patrol_config.fft_points);
         return;
     }
     else if (param->task_mode == TASK_MODE_DIAGNOSIS)
@@ -136,8 +150,41 @@ void init_config(daq_worker_param_t *param)
             2000.0f, // F_env
             1.0f     // delta_f_max
         );
+         LOG_INFOF("[DAQ_WORKER] Diagnosis config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
+                  diagnosis_config.actual_odr, diagnosis_config.actual_time, diagnosis_config.fft_points);
     }
 }
+
+// LIS2DH12 data handler
+static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count)
+{
+    float *x_plane = &s_vib_buffer[0];
+    float *y_plane = &s_vib_buffer[MAX_DAQ_SAMPLES];
+    float *z_plane = &s_vib_buffer[MAX_DAQ_SAMPLES * 2];
+
+    for (size_t i = 0; i < count; i++)
+    {
+        if (s_buffer_write_idx >= MAX_DAQ_SAMPLES)
+        {
+            break;
+        }
+
+        // LIS2DH12 sensitivity is dependent on FS. Assuming 2G for now.
+        // Sensitivity @ 2G = 1 mg/digit -> 0.001 G/digit
+        const float lsb_to_g = 0.001f; 
+
+        const float x_g = data[i].x * lsb_to_g;
+        const float y_g = data[i].y * lsb_to_g;
+        const float z_g = data[i].z * lsb_to_g;
+        
+        x_plane[s_buffer_write_idx] = x_g;
+        y_plane[s_buffer_write_idx] = y_g;
+        z_plane[s_buffer_write_idx] = z_g;
+        
+        s_buffer_write_idx++;
+    }
+}
+
 
 static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
@@ -192,3 +239,4 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
 
     return ESP_OK;
 }
+

@@ -10,9 +10,11 @@
 #include "logger.h"
 #include "core_wifi.h"
 #include "ppp_4g.h"
-#include "task_interruption.h"
+#include "wom_icm_42688.h"
+#include "wom_lis2dh12.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
+#include "drv_lis2dh12.h"
 #include "task_rms.h"
 #include "task_fft.h"
 
@@ -41,13 +43,20 @@ void start_tasks()
         // MQTT 初始化失败不影响设备运行，数据会存储在队列中等待网络恢复
     }
 
-    // 初始化硬件底层 (只调用一次)
+    // --- Initialize Hardware Drivers ---
     err = drv_icm42688_init();
     if (err != ESP_OK)
     {
         LOG_WARNF("ICM42688P initialization failed: %d", err);
-        return;
+        // Not returning, maybe only one sensor is present
     }
+    err = drv_lis2dh12_init();
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("LIS2DH12 initialization failed: %d", err);
+        return; // LIS2DH12 is essential for patrolling and WoM
+    }
+
 
     // 初始化 data acquisition engine.
     err = daq_icm_42688_p_init();
@@ -57,11 +66,30 @@ void start_tasks()
         return;
     }
     
-    err = ppp_4g_init();
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("4G module initialization failed: %d", err);  
+    // 由于电流不足，暂不启用 4G 模组
+    // err = ppp_4g_init();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_WARNF("4G module initialization failed: %d", err);  
+    // }
+
+    // --- Start WoM monitoring ---
+    err = start_wom_lis2dh12_listener();
+    if (err != ESP_OK) {
+        LOG_ERRORF("Failed to start WoM listener: %s", esp_err_to_name(err));
+    } else {
+        lis2dh12_wom_cfg_t wom_cfg = {
+            .threshold_mg_int1 = 100, // Low-level warning
+            .threshold_mg_int2 = 200, // High-level alarm
+            .duration_int1 = 2,       // 2 * (1/ODR)
+            .duration_int2 = 2,
+        };
+        err = drv_lis2dh12_enable_wom(&wom_cfg);
+        if (err != ESP_OK) {
+            LOG_ERRORF("Failed to enable WoM: %s", esp_err_to_name(err));
+        }
     }
+
 
     // 获取设备 ID
     // const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
