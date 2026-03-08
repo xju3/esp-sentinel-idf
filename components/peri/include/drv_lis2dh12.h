@@ -10,8 +10,8 @@ extern "C" {
 #endif
 
 // GPIO assignments
-#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_5
-#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_6
+#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_6
+#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_5
 #define LIS2DH12_PIN_NUM_CS     GPIO_NUM_7      // Independent CS (different from ICM-42688-P)
 #define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_12     // Shared with ICM-42688-P (SPI2 SCLK)
 

@@ -35,10 +35,17 @@ static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     // INT1: vibration/shock — HPF autoreset, threshold = delta from current state.
     //   2000 mg / 186 = 10 LSb → actual threshold 1860 mg (~2g impulse)
     //   duration=3: impulse must persist ≥ 60 ms (rejects single-sample noise)
-    .threshold_mg_int1 = 200,
-    .duration_int1     = 2,
-    .threshold_mg_int2 = 800,   // ignored by 6D engine
-    .duration_int2     = 2,
+    .threshold_mg_int1 = 2000,
+    .duration_int1     = 3,
+
+    // INT2: 6D posture/orientation change detection.
+    //   The 6D engine uses its own internal ±0.5g threshold per axis — INT2_THS
+    //   is NOT used by the 6D comparator. We still write a value here to keep
+    //   the struct valid; it has no effect on 6D behaviour.
+    //   duration=3: new orientation must be held ≥ 60 ms before INT2 fires.
+    //   This rejects brief tilts from bumps while catching deliberate re-orientation.
+    .threshold_mg_int2 = 300,   // ignored by 6D engine
+    .duration_int2     = 3,
 };
 
 // ---------------------------------------------------------------------------
@@ -81,7 +88,7 @@ static void wom_listener_task(void *arg) {
             uint8_t int_src = 0;
             if (io_num == LIS2DH12_PIN_NUM_INT1) {
                 drv_lis2dh12_read_int1_source(&int_src);
-                LOG_WARNF(TAG, "WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
+                LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
                           s_default_wom_cfg.threshold_mg_int1, int_src);
                 // Decode active axes for quick diagnosis
                 ESP_LOGI(TAG, "  Active axes → XL=%d XH=%d YL=%d YH=%d ZL=%d ZH=%d",
@@ -90,7 +97,7 @@ static void wom_listener_task(void *arg) {
                          (int_src >> 4) & 1, (int_src >> 5) & 1);
             } else if (io_num == LIS2DH12_PIN_NUM_INT2) {
                 drv_lis2dh12_read_int2_source(&int_src);
-                LOG_ERRORF(TAG, "WoM INT2: SEVERE SHOCK (thr=%d mg) INT2_SRC=0x%02X",
+                LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);
                 ESP_LOGI(TAG, "  Active axes → XL=%d XH=%d YL=%d YH=%d ZL=%d ZH=%d",
                          (int_src >> 0) & 1, (int_src >> 1) & 1,
