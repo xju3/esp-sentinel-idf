@@ -43,7 +43,7 @@ static const char *TAG = "LIS2DH12";
 #define WOM_FS              LIS2DH12_FS_16G
 #define WOM_SENSITIVITY_MG  186u    // mg per LSB, normal mode, FS=±16g (datasheet Table 59)
 #define WOM_THS_MAX         127u    // INT_THS bit[6:0] maximum
-#define WOM_THS_MIN         2u      // minimum (2 LSb = 372 mg @ 186mg/LSB)
+#define WOM_THS_MIN         1u      // minimum (1 LSb = 186 mg @ 186mg/LSB)
 #define WOM_ODR_HZ          50.0f   // 50 Hz → 1 LSB duration = 20 ms
 // CTRL_REG1 value for WoM: ODR=50Hz (0x4), LP=0, XYZ enabled
 #define WOM_CTRL_REG1       0x47u
@@ -193,10 +193,10 @@ esp_err_t drv_lis2dh12_init(void) {
         .sclk_io_num    = LIS2DH12_PIN_NUM_SCL,
         .quadwp_io_num  = -1,
         .quadhd_io_num  = -1,
-        .max_transfer_sz = 32,
+        .max_transfer_sz = 4092, // 关键：即使只传小数据，也要为共享总线的大数据设备(ICM)预留空间
     };
     esp_err_t ret = spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "SPI bus initialize failed: %s", esp_err_to_name(ret));
         return ret;
     }

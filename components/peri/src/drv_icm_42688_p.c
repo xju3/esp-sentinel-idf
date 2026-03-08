@@ -158,7 +158,7 @@ esp_err_t drv_icm42688_init(void) {
         .quadhd_io_num = -1,         .max_transfer_sz = DMA_CHUNK_BYTES + 8 
     };
     esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) return ret;
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 10 * 1000 * 1000, .mode = 0,                          
