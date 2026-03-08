@@ -35,17 +35,10 @@ static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     // INT1: vibration/shock — HPF autoreset, threshold = delta from current state.
     //   2000 mg / 186 = 10 LSb → actual threshold 1860 mg (~2g impulse)
     //   duration=3: impulse must persist ≥ 60 ms (rejects single-sample noise)
-    .threshold_mg_int1 = 2000,
-    .duration_int1     = 3,
-
-    // INT2: 6D posture/orientation change detection.
-    //   The 6D engine uses its own internal ±0.5g threshold per axis — INT2_THS
-    //   is NOT used by the 6D comparator. We still write a value here to keep
-    //   the struct valid; it has no effect on 6D behaviour.
-    //   duration=3: new orientation must be held ≥ 60 ms before INT2 fires.
-    //   This rejects brief tilts from bumps while catching deliberate re-orientation.
-    .threshold_mg_int2 = 600,   // ignored by 6D engine
-    .duration_int2     = 3,
+    .threshold_mg_int1 = 200,
+    .duration_int1     = 2,
+    .threshold_mg_int2 = 800,   // ignored by 6D engine
+    .duration_int2     = 2,
 };
 
 // ---------------------------------------------------------------------------
