@@ -39,43 +39,38 @@ void start_tasks()
 
 #ifdef CONFIG_DEV_MODE
     // 开发模式下仍保留 Web 调试入口
-    ESP_ERROR_CHECK(web_server_start());
+    // ESP_ERROR_CHECK(web_server_start());
 #endif
 
-    // 网络连接成功后，初始化 MQTT 客户端
-    err = mqtt_client_init();
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("MQTT client initialization failed: %d", err);
-        // MQTT 初始化失败不影响设备运行，数据会存储在队列中等待网络恢复
-    }
+    // // 网络连接成功后，初始化 MQTT 客户端
+    // err = mqtt_client_init();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_WARNF("MQTT client initialization failed: %d", err);
+    //     // MQTT 初始化失败不影响设备运行，数据会存储在队列中等待网络恢复
+    // }
 
     // --- Initialize Hardware Drivers ---
-    err = drv_icm42688_init();
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("ICM42688P initialization failed: %d", err);
-        // Not returning, maybe only one sensor is present
-    }
-    err = drv_lis2dh12_init();
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("LIS2DH12 initialization failed: %d", err);
-        return; // LIS2DH12 is essential for patrolling and WoM
-    }
+    // err = drv_icm42688_init();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_WARNF("ICM42688P initialization failed: %d", err);
+    //     // Not returning, maybe only one sensor is present
+    // }
+}
 
     // [DEBUG] 启动时运行 LIS2DH12 巡逻模式采集测试
     // 这将触发一次采集并打印数据，用于验证 daq_worker 和驱动是否正常
     test_lis2dh12_patrol_run();
 
 
-    // 初始化 data acquisition engine.
-    err = daq_icm_42688_p_init();
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("System DAQ initialization failed: %d", err);
-        return;
-    }
+    // // 初始化 data acquisition engine.
+    // err = daq_icm_42688_p_init();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_WARNF("System DAQ initialization failed: %d", err);
+    //     return;
+    // }
     
     // 由于电流不足，暂不启用 4G 模组
     // err = ppp_4g_init();
@@ -86,10 +81,10 @@ void start_tasks()
 
     // --- Start WoM monitoring ---
 
-    err = start_wom_lis2dh12_listener(&g_user_config.wom_cfg);
-    if (err != ESP_OK) {
-        LOG_ERRORF("Failed to start WoM listener: %s", esp_err_to_name(err));
-    }
+    // err = start_wom_lis2dh12_listener(&g_user_config.wom_cfg);
+    // if (err != ESP_OK) {
+    //     LOG_ERRORF("Failed to start WoM listener: %s", esp_err_to_name(err));
+    // }
 
 
     // 获取设备 ID
@@ -102,17 +97,17 @@ void start_tasks()
     //     return;
     // }
 
-    LOG_DEBUG("准备执行任务.");
-    // 启动诊断任务
-    start_rms_diagnosis();
-    start_fft_task();
-    // 启动传感器监控任务
-    err = start_task_daq();
-    if (err != ESP_OK)
-    {
-        LOG_ERRORF("Failed to start monitor task: %d", err);
-        return;
-    }
+    // LOG_DEBUG("准备执行任务.");
+    // // 启动诊断任务
+    // start_rms_diagnosis();
+    // start_fft_task();
+    // // 启动传感器监控任务
+    // err = start_task_daq();
+    // if (err != ESP_OK)
+    // {
+    //     LOG_ERRORF("Failed to start monitor task: %d", err);
+    //     return;
+    // }
     // // 启用中断监控.
     // imu_interrupt_init();
 

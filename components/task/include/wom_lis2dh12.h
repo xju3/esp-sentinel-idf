@@ -2,6 +2,7 @@
 #define WOM_LIS2DH12_H
 
 #include "esp_err.h"
+#include "drv_lis2dh12.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,7 +18,7 @@ extern "C" {
  *      - ESP_OK on success
  *      - Other error codes on failure
  */
-esp_err_t start_wom_lis2dh12_listener(void);
+esp_err_t start_wom_lis2dh12_listener(const lis2dh12_wom_cfg_t *wom_cfg);
 
 #ifdef __cplusplus
 }
