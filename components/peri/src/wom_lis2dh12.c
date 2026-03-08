@@ -1,4 +1,3 @@
-
 #include "wom_lis2dh12.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -89,7 +88,7 @@ static void wom_listener_task(void *arg) {
             uint8_t int_src = 0;
             if (io_num == LIS2DH12_PIN_NUM_INT1) {
                 drv_lis2dh12_read_int1_source(&int_src);
-                LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
+                LOG_WARNF(TAG, "WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
                           s_default_wom_cfg.threshold_mg_int1, int_src);
                 // Decode active axes for quick diagnosis
                 ESP_LOGI(TAG, "  Active axes → XL=%d XH=%d YL=%d YH=%d ZL=%d ZH=%d",
@@ -98,7 +97,7 @@ static void wom_listener_task(void *arg) {
                          (int_src >> 4) & 1, (int_src >> 5) & 1);
             } else if (io_num == LIS2DH12_PIN_NUM_INT2) {
                 drv_lis2dh12_read_int2_source(&int_src);
-                LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
+                LOG_ERRORF(TAG, "WoM INT2: SEVERE SHOCK (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);
                 ESP_LOGI(TAG, "  Active axes → XL=%d XH=%d YL=%d YH=%d ZL=%d ZH=%d",
                          (int_src >> 0) & 1, (int_src >> 1) & 1,

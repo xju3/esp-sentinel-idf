@@ -72,17 +72,14 @@ static const char *TAG = "LIS2DH12";
 //   only sustained deviations (tilts) trigger it while transient shocks (which
 //   reset the baseline immediately) do not accumulate enough duration counts.
 //
-//   INT1 (shock/vibration): HPF ON, HPM=11 (autoreset on interrupt).
-//     HP_IA1=1 (bit0). After each INT1 event the HPF baseline resets to the
-//     current acceleration — dynamic delta detector, no startup calibration needed.
-//   INT2 (posture/6D): HPF OFF, HP_IA2=0 (bit1).
-//     INT2 uses the 6D hardware direction engine which compares raw acceleration
-//     to a fixed ±0.5g threshold on each axis to determine face-up/down/left/right.
-//     HPF must be disabled for INT2 so the 6D engine sees the real gravity vector.
+//   Both INT1 and INT2 use HPF for shock/vibration detection.
+//   HPM=11 (autoreset on interrupt): baseline resets after each event on
+//   either channel, keeping both detectors sensitive at all times.
+//   HP_IA1=1 (bit0), HP_IA2=1 (bit1).
 //
-//   HPM=11 → bit7=1, bit6=1; HP_IA2=0 → bit1=0; HP_IA1=1 → bit0=1
-//   CTRL_REG2 = 0b11000001 = 0xC1
-#define WOM_CTRL_REG2           0xC1u
+//   HPM=11 → bit7=1, bit6=1; HP_IA2=1 → bit1=1; HP_IA1=1 → bit0=1
+//   CTRL_REG2 = 0b11000011 = 0xC3
+#define WOM_CTRL_REG2           0xC3u
 
 // --- Driver state ---
 static spi_device_handle_t s_spi_handle = NULL;
@@ -309,29 +306,23 @@ esp_err_t drv_lis2dh12_read_register(uint8_t reg, uint8_t *value) {
 // ---------------------------------------------------------------------------
 // drv_lis2dh12_enable_wom
 //
-// INT1 — shock / vibration / motor e-stop
-//   HPF active (HP_IA1=1), HPM=11 (autoreset on interrupt).
-//   Detects dynamic acceleration changes (impulsive events) relative to the
-//   current baseline. After each interrupt the baseline auto-resets so the
-//   detector remains sensitive immediately after an event.
-//   INT1_CFG=0x2A: OR, high events on X/Y/Z.
-//   Short duration (3×20ms=60ms) catches brief impulses.
+// Both INT1 and INT2 are shock/vibration detectors with different thresholds.
+// HPF active on both (HP_IA1=1, HP_IA2=1), HPM=11 (autoreset on interrupt).
+// The HPF removes the static gravity component so only dynamic acceleration
+// changes trigger the comparators. After each event the baseline auto-resets.
 //
-// INT2 — posture / orientation change (6D movement recognition)
-//   HPF OFF (HP_IA2=0). Uses the LIS2DH12 hardware 6D engine.
-//   6D mode (AOI=0, 6D=1 in INT2_CFG) detects which of the 6 faces of the
-//   device is pointing up/down. An interrupt fires when the orientation moves
-//   from one recognised face to another (movement recognition).
-//   INT2_THS is not used by 6D logic — the chip uses an internal ±0.5g
-//   threshold on each axis to classify orientation.
-//   INT2_CFG=0x6A: 6D=1, AOI=0, ZHIE=1, ZLIE=1, YHIE=1, YLIE=1 (all axes).
-//     bit7=AOI=0, bit6=6D=1, bit5=ZHIE=1, bit4=ZLIE=1,
-//     bit3=YHIE=1, bit2=YLIE=1, bit1=XHIE=1, bit0=XLIE=1 → 0x6F
-//   Duration for INT2 sets the minimum time (in 1/ODR units) the new
-//   orientation must be held before the interrupt fires.
+// INT1 — primary vibration / shock warning
+//   Lower threshold → catches routine vibration and moderate shocks.
+//   Program uses INT1 as a signal to begin further health checks.
+//   INT1_CFG=0x2A: AOI=0 (OR), high events on X/Y/Z.
+//
+// INT2 — severe shock / critical event
+//   Higher threshold → only fires on serious impacts.
+//   INT2 firing means a more severe problem has occurred.
+//   INT2_CFG=0x2A: same logic as INT1, different threshold register.
 //
 // FS=±16g, normal mode → 186 mg/LSB. ODR=50Hz → 1 duration LSB = 20 ms.
-// CTRL_REG6: I2_IA2 = bit5 = 0x20  (NOT bit6=I2_IA1 — common mistake)
+// CTRL_REG3 bit6 = I1_IA1 → INT1 pin. CTRL_REG6 bit5 = I2_IA2 → INT2 pin.
 // ---------------------------------------------------------------------------
 esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
@@ -353,7 +344,8 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     s_current_fs = WOM_FS;
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, WOM_CTRL_REG4));
 
-    // Step 3 — Enable HPF for INT1 (HPM=11, HP_IA1=1, HP_IA2=0).
+    // Step 3 — Enable HPF for both INT1 and INT2 (HPM=11, HP_IA1=1, HP_IA2=1).
+    //   CTRL_REG2 = 0xC3
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, WOM_CTRL_REG2));
 
     // Step 4 — Enable ODR=50Hz, normal mode, XYZ axes. Wait for stabilisation.
@@ -387,12 +379,10 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     //     Only high events needed: a shock pushes HPF output positive on impact.
     //     AOI=0 (OR), XHIE=1, YHIE=1, ZHIE=1 → 0x2A
     //
-    //   INT1 (shock/vibration): OR, high events X/Y/Z → 0x2A
-    //   INT2 (6D posture): AOI=0, 6D=1, all axes high+low → 0x6F
-    //     The 6D engine fires when orientation moves from one known face to
-    //     another. AOI=0 + 6D=1 = movement recognition (datasheet Table 64).
+    //   INT1 and INT2 both use OR, high events on X/Y/Z → 0x2A
+    //   Different behaviour comes from different threshold registers only.
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x6F));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x2A));
 
     // Step 8 — Pulse mode (no latch). The interrupt pin pulses for 1/ODR = 20 ms
     //   then returns low automatically. The ISR re-enables the GPIO after handling.
