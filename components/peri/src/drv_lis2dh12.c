@@ -1,64 +1,35 @@
-/**
- * @file drv_lis2dh12.c
- * @brief Driver for LIS2DH12 3-axis accelerometer
- * @version 1.1
- * @date 2024-06-01
- * 
- * Refactored for better readability and robustness.
- */
 #include "drv_lis2dh12.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
 
 static const char *TAG = "LIS2DH12";
 
 // Register map
-#define LIS2DH12_REG_WHO_AM_I       0x0F
+#define LIS2DH12_REG_WHO_AM_I      0x0F
 #define LIS2DH12_REG_CTRL_REG1      0x20
 #define LIS2DH12_REG_CTRL_REG2      0x21
 #define LIS2DH12_REG_CTRL_REG3      0x22
 #define LIS2DH12_REG_CTRL_REG4      0x23
 #define LIS2DH12_REG_CTRL_REG5      0x24
 #define LIS2DH12_REG_CTRL_REG6      0x25
-#define LIS2DH12_REG_REFERENCE      0x26
-#define LIS2DH12_REG_OUT_X_L        0x28
-#define LIS2DH12_REG_INT1_CFG       0x30
-#define LIS2DH12_REG_INT1_SRC       0x31
-#define LIS2DH12_REG_INT1_THS       0x32
-#define LIS2DH12_REG_INT1_DURATION  0x33
-#define LIS2DH12_REG_INT2_CFG       0x34
-#define LIS2DH12_REG_INT2_SRC       0x35
-#define LIS2DH12_REG_INT2_THS       0x36
-#define LIS2DH12_REG_INT2_DURATION  0x37
+#define LIS2DH12_REG_OUT_X_L         0x28
+#define LIS2DH12_REG_INT1_CFG        0x30
+#define LIS2DH12_REG_INT1_THS        0x32
+#define LIS2DH12_REG_INT1_DURATION   0x33
+#define LIS2DH12_REG_INT1_SRC        0x31
+#define LIS2DH12_REG_INT2_CFG        0x34
+#define LIS2DH12_REG_INT2_THS        0x36
+#define LIS2DH12_REG_INT2_DURATION   0x37
+#define LIS2DH12_REG_INT2_SRC        0x35
+#define LIS2DH12_REG_FIFO_CTRL       0x2E
+#define LIS2DH12_REG_FIFO_SRC        0x2F
 
-#define LIS2DH12_WHO_AM_I_VAL       0x33
-
-// Bit masks and values
-#define LIS2DH12_ODR_50HZ           0x40
-#define LIS2DH12_ODR_100HZ          0x50
-#define LIS2DH12_XYZ_EN             0x07
-
-#define LIS2DH12_HPIS1              0x01
-#define LIS2DH12_HPIS2              0x02
-
-#define LIS2DH12_I1_IA1             0x40
-#define LIS2DH12_I2_IA2             0x20 // Correct bit for I2 on INT2 pin
-
-#define LIS2DH12_BDU                0x80
-#define LIS2DH12_FS_MASK            0x30
-
-#define LIS2DH12_LIR_INT1           0x08
-#define LIS2DH12_LIR_INT2           0x02
-
-#define LIS2DH12_INT_6D             0x40
-#define LIS2DH12_INT_AOI            0x80
-#define LIS2DH12_INT_XHIE           0x02
-#define LIS2DH12_INT_YHIE           0x08
-#define LIS2DH12_INT_ZHIE           0x20
+#define LIS2DH12_WHO_AM_I_VAL      0x33
 
 // SPI configuration
 #define SPI_HOST SPI2_HOST
@@ -160,6 +131,7 @@ SensorDriver_t lis2dh12_driver = {
 };
 
 // --- Public Functions ---
+
 esp_err_t drv_lis2dh12_init(void) {
 
     if (s_initialized) {
@@ -173,17 +145,15 @@ esp_err_t drv_lis2dh12_init(void) {
     }
 
     spi_bus_config_t buscfg = {
-        .miso_io_num = LIS2DH12_PIN_NUM_SDO,
-        .mosi_io_num = LIS2DH12_PIN_NUM_SDA,
+        .miso_io_num = LIS2DH12_PIN_NUM_SDA,
+        .mosi_io_num = LIS2DH12_PIN_NUM_SDO,
         .sclk_io_num = LIS2DH12_PIN_NUM_SCL,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 32,
     };
     esp_err_t ret = spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (ret == ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "SPI bus already initialized, skipping init");
-    } else if (ret != ESP_OK) {
+    if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI bus initialize failed: %s", esp_err_to_name(ret));
         return ret;
     }
@@ -195,7 +165,6 @@ esp_err_t drv_lis2dh12_init(void) {
         .queue_size = 7,
         .address_bits = 8,
     };
-
     ret = spi_bus_add_device(SPI_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SPI bus add device failed: %s", esp_err_to_name(ret));
@@ -210,7 +179,7 @@ esp_err_t drv_lis2dh12_init(void) {
         ESP_LOGE(TAG, "SPI communication error or LIS2DH12 not responding.");
         ESP_LOGE(TAG, "Please verify:");
         ESP_LOGE(TAG, "  1. Hardware connections (SCL=%d, MOSI=%d, MISO=%d, CS=%d)", 
-                 LIS2DH12_PIN_NUM_SCL, LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_CS);
+                 LIS2DH12_PIN_NUM_SCL, LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_CS);
         ESP_LOGE(TAG, "  2. LIS2DH12 power supply");
         ESP_LOGE(TAG, "  3. Correct SPI clock frequency (currently 1MHz)");
         return ESP_ERR_NOT_FOUND;
@@ -270,7 +239,11 @@ lis2dh12_fs_t drv_lis2dh12_get_current_fs(void) {
     return s_current_fs;
 }
 
-
+esp_err_t drv_lis2dh12_self_test(void) {
+    // STUB
+    ESP_LOGW(TAG, "drv_lis2dh12_self_test is not implemented");
+    return ESP_OK;
+}
 
 // Read INT1 source register to clear latched interrupt
 esp_err_t drv_lis2dh12_read_int1_source(uint8_t *source) {
@@ -286,6 +259,16 @@ esp_err_t drv_lis2dh12_read_int2_source(uint8_t *source) {
     return lis2dh12_read_reg(LIS2DH12_REG_INT2_SRC, source);
 }
 
+// debug helper implementation
+esp_err_t drv_lis2dh12_read_register(uint8_t reg, uint8_t *value) {
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    if (!value) return ESP_ERR_INVALID_ARG;
+    return lis2dh12_read_reg(reg, value);
+}
+
+
+// drv_lis2dh12.c - enable_wom() 修改
+
 esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
 
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
@@ -293,84 +276,90 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
 
     ESP_LOGI(TAG, "Enabling WoM mode...");
 
-    // 1. Set ODR to a low-power friendly rate, e.g., 50Hz, and enter normal mode.
-    uint8_t odr_reg_val = LIS2DH12_ODR_50HZ | LIS2DH12_XYZ_EN; // 0x47
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, odr_reg_val));
-    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for device to stabilize
+    // 1. 先掉电复位所有控制寄存器，确保干净状态
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x00));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x00));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // 2. Initialize HPF baseline by reading current acceleration data
-    // This establishes the reference point for detecting posture deviation
+    // 2. 强制设置FS=±16g，BDU=1，HR=0（normal mode）
+    //    原因：WoM场景下需要大量程避免饱和；threshold用mg计算时需匹配
+    s_current_fs = LIS2DH12_FS_16G;
+    uint8_t ctrl_reg4_val = (LIS2DH12_FS_16G << 4) | 0x80; // BDU=1
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, ctrl_reg4_val));
+
+    // 3. 上电，50Hz normal mode，XYZ使能
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x47));
+    vTaskDelay(pdMS_TO_TICKS(100)); // 等待ODR稳定（至少2个周期=40ms，给100ms余量）
+
+    // 4. 使能HPF：HPM=00（normal mode，自动复位），HPIS1=1，HPIS2=1
+    //    注意：HPM=00 不是 10，00才是"normal mode with reset"
+    //    0b00001100 = 0x0C
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x0C));
+
+    // 5. 读REFERENCE寄存器一次，强制HPF基线复位到当前DC值
+    uint8_t reference_dummy;
+    lis2dh12_read_reg(0x26, &reference_dummy); // REG_REFERENCE = 0x26
+    vTaskDelay(pdMS_TO_TICKS(200)); // 等待HPF收敛（10个周期@50Hz=200ms）
+
+    // 6. flush采样，确认HPF已收敛（Z轴HPF输出应接近0）
     lis2dh12_raw_data_t baseline_sample;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 10; i++) {
         drv_lis2dh12_get_raw_data(&baseline_sample);
-        vTaskDelay(pdMS_TO_TICKS(20)); // Wait for stable reading
+        vTaskDelay(pdMS_TO_TICKS(25));
     }
-    ESP_LOGI(TAG, "Baseline initialized: X=%d, Y=%d, Z=%d", 
+    ESP_LOGI(TAG, "HPF baseline after flush: X=%d, Y=%d, Z=%d (should be near 0)",
              baseline_sample.x, baseline_sample.y, baseline_sample.z);
 
-    // 3. Configure High-Pass filter (HPF)
-    // INT1 (Vibration): Enable HPF (HP_IA1=1) to remove gravity and detect shock/shake.
-    // INT2 (Posture): Disable HPF (HP_IA2=0) to use static gravity for 6D orientation.
-    // CTRL_REG2: HPCF=00 (default), HP_IA2=0, HP_IA1=1 -> 0x01
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, LIS2DH12_HPIS1));
-    vTaskDelay(pdMS_TO_TICKS(30)); // Wait for HPF to stabilize
-
-    // 4. Configure INT1 and INT2 routing
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, LIS2DH12_I1_IA1)); // I1_IA1 on INT1
-    // Note: Previous code used 0x40 (I2_IA1) for INT2 pin, which routed INT1 engine to INT2 pin.
-    // Corrected to 0x20 (I2_IA2) to route INT2 engine to INT2 pin.
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, LIS2DH12_I2_IA2)); 
-
-    // 5. Set Thresholds. The value is dependent on the Full-Scale selection.
-    // LSB value changes with FS.
-    uint16_t sensitivity_mg_lsb = 16; // Default to 2G
-    switch (s_current_fs) {
-        case LIS2DH12_FS_2G:  sensitivity_mg_lsb = 16;  break;
-        case LIS2DH12_FS_4G:  sensitivity_mg_lsb = 32;  break;
-        case LIS2DH12_FS_8G:  sensitivity_mg_lsb = 62;  break;
-        case LIS2DH12_FS_16G: sensitivity_mg_lsb = 186; break;
+    // 7. 检查基线是否合理（FS=±16g，12mg/LSB，静止时HPF输出应<50 LSB）
+    int16_t max_baseline = 50;
+    if (abs(baseline_sample.x) > max_baseline ||
+        abs(baseline_sample.y) > max_baseline ||
+        abs(baseline_sample.z) > max_baseline) {
+        ESP_LOGW(TAG, "HPF baseline not settled (X=%d Y=%d Z=%d), consider increasing flush delay",
+                 baseline_sample.x, baseline_sample.y, baseline_sample.z);
     }
-    uint8_t thr1 = wom_cfg->threshold_mg_int1 / sensitivity_mg_lsb;
-    uint8_t thr2 = wom_cfg->threshold_mg_int2 / sensitivity_mg_lsb;
+
+    // 8. 计算阈值寄存器值（FS=±16g，12mg/LSB，寄存器7位最大127）
+    //    INT_THS寄存器只有bit[6:0]有效，最大值127
+    const uint16_t sensitivity_mg_lsb = 12; // FS=±16g
+    uint8_t thr1 = (uint8_t)(wom_cfg->threshold_mg_int1 / sensitivity_mg_lsb);
+    uint8_t thr2 = (uint8_t)(wom_cfg->threshold_mg_int2 / sensitivity_mg_lsb);
+    // 钳位到7位最大值
+    if (thr1 > 127) thr1 = 127;
+    if (thr2 > 127) thr2 = 127;
+    // 防止阈值过低（<5 LSB）导致噪声触发
+    if (thr1 < 5) thr1 = 5;
+    if (thr2 < 5) thr2 = 5;
+
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_THS, thr1));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_THS, thr2));
-    ESP_LOGI(TAG, "INT1 threshold: %d LSBs (~%dmg), INT2 threshold: %d LSBs (~%dmg)", 
-             thr1, thr1 * sensitivity_mg_lsb, thr2, thr2 * sensitivity_mg_lsb);
+    ESP_LOGI(TAG, "THS1=%d (~%dmg), THS2=%d (~%dmg) @ FS=±16g",
+             thr1, thr1 * sensitivity_mg_lsb,
+             thr2, thr2 * sensitivity_mg_lsb);
 
-    // 6. Set Durations. Duration = value / ODR (50Hz, so 20ms per LSB).
+    // 9. Duration（50Hz，1LSB=20ms）
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_DURATION, wom_cfg->duration_int1));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_DURATION, wom_cfg->duration_int2));
-    ESP_LOGI(TAG, "INT1 duration: %dms, INT2 duration: %dms", 
-             wom_cfg->duration_int1 * 20, wom_cfg->duration_int2 * 20);
 
-    // 7. Configure interrupt event logic.
-    // INT1: Vibration (Shock). Enable High events only for rapid motion detection
-    // AOI=0 (OR logic), XHIE=1, YHIE=1, ZHIE=1
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 
-        LIS2DH12_INT_XHIE | LIS2DH12_INT_YHIE | LIS2DH12_INT_ZHIE)); // 0x2A
+    // 10. 中断路由
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x40)); // INT1引脚←IA1
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x20)); // INT2引脚←IA2
+    // 注意CTRL_REG6 bit5=I2_IA2，不是bit6
 
-    // INT2: Posture (6D Movement).
-    // AOI=0 (OR logic), 6D=1 (6D detection), Enable all 6 directions (XH, XL, YH, YL, ZH, ZL)
-    // Value: 0111 1111 = 0x7F
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x7F)); // 0x7F enables all 6D
-    
-    // 8. Latch interrupts on INT1 and INT2 to read the source register
-    // This prevents interrupt from being cleared until source register is read
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 
-        LIS2DH12_LIR_INT1 | LIS2DH12_LIR_INT2)); // 0x0A
-    vTaskDelay(pdMS_TO_TICKS(20));
+    // 11. 中断事件配置（OR模式，XYZ高事件）
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A));
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x2A));
 
-    ESP_LOGI(TAG, "WoM mode enabled successfully");
-    ESP_LOGI(TAG, "INT1: Vibration detection (>%dmg absolute), INT2: Posture detection (6D, >%dmg deviation)", 
+    // 12. 无锁存，脉冲模式
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00));
+
+    ESP_LOGI(TAG, "WoM enabled. INT1: shock>%dmg, INT2: posture>%dmg",
              wom_cfg->threshold_mg_int1, wom_cfg->threshold_mg_int2);
-
-    // 9. Clear any pending interrupts to ensure lines are low before we start
-    // This is crucial because LIR (Latch) is enabled. If an interrupt triggered during config, it stays high.
-    uint8_t dummy;
-    lis2dh12_read_reg(LIS2DH12_REG_REFERENCE, &dummy); // Reset HPF filter
-    lis2dh12_read_reg(LIS2DH12_REG_INT1_SRC, &dummy);  // Clear INT1
-    lis2dh12_read_reg(LIS2DH12_REG_INT2_SRC, &dummy);  // Clear INT2
-
     return ESP_OK;
 }
 
@@ -390,7 +379,7 @@ esp_err_t drv_lis2dh12_disable_wom(void) {
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
     
     // Restore a default ODR (e.g., 100Hz)
-    uint8_t odr_reg_val = LIS2DH12_ODR_100HZ | LIS2DH12_XYZ_EN; // 0x57
+    uint8_t odr_reg_val = 0x57; // 100 Hz, normal mode, X/Y/Z enabled
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, odr_reg_val));
 
     ESP_LOGI(TAG, "WoM mode disabled");

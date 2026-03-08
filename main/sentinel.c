@@ -53,12 +53,12 @@ void start_tasks()
     // Configure wakeup sources before sleeping
     config_light_sleep();
     
-    LOG_INFO("Entering light sleep...");
-    esp_light_sleep_start();
+    // LOG_INFO("Entering light sleep...");
+    // esp_light_sleep_start();
     
-    // Wakeup point: Check if we woke up due to WoM and handle missed edges
-    LOG_INFO("Woke up from light sleep!");
-    wom_lis2dh12_on_wakeup();
+    // // Wakeup point: Check if we woke up due to WoM and handle missed edges
+    // LOG_INFO("Woke up from light sleep!");
+    // wom_lis2dh12_on_wakeup();
 }
 
 void app_main(void)
