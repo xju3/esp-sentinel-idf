@@ -1,7 +1,6 @@
 #include "daq_worker.h"
 #include "drv_icm_42688_p.h"
 #include "daq_icm_42688_p.h"
-#include "drv_lis2dh12.h" // <-- Added
 #include "imu_config.h"
 #include "logger.h"
 #include "esp_err.h"
@@ -21,9 +20,23 @@ esp_err_t start_diagnosing_work();
 EXT_RAM_BSS_ATTR static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
 static uint32_t s_buffer_write_idx = 0;
 
+/**
+ * @brief 内联辅助函数：将物理量存入平面化 Buffer (Planar Buffer)
+ * 内存布局: [X0...Xn | Y0...Yn | Z0...Zn]
+ */
+static inline void daq_push_sample(float x, float y, float z)
+{
+    if (s_buffer_write_idx >= MAX_DAQ_SAMPLES) return;
+    
+    s_vib_buffer[s_buffer_write_idx] = x;
+    s_vib_buffer[MAX_DAQ_SAMPLES + s_buffer_write_idx] = y;
+    s_vib_buffer[MAX_DAQ_SAMPLES * 2 + s_buffer_write_idx] = z;
+    
+    s_buffer_write_idx++;
+}
+
 // 通用数据处理回调：将数据解交错并存入静态 Buffer
-static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx);
-static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count);
+static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, void *ctx);
 
 /**
  * @brief 启动巡逻工作
@@ -50,9 +63,13 @@ esp_err_t start_patrolling_work()
     if (duration_ms == 0)
         duration_ms = 1000;
 
-    // 此处使用LIS2DH12采集数据，因为它支持更低的采样率，且巡逻工作不需要高频数据
-    LOG_INFOF("[DAQ_WORKER] Starting LIS2DH12 capture for %lu ms", duration_ms);
-    esp_err_t ret = drv_lis2dh12_capture(duration_ms, daq_buffer_handler_lis);
+    // 方案调整：LIS2DH12 仅用于报警，数据采集统一使用 ICM-42688-P
+    icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
+    float lsb_to_g = LSB_TO_G_16G;
+
+    LOG_INFOF("[DAQ_WORKER] Starting ICM-42688-P capture for %lu ms (Patrol)", duration_ms);
+    esp_err_t ret = daq_icm_42688_p_capture(
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, &lsb_to_g, 512, 20);
 
     if (ret != ESP_OK)
     {
@@ -86,13 +103,22 @@ esp_err_t start_diagnosing_work()
     s_buffer_write_idx = 0; // 重置写入索引
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
 
+    // 根据配置的量程选择对应的 LSB 转换系数
+    float lsb_to_g = LSB_TO_G_16G;
+    switch (capture_cfg.fs) {
+        case ICM_FS_2G:  lsb_to_g = LSB_TO_G_2G; break;
+        case ICM_FS_4G:  lsb_to_g = LSB_TO_G_4G; break;
+        case ICM_FS_8G:  lsb_to_g = LSB_TO_G_8G; break;
+        case ICM_FS_16G: lsb_to_g = LSB_TO_G_16G; break;
+    }
+
     // 计算采集时长 (ms)
     uint32_t duration_ms = (uint32_t)(diagnosis_config.actual_time * 1000.0f);
     if (duration_ms == 0)
         duration_ms = 100;
 
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler, NULL, 512, 20);
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, &lsb_to_g, 512, 20);
 
     if (ret != ESP_OK)
     {
@@ -128,9 +154,9 @@ void init_config(daq_worker_param_t *param)
             LOG_INFO("[DAQ_WORKER] Patrol config already initialized");
             return;
         }
-        // Use LIS2DH12 driver for patrolling
+        // Use ICM driver for patrolling (LIS2DH12 is alarm only)
         patrol_config = IMU_Calculate_DSP_Config(
-            &lis2dh12_driver,
+            &icm42688_driver,
             (float)param->rpm,
             10.0f,   // C
             10.0f,   // H
@@ -162,12 +188,12 @@ void init_config(daq_worker_param_t *param)
     }
 }
 
-// LIS2DH12 data handler
-static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count)
+// ICM-42688-P 专用处理函数 (Big-Endian)
+// 注意：这是一个临时方案，用于 PoV 阶段。
+// 未来替换为 ST IIS3DWB 后，将与 LIS2DH12 一样使用 Little-Endian 处理逻辑，
+// 届时可以考虑合并 Handler 或使用统一的 ST 处理模板。
+static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, void *ctx)
 {
-    float *x_plane = &s_vib_buffer[0];
-    float *y_plane = &s_vib_buffer[MAX_DAQ_SAMPLES];
-    float *z_plane = &s_vib_buffer[MAX_DAQ_SAMPLES * 2];
 
     for (size_t i = 0; i < count; i++)
     {
@@ -176,44 +202,11 @@ static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count
             break;
         }
 
-        // LIS2DH12 sensitivity is dependent on FS. Assuming 2G for now.
-        // Sensitivity @ 2G = 1 mg/digit -> 0.001 G/digit
-        const float lsb_to_g = 0.001f;
+        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
+        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
+        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
 
-        const float x_g = data[i].x * lsb_to_g;
-        const float y_g = data[i].y * lsb_to_g;
-        const float z_g = data[i].z * lsb_to_g;
-
-        x_plane[s_buffer_write_idx] = x_g;
-        y_plane[s_buffer_write_idx] = y_g;
-        z_plane[s_buffer_write_idx] = z_g;
-
-        s_buffer_write_idx++;
-    }
-}
-
-static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx)
-{
-    float *x_plane = &s_vib_buffer[0];
-    float *y_plane = &s_vib_buffer[MAX_DAQ_SAMPLES];
-    float *z_plane = &s_vib_buffer[MAX_DAQ_SAMPLES * 2];
-
-    for (size_t i = 0; i < count; i++)
-    {
-        if (s_buffer_write_idx >= MAX_DAQ_SAMPLES)
-        {
-            break;
-        }
-
-        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
-        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
-        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
-
-        x_plane[s_buffer_write_idx] = x_g;
-        y_plane[s_buffer_write_idx] = y_g;
-        z_plane[s_buffer_write_idx] = z_g;
-
-        s_buffer_write_idx++;
+        daq_push_sample(x_g, y_g, z_g);
     }
 }
 

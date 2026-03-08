@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#endif
 
 #ifdef __cplusplus
 extern "C"
@@ -16,3 +15,4 @@ esp_err_t    start_task_daq(void);
 #ifdef __cplusplus
 }
 #endif // TASK_daq_H
+#endif // TASK_DAQ_H

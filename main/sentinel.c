@@ -21,11 +21,20 @@
 #include "task_rms.h"
 
 extern esp_err_t ppp_4g_init(void);
-void config_light_sleep();
-void enter_light_sleep();
+
+void config_light_sleep()
+{
+    // TODO: Configure wakeup sources (e.g., timer, GPIO)
+}
+
+void enter_light_sleep()
+{
+    LOG_INFO("Entering light sleep...");
+    esp_light_sleep_start();
+}
 
 // 引用测试函数 (定义在 components/test/src/test_lis2dh12.c)
-extern void test_lis2dh12_patrol_run(void);
+extern esp_err_t test_lis2dh12_patrol_run(void);
 
 void enable_config_service()
 {
@@ -140,7 +149,7 @@ void app_main(void)
         enable_config_service();
         return;
     }
-    bool enable_netwokd_channel = false;
+    bool enable_network_channel = false;
     esp_err_t err = ESP_OK;
     if (g_user_config.network == 1)
     {
@@ -148,7 +157,7 @@ void app_main(void)
         LOG_INFO("Initializing 4G Module...");
         if (ppp_4g_init() == ESP_OK)
         {
-            enable_netwokd_channel = true;
+            enable_network_channel = true;
         }
         else
         {
@@ -160,11 +169,11 @@ void app_main(void)
         err = wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, start_tasks);
         if (err == ESP_OK)
         {
-            enable_netwokd_channel = true;
+            enable_network_channel = true;
         }
     }
 
-    if (!enable_netwokd_channel)
+    if (!enable_network_channel)
     {
         enable_config_service();
         return;

@@ -27,10 +27,12 @@ typedef enum {
 
 // Raw accelerometer data
 typedef struct {
-    int16_t x;
-    int16_t y;
-    int16_t z;
-} lis2dh12_raw_data_t;
+    uint8_t header; // 保留字段，对齐 imu_raw_data_t
+    int16_t x;      // X轴
+    int16_t y;      // Y轴
+    int16_t z;      // Z轴
+    int8_t  temp;   // 保留字段，对齐 imu_raw_data_t
+} __attribute__((packed)) lis2dh12_raw_data_t;
 
 // Data callback function pointer
 typedef void (*lis2dh12_data_cb_t)(const lis2dh12_raw_data_t *data, size_t count);

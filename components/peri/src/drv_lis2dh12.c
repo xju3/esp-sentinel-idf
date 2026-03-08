@@ -64,12 +64,22 @@ static void IRAM_ATTR lis2dh12_fifo_isr_handler(void* arg) {
 // Task to read data from FIFO
 static void lis2dh12_fifo_reader_task(void *arg) {
     lis2dh12_raw_data_t *sample_buffer = NULL;
+    uint8_t *raw_rx_buffer = NULL; // 用于接收 SPI 紧凑数据的临时 Buffer
     ESP_LOGI(TAG, "FIFO reader task started.");
 
     // Allocate buffer once
     sample_buffer = malloc(sizeof(lis2dh12_raw_data_t) * 32); // Max FIFO size
     if (sample_buffer == NULL) {
         ESP_LOGE(TAG, "Failed to allocate FIFO sample buffer!");
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    // Allocate raw buffer (32 samples * 6 bytes = 192 bytes)
+    raw_rx_buffer = malloc(32 * 6);
+    if (raw_rx_buffer == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate FIFO raw buffer!");
+        free(sample_buffer);
         vTaskDelete(NULL);
         return;
     }
@@ -83,8 +93,18 @@ static void lis2dh12_fifo_reader_task(void *arg) {
             uint8_t unread_samples = fifo_src_val & 0x1F;
 
             if (unread_samples > 0) {
-                esp_err_t ret = lis2dh12_read_multiple(LIS2DH12_REG_OUT_X_L, (uint8_t*)sample_buffer, unread_samples * 6);
+                // 1. 先读入紧凑的 Raw Buffer (6 bytes/sample)
+                esp_err_t ret = lis2dh12_read_multiple(LIS2DH12_REG_OUT_X_L, raw_rx_buffer, unread_samples * 6);
                 if (ret == ESP_OK) {
+                    // 2. 解包到对齐的结构体数组 (8 bytes/sample)
+                    for (int i = 0; i < unread_samples; i++) {
+                        sample_buffer[i].header = 0xAA; // 示例 Header
+                        sample_buffer[i].x = (int16_t)(raw_rx_buffer[i*6] | (raw_rx_buffer[i*6+1] << 8));
+                        sample_buffer[i].y = (int16_t)(raw_rx_buffer[i*6+2] | (raw_rx_buffer[i*6+3] << 8));
+                        sample_buffer[i].z = (int16_t)(raw_rx_buffer[i*6+4] | (raw_rx_buffer[i*6+5] << 8));
+                        sample_buffer[i].temp = 0;      // LIS2DH12 FIFO 不带温度
+                    }
+
                     if (s_fifo_data_cb) {
                         s_fifo_data_cb(sample_buffer, unread_samples);
                     }
@@ -95,6 +115,7 @@ static void lis2dh12_fifo_reader_task(void *arg) {
         }
     }
     free(sample_buffer);
+    free(raw_rx_buffer);
     vTaskDelete(NULL);
 }
 
@@ -271,9 +292,11 @@ esp_err_t drv_lis2dh12_get_raw_data(lis2dh12_raw_data_t *data) {
     }
 
     // Data is LSB-first
+    data->header = 0xAA;
     data->x = (int16_t)((buffer[1] << 8) | buffer[0]);
     data->y = (int16_t)((buffer[3] << 8) | buffer[2]);
     data->z = (int16_t)((buffer[5] << 8) | buffer[4]);
+    data->temp = 0;
 
     return ESP_OK;
 }
@@ -349,6 +372,10 @@ esp_err_t drv_lis2dh12_start_fifo_capture(uint8_t watermark_level, lis2dh12_data
     }
     
     return ESP_OK;
+}
+
+lis2dh12_fs_t drv_lis2dh12_get_current_fs(void) {
+    return s_current_fs;
 }
 
 esp_err_t drv_lis2dh12_stop_fifo_capture(void) {
@@ -462,4 +489,3 @@ esp_err_t drv_lis2dh12_disable_wom(void) {
     ESP_LOGI(TAG, "WoM mode disabled");
     return ESP_OK;
 }
-
