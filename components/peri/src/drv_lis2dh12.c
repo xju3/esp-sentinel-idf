@@ -429,7 +429,8 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     vTaskDelay(pdMS_TO_TICKS(20)); // Wait for settings to apply
 
     // 2. Enable High-Pass filter for interrupt functions
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x09)); // HPF enabled for INT1
+    // Enable HPF for INT1 and INT2 (HPIS1=1, HPIS2=1) to use relative motion/posture
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x03));
 
     // 3. Configure INT1 and INT2 routing
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x40)); // I1_IA1 interrupt on INT1 pin
@@ -454,10 +455,11 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_DURATION, wom_cfg->duration_int2));
 
     // 6. Configure interrupt event logic.
-    // Use OR combination and enable high events on all axes.
-    uint8_t int_cfg = 0x2A; // AOI=0 (OR), ZHIE=1, YHIE=1, XHIE=1
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, int_cfg));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, int_cfg));
+    // INT1: Vibration (Shock). Enable High events only (AOI=0, ZHIE=1, YHIE=1, XHIE=1)
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A));
+
+    // INT2: Posture (Deviation). Enable High & Low events (6D) to detect +/- offset
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x3F));
     
     // 7. Latch interrupts on INT1 and INT2 to read the source register
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x0A)); // LIR_INT1=1, LIR_INT2=1

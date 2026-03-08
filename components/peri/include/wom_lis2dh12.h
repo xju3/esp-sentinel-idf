@@ -18,7 +18,7 @@ extern "C" {
  *      - ESP_OK on success
  *      - Other error codes on failure
  */
-esp_err_t start_wom_lis2dh12_listener(const lis2dh12_wom_cfg_t *wom_cfg);
+esp_err_t start_wom_lis2dh12_listener();
 
 #ifdef __cplusplus
 }

@@ -6,6 +6,10 @@ idf_component_register(
         "src/drv_ds18b20.c"
         "src/imu_config.c" 
         "src/daq_icm_42688_p.c" 
+        "src/wom_lis2dh12.c" 
+        "src/wom_icm_42688.c"
+    
+        
     INCLUDE_DIRS include
     REQUIRES algo
     PRIV_REQUIRES freertos esp_driver_spi esp_timer util driver

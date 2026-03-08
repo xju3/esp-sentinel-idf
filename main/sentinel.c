@@ -27,11 +27,6 @@ void config_light_sleep()
     // TODO: Configure wakeup sources (e.g., timer, GPIO)
 }
 
-void enter_light_sleep()
-{
-    LOG_INFO("Entering light sleep...");
-    esp_light_sleep_start();
-}
 
 // 引用测试函数 (定义在 components/test/src/test_lis2dh12.c)
 extern esp_err_t test_lis2dh12_patrol_run(void);
@@ -50,85 +45,9 @@ void start_tasks()
     // 开发模式下仍保留 Web 调试入口
     // ESP_ERROR_CHECK(web_server_start());
 #endif
-
-    // // 网络连接成功后，初始化 MQTT 客户端
-    // err = mqtt_client_init();
-    // if (err != ESP_OK)
-    // {
-    //     LOG_WARNF("MQTT client initialization failed: %d", err);
-    //     // MQTT 初始化失败不影响设备运行，数据会存储在队列中等待网络恢复
-    // }
-
-    // --- Initialize Hardware Drivers ---
-    // err = drv_icm42688_init();
-    // if (err != ESP_OK)
-    // {
-    //     LOG_WARNF("ICM42688P initialization failed: %d", err);
-    //     // Not returning, maybe only one sensor is present
-    // }
-}
-
-    // [DEBUG] 启动时运行 LIS2DH12 巡逻模式采集测试
-    // 这将触发一次采集并打印数据，用于验证 daq_worker 和驱动是否正常
-    test_lis2dh12_patrol_run();
-
-
-    // // 初始化 data acquisition engine.
-    // err = daq_icm_42688_p_init();
-    // if (err != ESP_OK)
-    // {
-    //     LOG_WARNF("System DAQ initialization failed: %d", err);
-    //     return;
-    // }
-    
-    // 由于电流不足，暂不启用 4G 模组
-    // err = ppp_4g_init();
-    // if (err != ESP_OK)
-    // {
-    //     LOG_WARNF("4G module initialization failed: %d", err);  
-    // }
-
-    // --- Start WoM monitoring ---
-
-    // err = start_wom_lis2dh12_listener(&g_user_config.wom_cfg);
-    // if (err != ESP_OK) {
-    //     LOG_ERRORF("Failed to start WoM listener: %s", esp_err_to_name(err));
-    // }
-
-
-    // 获取设备 ID
-    // const char *device_id = (g_user_config.device_id[0] != '\0') ? g_user_config.device_id : "default";
-    // 获取设备的基准姿态
-    // err = set_device_baseline(1000, device_id);
-    // if (err != ESP_OK)
-    // {
-    //     LOG_WARNF("Baseline capture failed: %d", err);
-    //     return;
-    // }
-
-    // LOG_DEBUG("准备执行任务.");
-    // // 启动诊断任务
-    // start_rms_diagnosis();
-    // start_fft_task();
-    // // 启动传感器监控任务
-    // err = start_task_daq();
-    // if (err != ESP_OK)
-    // {
-    //     LOG_ERRORF("Failed to start monitor task: %d", err);
-    //     return;
-    // }
-    // // 启用中断监控.
-    // imu_interrupt_init();
-
-    // // 启动消费者任务 (data_dispatcher)
-    // err = data_dispatcher_start();
-    // if (err != ESP_OK)
-    {
-        LOG_ERRORF("Failed to start data dispatcher: %d", err);
-    }
-    LOG_INFO("System initialization complete. Device is now monitoring vibrations.");
-
-    enter_light_sleep();
+    start_wom_lis2dh12_listener();
+    LOG_INFO("Entering light sleep...");
+    esp_light_sleep_start();
 }
 
 void app_main(void)

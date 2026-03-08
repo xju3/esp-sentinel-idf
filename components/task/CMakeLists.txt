@@ -1,11 +1,9 @@
 idf_component_register(
     SRCS 
         "src/task_daq.c" 
-        "src/daq_worker.c" 
         "src/task_rms.c" 
         "src/task_fft.c"
-        "src/wom_lis2dh12.c" 
-        "src/wom_icm_42688.c" 
+        "src/daq_worker.c" 
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
