@@ -54,6 +54,7 @@ esp_err_t drv_lis2dh12_capture(uint32_t duration_ms, lis2dh12_data_cb_t cb);
 
 esp_err_t drv_lis2dh12_start_fifo_capture(uint8_t watermark_level, lis2dh12_data_cb_t cb);
 esp_err_t drv_lis2dh12_stop_fifo_capture(void);
+lis2dh12_fs_t drv_lis2dh12_get_current_fs(void);
 
 // Sensor driver instance for imu_config
 extern SensorDriver_t lis2dh12_driver;

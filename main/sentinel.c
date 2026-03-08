@@ -1,3 +1,4 @@
+#include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -8,17 +9,23 @@
 #include "config_manager.h"
 #include "web_server.h"
 #include "logger.h"
-#include "core_wifi.h"
-#include "ppp_4g.h"
+#include "bsp_wifi.h"
+#include "bsp_4g.h"
 #include "wom_icm_42688.h"
 #include "wom_lis2dh12.h"
 #include "data_dispatcher.h"
 #include "daq_icm_42688_p.h"
 #include "drv_lis2dh12.h"
-#include "task_rms.h"
 #include "task_fft.h"
+#include "task_daq.h"
+#include "task_rms.h"
 
 extern esp_err_t ppp_4g_init(void);
+void config_light_sleep();
+void enter_light_sleep();
+
+// 引用测试函数 (定义在 components/test/src/test_lis2dh12.c)
+extern void test_lis2dh12_patrol_run(void);
 
 void enable_config_service()
 {
@@ -57,6 +64,10 @@ void start_tasks()
         return; // LIS2DH12 is essential for patrolling and WoM
     }
 
+    // [DEBUG] 启动时运行 LIS2DH12 巡逻模式采集测试
+    // 这将触发一次采集并打印数据，用于验证 daq_worker 和驱动是否正常
+    test_lis2dh12_patrol_run();
+
 
     // 初始化 data acquisition engine.
     err = daq_icm_42688_p_init();
@@ -74,20 +85,10 @@ void start_tasks()
     // }
 
     // --- Start WoM monitoring ---
-    err = start_wom_lis2dh12_listener();
+
+    err = start_wom_lis2dh12_listener(&g_user_config.wom_cfg);
     if (err != ESP_OK) {
         LOG_ERRORF("Failed to start WoM listener: %s", esp_err_to_name(err));
-    } else {
-        lis2dh12_wom_cfg_t wom_cfg = {
-            .threshold_mg_int1 = 100, // Low-level warning
-            .threshold_mg_int2 = 200, // High-level alarm
-            .duration_int1 = 2,       // 2 * (1/ODR)
-            .duration_int2 = 2,
-        };
-        err = drv_lis2dh12_enable_wom(&wom_cfg);
-        if (err != ESP_OK) {
-            LOG_ERRORF("Failed to enable WoM: %s", esp_err_to_name(err));
-        }
     }
 
 
@@ -103,15 +104,15 @@ void start_tasks()
 
     LOG_DEBUG("准备执行任务.");
     // 启动诊断任务
-    // start_rms_diagnosis();
-    // start_fft_task();
+    start_rms_diagnosis();
+    start_fft_task();
     // 启动传感器监控任务
-    // err = task_monitor_start();
-    // if (err != ESP_OK)
-    // {
-    //     LOG_ERRORF("Failed to start monitor task: %d", err);
-    //     return;
-    // }
+    err = start_task_daq();
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("Failed to start monitor task: %d", err);
+        return;
+    }
     // // 启用中断监控.
     // imu_interrupt_init();
 
@@ -122,6 +123,8 @@ void start_tasks()
         LOG_ERRORF("Failed to start data dispatcher: %d", err);
     }
     LOG_INFO("System initialization complete. Device is now monitoring vibrations.");
+
+    enter_light_sleep();
 }
 
 void app_main(void)

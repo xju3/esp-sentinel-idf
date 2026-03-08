@@ -154,7 +154,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     return true;
 }
 
- void start_task_daq(void) {
+ esp_err_t start_task_daq(void) {
     LOG_INFO("[TASK_DAQ] Starting DAQ tasks...");
     
     // 创建互斥锁 (Mutex)
@@ -162,7 +162,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     if (s_daq_mutex == NULL)
     {
         LOG_ERROR("[TASK_DAQ] Failed to create mutex");
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
     
     // 创建任务上下文 (必须是 static 或堆内存，因为任务会长期引用)
@@ -190,7 +190,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     {
         LOG_ERROR("[TASK_DAQ] Failed to create patrol task");
         vSemaphoreDelete(s_daq_mutex);
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
     
     // 创建诊断任务
@@ -208,7 +208,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
         LOG_ERROR("[TASK_DAQ] Failed to create diagnosis task");
         vTaskDelete(patrol_task_handle);
         vSemaphoreDelete(s_daq_mutex);
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
     
     // 初始化巡逻定时器（分钟级）
@@ -226,5 +226,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     }
     
     LOG_INFO("[TASK_DAQ] DAQ tasks started successfully");
+
+    return ESP_OK;
  }
         

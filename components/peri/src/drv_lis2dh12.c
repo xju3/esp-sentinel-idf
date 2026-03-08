@@ -184,6 +184,7 @@ SensorDriver_t lis2dh12_driver = {
 // --- Public Functions ---
 
 esp_err_t drv_lis2dh12_init(void) {
+
     if (s_initialized) {
         return ESP_OK;
     }

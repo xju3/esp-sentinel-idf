@@ -11,11 +11,11 @@ static const char *TAG = "WOM_LIS2DH12";
 static QueueHandle_t gpio_evt_queue = NULL;
 
 // Default WoM configuration to be restored after FFT capture
-static const lis2dh12_wom_cfg_t s_default_wom_cfg = {
+static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     .threshold_mg_int1 = 100, // 100mg threshold
     .threshold_mg_int2 = 200, // 200mg threshold
-    .duration_int1 = 0,
-    .duration_int2 = 0,
+    .duration_int1 = 2,
+    .duration_int2 = 2,
 };
 
 // ISR handler
@@ -74,7 +74,11 @@ static void wom_listener_task(void* arg) {
     }
 }
 
-esp_err_t start_wom_lis2dh12_listener(void) {
+esp_err_t start_wom_lis2dh12_listener(const lis2dh12_wom_cfg_t *wom_cfg) {
+    if (wom_cfg != NULL) {
+        s_default_wom_cfg = *wom_cfg;
+    }
+
     // Create a queue to handle gpio events from isr
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     if (!gpio_evt_queue) {
@@ -122,6 +126,17 @@ esp_err_t start_wom_lis2dh12_listener(void) {
         return ret;
     }
 
-    ESP_LOGI(TAG, "WoM listener initialized successfully.");
+    // Enable WoM on the sensor
+    ret = drv_lis2dh12_enable_wom(&s_default_wom_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to enable WoM: %s", esp_err_to_name(ret));
+        // Cleanup ISR handlers
+        gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT1);
+        gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT2);
+        // The task and queue are not cleaned up here to maintain consistency with existing error handling.
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "WoM listener initialized and enabled successfully.");
     return ESP_OK;
 }

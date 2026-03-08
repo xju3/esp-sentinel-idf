@@ -11,7 +11,7 @@
 #include "freertos/task.h"
 
 #include "config_manager.h"
-#include "core_wifi.h"
+#include "bsp_wifi.h"
 #include "fs_utils.h"
 #include "logger.h"
 #include "web_server.h"

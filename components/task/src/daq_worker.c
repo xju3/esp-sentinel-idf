@@ -9,12 +9,11 @@
 #include <math.h>
 #include "esp_attr.h"
 
-
-static DSP_Config_t patrol_config = {0};    
-static DSP_Config_t diagnosis_config = {0};    
+static DSP_Config_t patrol_config = {0};
+static DSP_Config_t diagnosis_config = {0};
 
 // 初始化配置
-void init_config(daq_worker_param_t *param);    
+void init_config(daq_worker_param_t *param);
 esp_err_t start_patrolling_work();
 esp_err_t start_diagnosing_work();
 
@@ -26,19 +25,18 @@ static uint32_t s_buffer_write_idx = 0;
 static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx);
 static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count);
 
-
 /**
  * @brief 启动巡逻工作
- * 
+ *
  * 巡逻工作只需要低频率数据
  * 参数配置：C=10, H=10, F_env=1000, delta_f_max=1
- * 
+ *
  * @param rpm 设备转速 (RPM)
  * @return true 成功启动
  * @return false 启动失败
  */
 esp_err_t start_patrolling_work()
-{   
+{
     if (patrol_config.actual_odr <= 0.0f)
     {
         LOG_ERROR("[DAQ_WORKER] Patrol config is not initialized");
@@ -46,32 +44,34 @@ esp_err_t start_patrolling_work()
     }
 
     s_buffer_write_idx = 0; // 重置写入索引
-    
+
     // 计算采集时长 (ms)
     uint32_t duration_ms = (uint32_t)(patrol_config.actual_time * 1000.0f);
-    if (duration_ms == 0) duration_ms = 1000;
-    
+    if (duration_ms == 0)
+        duration_ms = 1000;
+
     // 此处使用LIS2DH12采集数据，因为它支持更低的采样率，且巡逻工作不需要高频数据
     LOG_INFOF("[DAQ_WORKER] Starting LIS2DH12 capture for %lu ms", duration_ms);
     esp_err_t ret = drv_lis2dh12_capture(duration_ms, daq_buffer_handler_lis);
 
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         LOG_ERRORF("[DAQ_WORKER] Patrol capture failed: %d", ret);
         return ret;
     }
     LOG_INFOF("[DAQ_WORKER] Patrol complete. Samples: %lu", s_buffer_write_idx);
-    
+
     // TODO: Add job to queue for processing patrol data
-    
+
     return ESP_OK;
 }
 
 /**
  * @brief 启动诊断工作
- * 
+ *
  * 诊断需要高频数据
  * 参数配置：C=10, H=40, F_env=2000, delta_f_max=1
- * 
+ *
  * @param rpm 设备转速 (RPM)
  * @return true 成功启动
  * @return false 启动失败
@@ -84,41 +84,47 @@ esp_err_t start_diagnosing_work()
         return ESP_ERR_INVALID_STATE;
     }
     s_buffer_write_idx = 0; // 重置写入索引
-    icm_cfg_t capture_cfg = { .fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0 };
+    icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
 
     // 计算采集时长 (ms)
     uint32_t duration_ms = (uint32_t)(diagnosis_config.actual_time * 1000.0f);
-    if (duration_ms == 0) duration_ms = 100;
+    if (duration_ms == 0)
+        duration_ms = 100;
 
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler, NULL, 512, 20
-    );
+        &capture_cfg, duration_ms, daq_buffer_handler, NULL, 512, 20);
 
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         LOG_ERRORF("[DAQ_WORKER] Diagnosis capture failed: %d", ret);
         return ret;
     }
     LOG_INFOF("[DAQ_WORKER] Diagnosis complete. Samples: %lu", s_buffer_write_idx);
-    
+
     vib_job_t job = {
         .raw_data = s_vib_buffer,
         .length = s_buffer_write_idx,
         .sample_rate = diagnosis_config.actual_odr,
-        .task_mode = TASK_MODE_DIAGNOSIS
-    };
-    if (g_rms_job_queue) {
+        .task_mode = TASK_MODE_DIAGNOSIS};
+    if (g_rms_job_queue)
+    {
         xQueueSend(g_rms_job_queue, &job, 0);
     }
-    
+
     return ESP_OK;
 }
-
 
 void init_config(daq_worker_param_t *param)
 {
     if (param->task_mode == TASK_MODE_PATROLING)
     {
-        if (patrol_config.actual_odr > 0.0f) {
+        // 这意味着如果在一次系统运行中，
+        //  先用 1500 RPM 跑了一次测试，
+        // 然后想改用 3000 RPM 再跑一次测试，配置不会更新，
+        // 仍然会沿用 1500 RPM 的参数。在编写单元测试时，
+        // 如果涉及多次不同参数的调用，可能需要增加一个 "重置配置" 的接口。
+        if (patrol_config.actual_odr > 0.0f)
+        {
             LOG_INFO("[DAQ_WORKER] Patrol config already initialized");
             return;
         }
@@ -137,7 +143,8 @@ void init_config(daq_worker_param_t *param)
     }
     else if (param->task_mode == TASK_MODE_DIAGNOSIS)
     {
-        if (diagnosis_config.actual_odr > 0.0f) {
+        if (diagnosis_config.actual_odr > 0.0f)
+        {
             LOG_INFO("[DAQ_WORKER] Diagnosis config already initialized");
             return;
         }
@@ -150,7 +157,7 @@ void init_config(daq_worker_param_t *param)
             2000.0f, // F_env
             1.0f     // delta_f_max
         );
-         LOG_INFOF("[DAQ_WORKER] Diagnosis config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
+        LOG_INFOF("[DAQ_WORKER] Diagnosis config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
                   diagnosis_config.actual_odr, diagnosis_config.actual_time, diagnosis_config.fft_points);
     }
 }
@@ -171,20 +178,19 @@ static void daq_buffer_handler_lis(const lis2dh12_raw_data_t *data, size_t count
 
         // LIS2DH12 sensitivity is dependent on FS. Assuming 2G for now.
         // Sensitivity @ 2G = 1 mg/digit -> 0.001 G/digit
-        const float lsb_to_g = 0.001f; 
+        const float lsb_to_g = 0.001f;
 
         const float x_g = data[i].x * lsb_to_g;
         const float y_g = data[i].y * lsb_to_g;
         const float z_g = data[i].z * lsb_to_g;
-        
+
         x_plane[s_buffer_write_idx] = x_g;
         y_plane[s_buffer_write_idx] = y_g;
         z_plane[s_buffer_write_idx] = z_g;
-        
+
         s_buffer_write_idx++;
     }
 }
-
 
 static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
@@ -202,11 +208,11 @@ static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *c
         const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G;
         const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G;
         const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G;
-        
+
         x_plane[s_buffer_write_idx] = x_g;
         y_plane[s_buffer_write_idx] = y_g;
         z_plane[s_buffer_write_idx] = z_g;
-        
+
         s_buffer_write_idx++;
     }
 }
@@ -240,3 +246,14 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     return ESP_OK;
 }
 
+/**
+ * @brief 获取最近一次采集的振动数据 Buffer (用于测试/调试)
+ * @param length 输出参数，返回有效数据点的数量
+ * @return float* 指向 Buffer 的指针
+ */
+float *daq_get_vib_buffer(size_t *length)
+{
+    if (length)
+        *length = s_buffer_write_idx;
+    return s_vib_buffer;
+}
