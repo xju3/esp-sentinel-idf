@@ -20,6 +20,12 @@ extern "C" {
  */
 esp_err_t start_wom_lis2dh12_listener();
 
+/**
+ * @brief Manual check for WoM triggers after sleep wakeup.
+ * Call this immediately after esp_light_sleep_start() returns.
+ */
+void wom_lis2dh12_on_wakeup(void);
+
 #ifdef __cplusplus
 }
 #endif

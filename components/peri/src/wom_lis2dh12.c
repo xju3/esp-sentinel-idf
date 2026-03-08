@@ -12,22 +12,16 @@ static QueueHandle_t gpio_evt_queue = NULL;
 
 // Default WoM configuration to be restored after FFT capture
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .threshold_mg_int1 = 2000, // 2g for Vibration Anomaly (Shock)
-    .threshold_mg_int2 = 300,  // 0.3g for Posture Deviation (Baseline offset)
+    .threshold_mg_int1 = 200,  // 200mg for shake detection (HPF enabled, gravity removed)
+    .threshold_mg_int2 = 500,  // 500mg (~30 deg tilt) for 6D posture
     .duration_int1 = 0,        // Instant trigger for shock
-    .duration_int2 = 5,        // Slight debounce for posture
+    .duration_int2 = 10,       // Debounce for posture (200ms at 50Hz)
 };
 
 // ISR handler
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
     uint32_t gpio_num = (uint32_t) arg;
     xQueueSendFromISR(gpio_evt_queue, &gpio_num, NULL);
-}
-
-// Callback for handling FIFO data packets
-static void fft_data_handler(const lis2dh12_raw_data_t *data, size_t count) {
-    ESP_LOGI(TAG, "FFT Capture: Received %d samples.", count);
-    // In a real application, this data would be sent to an FFT processing task.
 }
 
 // Main task
@@ -39,43 +33,39 @@ static void wom_listener_task(void* arg) {
         if(xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY)) {
             // --- Stage 1: WoM Interrupt Received ---
             if (io_num == LIS2DH12_PIN_NUM_INT1) {
-                ESP_LOGW(TAG, "WoM Event: Vibration Anomaly (INT1, >2g) triggered.");
+                ESP_LOGW(TAG, "WoM Event: Vibration Anomaly (INT1, >500mg) triggered.");
             } else if (io_num == LIS2DH12_PIN_NUM_INT2) {
-                ESP_LOGE(TAG, "WoM Event: Posture Deviation (INT2, >0.3g) triggered.");
+                ESP_LOGE(TAG, "WoM Event: Posture Deviation (INT2, >500mg) triggered.");
             }
 
-            // --- Stage 2: Dynamic Re-configuration for FFT Capture ---
-            ESP_LOGI(TAG, "Disabling WoM mode...");
-            ESP_ERROR_CHECK(drv_lis2dh12_disable_wom());
+            // --- Stage 1.5: Read interrupt source to clear latched interrupt ---
+            // This is CRITICAL: With LIR (Latch Interrupt Request) enabled,
+            // the interrupt remains asserted until the source register is read
+            uint8_t int_src = 0;
+            if (io_num == LIS2DH12_PIN_NUM_INT1) {
+                drv_lis2dh12_read_int1_source(&int_src);
+                ESP_LOGD(TAG, "INT1_SRC: 0x%02X (axes triggered: X=%d Y=%d Z=%d)", 
+                         int_src, (int_src>>0)&1, (int_src>>2)&1, (int_src>>4)&1);
+            } else if (io_num == LIS2DH12_PIN_NUM_INT2) {
+                drv_lis2dh12_read_int2_source(&int_src);
+                ESP_LOGD(TAG, "INT2_SRC: 0x%02X (axes triggered: X=%d Y=%d Z=%d)", 
+                         int_src, (int_src>>0)&1, (int_src>>2)&1, (int_src>>4)&1);
+            }
 
-            ESP_LOGI(TAG, "Setting high-frequency ODR (400Hz) for FFT...");
-            ESP_ERROR_CHECK(drv_lis2dh12_set_config(LIS2DH12_FS_2G, 400.0f));
-            
-            ESP_LOGI(TAG, "Starting FIFO capture...");
-            ESP_ERROR_CHECK(drv_lis2dh12_start_fifo_capture(10, fft_data_handler));
-
-            // Let the capture run for a while
-            const int capture_duration_ms = 5000;
-            ESP_LOGI(TAG, "Capturing data for %dms...", capture_duration_ms);
-            vTaskDelay(pdMS_TO_TICKS(capture_duration_ms));
-
-            ESP_LOGI(TAG, "Stopping FIFO capture...");
-            ESP_ERROR_CHECK(drv_lis2dh12_stop_fifo_capture());
-
-            // --- Stage 3: Restore WoM Mode ---
-            ESP_LOGI(TAG, "Re-enabling WoM mode...");
-            ESP_ERROR_CHECK(drv_lis2dh12_enable_wom(&s_default_wom_cfg));
-
-            // Re-attach the WoM ISR handler for INT1, as the FIFO capture took ownership of it
-            gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT1, gpio_isr_handler, (void*) LIS2DH12_PIN_NUM_INT1);
-            
-            ESP_LOGI(TAG, "Process complete. Returning to WoM listening mode.");
+            ESP_LOGI(TAG, "WoM event handled. Continuing to listen...");
         }
     }
 }
 
 esp_err_t start_wom_lis2dh12_listener() {
     // Create a queue to handle gpio events from isr
+    
+    esp_err_t ret = drv_lis2dh12_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize LIS2DH12: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     if (!gpio_evt_queue) {
         ESP_LOGE(TAG, "Failed to create GPIO event queue.");
@@ -97,7 +87,7 @@ esp_err_t start_wom_lis2dh12_listener() {
     io_conf.pin_bit_mask = (1ULL << LIS2DH12_PIN_NUM_INT1) | (1ULL << LIS2DH12_PIN_NUM_INT2);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
-    esp_err_t ret = gpio_config(&io_conf);
+    ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "GPIO config failed: %s", esp_err_to_name(ret));
         return ret;
@@ -135,4 +125,17 @@ esp_err_t start_wom_lis2dh12_listener() {
 
     ESP_LOGI(TAG, "WoM listener initialized and enabled successfully.");
     return ESP_OK;
+}
+
+// Check GPIO state after waking up from light sleep
+// Since edge interrupts might be missed during sleep, we check the level manually.
+void wom_lis2dh12_on_wakeup(void) {
+    if (gpio_get_level(LIS2DH12_PIN_NUM_INT1)) {
+        uint32_t io_num = LIS2DH12_PIN_NUM_INT1;
+        xQueueSend(gpio_evt_queue, &io_num, 0);
+    }
+    if (gpio_get_level(LIS2DH12_PIN_NUM_INT2)) {
+        uint32_t io_num = LIS2DH12_PIN_NUM_INT2;
+        xQueueSend(gpio_evt_queue, &io_num, 0);
+    }
 }

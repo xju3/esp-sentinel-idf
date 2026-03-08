@@ -34,9 +34,6 @@ typedef struct {
     int8_t  temp;   // 保留字段，对齐 imu_raw_data_t
 } __attribute__((packed)) lis2dh12_raw_data_t;
 
-// Data callback function pointer
-typedef void (*lis2dh12_data_cb_t)(const lis2dh12_raw_data_t *data, size_t count);
-
 // WoM configuration
 typedef struct {
     uint8_t threshold_mg_int1; // Threshold for INT1 in mg
@@ -47,16 +44,14 @@ typedef struct {
 
 // Public Functions
 esp_err_t drv_lis2dh12_init(void);
-esp_err_t drv_lis2dh12_self_test(void);
 esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg);
 esp_err_t drv_lis2dh12_disable_wom(void);
 esp_err_t drv_lis2dh12_set_config(lis2dh12_fs_t fs, float odr);
 esp_err_t drv_lis2dh12_get_raw_data(lis2dh12_raw_data_t *data);
-esp_err_t drv_lis2dh12_capture(uint32_t duration_ms, lis2dh12_data_cb_t cb);
-
-esp_err_t drv_lis2dh12_start_fifo_capture(uint8_t watermark_level, lis2dh12_data_cb_t cb);
-esp_err_t drv_lis2dh12_stop_fifo_capture(void);
 lis2dh12_fs_t drv_lis2dh12_get_current_fs(void);
+esp_err_t drv_lis2dh12_read_int1_source(uint8_t *source);
+esp_err_t drv_lis2dh12_read_int2_source(uint8_t *source);
+
 
 // Sensor driver instance for imu_config
 extern SensorDriver_t lis2dh12_driver;

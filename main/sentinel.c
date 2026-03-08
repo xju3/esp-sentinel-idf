@@ -4,6 +4,7 @@
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 #include <string.h>
+#include "driver/gpio.h"
 
 #include "mqtt_proxy.h"
 #include "config_manager.h"
@@ -24,7 +25,11 @@ extern esp_err_t ppp_4g_init(void);
 
 void config_light_sleep()
 {
-    // TODO: Configure wakeup sources (e.g., timer, GPIO)
+    // Configure LIS2DH12 Interrupt pins as wakeup sources
+    // LIS2DH12 interrupts are Active High (configured in drv_lis2dh12.c)
+    gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_HIGH_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
 }
 
 
@@ -39,15 +44,21 @@ void enable_config_service()
 
 void start_tasks()
 {
-    esp_err_t err = ESP_OK;
-
 #ifdef CONFIG_DEV_MODE
     // 开发模式下仍保留 Web 调试入口
     // ESP_ERROR_CHECK(web_server_start());
 #endif
     start_wom_lis2dh12_listener();
+    
+    // Configure wakeup sources before sleeping
+    config_light_sleep();
+    
     LOG_INFO("Entering light sleep...");
     esp_light_sleep_start();
+    
+    // Wakeup point: Check if we woke up due to WoM and handle missed edges
+    LOG_INFO("Woke up from light sleep!");
+    wom_lis2dh12_on_wakeup();
 }
 
 void app_main(void)
