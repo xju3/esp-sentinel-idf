@@ -4,6 +4,8 @@ idf_component_register(
         "src/task_rms.c" 
         "src/task_fft.c"
         "src/daq_worker.c" 
+        "src/task_baseline.c" 
+        "src/wom_lis2dh12.c" 
     INCLUDE_DIRS 
         "include" 
     REQUIRES 

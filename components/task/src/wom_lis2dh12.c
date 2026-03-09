@@ -34,10 +34,10 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .threshold_mg_int1 = 380, // vibration/shock
-    .duration_int1 = 2,
+    .threshold_mg_int1 = 358, // vibration/shock
+    .duration_int1 = 1,
     .threshold_mg_int2 = 2000, // posture/orientation 
-    .duration_int2 = 2,
+    .duration_int2 = 5,
 };
 
 

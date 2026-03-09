@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-
+#include <math.h>
 #ifdef __cplusplus
 extern "C"
 {
@@ -58,6 +58,33 @@ extern "C"
         vib_welford_1d_update(&s->x, x);
         vib_welford_1d_update(&s->y, y);
         vib_welford_1d_update(&s->z, z);
+    }
+
+    // 返回样本方差（n>1时 m2/(n-1)，否则 0）
+    static inline float vib_welford_1d_var_sample(const vib_welford_1d_t *s)
+    {
+        if (!s || s->n <= 1)
+            return 0.0f;
+        return (float)(s->m2 / (double)(s->n - 1));
+    }
+
+    static inline float vib_welford_1d_mean(const vib_welford_1d_t *s)
+    {
+        if (!s || s->n == 0)
+            return 0.0f;
+        return (float)s->mean;
+    }
+
+    static inline float vib_welford_1d_std_sample(const vib_welford_1d_t *s)
+    {
+        float v = vib_welford_1d_var_sample(s);
+        return (v > 0.0f) ? sqrtf(v) : 0.0f;
+    }
+
+    // 3D 合成：sqrt(x^2+y^2+z^2)
+    static inline float vib_3d_norm(float x, float y, float z)
+    {
+        return sqrtf(x * x + y * y + z * z);
     }
 
 #ifdef __cplusplus

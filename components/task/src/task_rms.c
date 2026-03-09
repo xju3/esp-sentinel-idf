@@ -9,7 +9,7 @@
 
 // 必须与 daq_worker.c 中的定义保持一致
 #define MAX_DAQ_SAMPLES 8192
-#define RMS_QUEUE_LEN   5
+#define RMS_QUEUE_LEN 5
 
 QueueHandle_t g_rms_job_queue = NULL;
 
@@ -21,7 +21,7 @@ static void rms_task_entry(void *arg)
         // 阻塞等待采集任务发来的数据指针
         if (xQueueReceive(g_rms_job_queue, &job, portMAX_DELAY))
         {
-            LOG_INFOF("[TASK_RMS] Received job. Mode: %d, Len: %lu, SR: %.1f", 
+            LOG_INFOF("[TASK_RMS] Received job. Mode: %d, Len: %lu, SR: %.1f",
                       job.task_mode, job.length, job.sample_rate);
 
             // 1. 根据平面化布局 (Planar Layout) 获取各轴指针
@@ -33,7 +33,7 @@ static void rms_task_entry(void *arg)
 
             // 2. 调用纯算法库计算 RMS (包含 HPF/LPF/积分)
             vib_rms_t rms = algo_rms_calculate(x_ptr, y_ptr, z_ptr, job.length, job.sample_rate);
-            
+
             LOG_INFOF("[TASK_RMS] Result (mm/s): X=%.2f, Y=%.2f, Z=%.2f", rms.x, rms.y, rms.z);
 
             // 3. 将结果发送给数据分发器 (Data Dispatcher)
@@ -60,16 +60,22 @@ static void rms_task_entry(void *arg)
             {
                 status = iso10816_check(max_v, &g_user_config.iso);
             }
-            // else if (g_user_config.iso.standard == 2) { /* TODO: ISO20816 logic */ }
+            else if (g_user_config.iso.standard == 2)
+            {
+                status = iso20816_check(max_v, &g_user_config.iso);
+            }
 
-            LOG_INFOF("[TASK_RMS] Vibration status: %s", iso_status_to_string(status));
+            LOG_INFOF("vibration status: %s", iso_status_to_string(status));
 
             // 5. 根据状态触发报警和进一步分析
             if (status >= ISO_STATUS_UNSATISFACTORY)
             {
-                if (status == ISO_STATUS_UNACCEPTABLE) {
+                if (status == ISO_STATUS_UNACCEPTABLE)
+                {
                     LOG_ERRORF("[TASK_RMS] CRITICAL ALARM! Vibration level is unacceptable. Max: %.2f mm/s", max_v);
-                } else {
+                }
+                else
+                {
                     LOG_WARNF("[TASK_RMS] Vibration Alarm! Level is unsatisfactory. Max: %.2f mm/s", max_v);
                 }
                 // 状态不佳时，触发FFT分析
@@ -105,6 +111,6 @@ esp_err_t start_rms_task(void)
         LOG_ERROR("[TASK_RMS] Failed to create RMS task");
         return ESP_ERR_INVALID_STATE;
     }
-    LOG_INFO("[TASK_RMS] RMS diagnosis task started"); 
+    LOG_INFO("[TASK_RMS] RMS diagnosis task started");
     return ESP_OK;
 }

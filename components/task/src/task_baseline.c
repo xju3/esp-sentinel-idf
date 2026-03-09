@@ -10,7 +10,7 @@
 // system
 #include "cJSON.h"
 #include "esp_timer.h"
-#include "esp_timer.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -37,7 +37,7 @@ static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, voi
 
 static void print_baseline()
 {
-    LOG_DEBUGF("baseline: %f, %f, %f, %f, %f, %f",
+    LOG_DEBUGF("x=%f, y=%f, z=%f, offset_x=%f, offset_y=%f, offset_y=%f",
                g_baseline.x.val,
                g_baseline.y.val,
                g_baseline.z.val,
@@ -175,9 +175,7 @@ esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
     }
 
     // 3. 配置传感器
-    // Align baseline sampling with monitor (4 kHz, ±16g) to match v2 behavior
-    icm_cfg_t cfg = {.odr = ICM_ODR_4KHZ, .fs = ICM_FS_16G};
-
+    icm_cfg_t cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
     vib_welford_3d_t welford_st;
     vib_welford_3d_init(&welford_st);
 

@@ -11,6 +11,7 @@
 static DSP_Config_t patrol_config = {0};
 static DSP_Config_t diagnosis_config = {0};
 
+static int32_t current_rpm = 0; // 当前设备转速 (RPM)，由外部配置更新
 // 初始化配置
 void init_config(daq_worker_param_t *param);
 esp_err_t start_patrolling_work();
@@ -69,7 +70,7 @@ esp_err_t start_patrolling_work()
 {
     if (patrol_config.actual_odr <= 0.0f)
     {
-        LOG_ERROR("[DAQ_WORKER] Patrol config is not initialized");
+        LOG_ERROR(" Patrol config is not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -80,19 +81,29 @@ esp_err_t start_patrolling_work()
     if (duration_ms == 0)
         duration_ms = 1000;
 
-    // 方案调整：LIS2DH12 仅用于报警，数据采集统一使用 ICM-42688-P
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
-
-    LOG_INFOF("[DAQ_WORKER] Starting ICM-42688-P capture for %lu ms (Patrol)", duration_ms);
+    LOG_DEBUGF("duration: %lu ms (Patrol)", duration_ms);
     esp_err_t ret = daq_icm_42688_p_capture(
         &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, 512, 20);
 
     if (ret != ESP_OK)
     {
-        LOG_ERRORF("[DAQ_WORKER] Patrol capture failed: %d", ret);
+        LOG_ERRORF("Patrol capture failed: %d", ret);
         return ret;
     }
-    LOG_INFOF("[DAQ_WORKER] Patrol complete. Samples: %lu", s_buffer_write_idx);
+    LOG_DEBUGF("samples: %lu", s_buffer_write_idx);
+
+    // 巡逻工作完成后，将数据发送给 RMS 任务进行分析
+    vib_job_t job = {
+        .raw_data = s_vib_buffer,
+        .length = s_buffer_write_idx,
+        .sample_rate = patrol_config.actual_odr,
+        .task_mode = TASK_MODE_PATROLING};
+    if (g_rms_job_queue)
+    {
+        xQueueSend(g_rms_job_queue, &job, 0);
+        LOG_DEBUGF("patrol data sent to RMS task for analysis");
+    }
 
     return ESP_OK;
 }
@@ -111,7 +122,7 @@ esp_err_t start_diagnosing_work()
 {
     if (diagnosis_config.actual_odr <= 0.0f)
     {
-        LOG_ERROR("[DAQ_WORKER] Diagnosis config is not initialized");
+        LOG_ERROR(" Diagnosis config is not initialized");
         return ESP_ERR_INVALID_STATE;
     }
     s_buffer_write_idx = 0; // 重置写入索引
@@ -128,10 +139,10 @@ esp_err_t start_diagnosing_work()
 
     if (ret != ESP_OK)
     {
-        LOG_ERRORF("[DAQ_WORKER] Diagnosis capture failed: %d", ret);
+        LOG_ERRORF(" Diagnosis capture failed: %d", ret);
         return ret;
     }
-    LOG_INFOF("[DAQ_WORKER] Diagnosis complete. Samples: %lu", s_buffer_write_idx);
+    LOG_INFOF(" Diagnosis complete. Samples: %lu", s_buffer_write_idx);
 
     vib_job_t job = {
         .raw_data = s_vib_buffer,
@@ -150,17 +161,15 @@ void init_config(daq_worker_param_t *param)
 {
     if (param->task_mode == TASK_MODE_PATROLING)
     {
-        // 这意味着如果在一次系统运行中，
-        //  先用 1500 RPM 跑了一次测试，
-        // 然后想改用 3000 RPM 再跑一次测试，配置不会更新，
-        // 仍然会沿用 1500 RPM 的参数。在编写单元测试时，
-        // 如果涉及多次不同参数的调用，可能需要增加一个 "重置配置" 的接口。
-        if (patrol_config.actual_odr > 0.0f)
+        if (current_rpm ==  param -> rpm)
         {
-            LOG_INFO("[DAQ_WORKER] Patrol config already initialized");
+            LOG_INFO("Patrol config already initialized");
             return;
+        } else {
+            LOG_WARNF("RPM changed from %d to %d." , current_rpm, param->rpm);
         }
-        // Use ICM driver for patrolling (LIS2DH12 is alarm only)
+
+        current_rpm = param->rpm;
         patrol_config = IMU_Calculate_DSP_Config(
             &icm42688_driver,
             (float)param->rpm,
@@ -169,7 +178,7 @@ void init_config(daq_worker_param_t *param)
             1000.0f, // F_env
             1.0f     // delta_f_max
         );
-        LOG_INFOF("[DAQ_WORKER] Patrol config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
+        LOG_DEBUGF("config: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
                   patrol_config.actual_odr, patrol_config.actual_time, patrol_config.fft_points);
         return;
     }
@@ -177,7 +186,7 @@ void init_config(daq_worker_param_t *param)
     {
         if (diagnosis_config.actual_odr > 0.0f)
         {
-            LOG_INFO("[DAQ_WORKER] Diagnosis config already initialized");
+            LOG_INFO(" Diagnosis config already initialized");
             return;
         }
 
@@ -189,7 +198,7 @@ void init_config(daq_worker_param_t *param)
             2000.0f, // F_env
             1.0f     // delta_f_max
         );
-        LOG_INFOF("[DAQ_WORKER] Diagnosis config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
+        LOG_INFOF(" Diagnosis config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
                   diagnosis_config.actual_odr, diagnosis_config.actual_time, diagnosis_config.fft_points);
     }
 }
@@ -207,31 +216,31 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     // 根据任务模式启动相应的工作
     if (param->task_mode == TASK_MODE_PATROLING)
     {
-        LOG_INFO("[DAQ_WORKER] Starting patrol work...");
+        LOG_INFO("Starting patrol work...");
         return start_patrolling_work();
     }
     else if (param->task_mode == TASK_MODE_DIAGNOSIS)
     {
-        LOG_INFO("[DAQ_WORKER] Starting diagnosis work...");
+        LOG_INFO("Starting diagnosis work...");
         return start_diagnosing_work();
     }
     else
     {
-        LOG_ERROR("[DAQ_WORKER] Invalid task mode");
+        LOG_ERROR("Invalid task mode");
         return ESP_ERR_INVALID_ARG;
     }
 
     return ESP_OK;
 }
 
-/**
- * @brief 获取最近一次采集的振动数据 Buffer (用于测试/调试)
- * @param length 输出参数，返回有效数据点的数量
- * @return float* 指向 Buffer 的指针
- */
-float *daq_get_vib_buffer(size_t *length)
-{
-    if (length)
-        *length = s_buffer_write_idx;
-    return s_vib_buffer;
-}
+// /**
+//  * @brief 获取最近一次采集的振动数据 Buffer (用于测试/调试)
+//  * @param length 输出参数，返回有效数据点的数量
+//  * @return float* 指向 Buffer 的指针
+//  */
+// float *daq_get_vib_buffer(size_t *length)
+// {
+//     if (length)
+//         *length = s_buffer_write_idx;
+//     return s_vib_buffer;
+// }

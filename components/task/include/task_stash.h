@@ -37,6 +37,19 @@ extern "C"
         TASK_MODE_DIAGNOSIS  // FFT diagnosis in progress
     } task_mode_t;
 
+    typedef struct
+    {
+        float val;    // baseline mean（例如：静态零偏均值）
+        float offset; // baseline offset（例如：环境噪声RMS偏置）
+    } vib_axis_baseline_t;
+
+    typedef struct
+    {
+        vib_axis_baseline_t x;
+        vib_axis_baseline_t y;
+        vib_axis_baseline_t z;
+    } vib_baseline_t;
+
 #ifdef __cplusplus
 }
 #endif
