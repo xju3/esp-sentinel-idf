@@ -51,7 +51,7 @@ extern "C"
     {
         char device_id[LEN_MAX_DEVICE_ID];
         char device_name[LEN_MAX_DEVICE_NAME];
-        char device_type[LEN_MAX_DEVICE_TYPE]; // e.g. "fixed", "variable", "servo"
+        char device_type[LEN_MAX_DEVICE_TYPE]; // defined in iso standards.
         int8_t motor_type; // 1. fixed speed motor, 2. variable frequency device, 3. servo
         int16_t months; // ages of the device in months, used for consumption estimation
         int32_t rpm; // geater than 600 and less than 10000

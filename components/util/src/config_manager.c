@@ -109,6 +109,13 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         cfg->rpm = (int32_t)item->valueint;
     }
 
+    item = cJSON_GetObjectItemCaseSensitive(root, "patrol");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->patrol = (int16_t)item->valueint;
+    }
+
+
     item = cJSON_GetObjectItemCaseSensitive(root, "diagnosis");
     if (cJSON_IsNumber(item))
     {
@@ -307,7 +314,7 @@ esp_err_t config_manager_save_user_json(const char *json)
         LOG_ERROR("User SPIFFS not mounted");
         return ESP_FAIL;
     }
-
+    LOG_DEBUGF("saving user config to %s", FILE_PATH_CONFIG_USER);
     return fsu_write_file(FILE_PATH_CONFIG_USER, json, strlen(json));
 }
 
@@ -331,6 +338,7 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddNumberToObject(root, "motorType", cfg->motor_type);
     cJSON_AddNumberToObject(root, "months", cfg->months);
     cJSON_AddStringToObject(root, "host", cfg->host);
+    cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
     cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
     cJSON_AddNumberToObject(root, "report", cfg->report);
     cJSON_AddNumberToObject(root, "battery", cfg->battery);

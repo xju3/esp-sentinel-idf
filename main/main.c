@@ -31,7 +31,7 @@ void start_tasks()
     ESP_ERROR_CHECK(start_rms_task());
     ESP_ERROR_CHECK(start_fft_task());
     ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
-    (void)esp_light_sleep_start();
+    // (void)esp_light_sleep_start();
 }
 
 void app_main(void)
@@ -78,4 +78,7 @@ void app_main(void)
         enable_config_service();
         return;
     }
+#ifdef CONFIG_DEV_MODE // 开发模式下仍保留 Web 调试入口
+    ESP_ERROR_CHECK(web_server_start());
+#endif
 }

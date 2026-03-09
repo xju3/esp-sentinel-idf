@@ -34,19 +34,9 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    // INT1: vibration/shock — HPF autoreset, threshold = delta from current state.
-    //   2000 mg / 186 = 10 LSb → actual threshold 1860 mg (~2g impulse)
-    //   duration=3: impulse must persist ≥ 60 ms (rejects single-sample noise)
-    .threshold_mg_int1 = 380,
+    .threshold_mg_int1 = 380, // vibration/shock
     .duration_int1 = 2,
-
-    // INT2: 6D posture/orientation change detection.
-    //   The 6D engine uses its own internal ±0.5g threshold per axis — INT2_THS
-    //   is NOT used by the 6D comparator. We still write a value here to keep
-    //   the struct valid; it has no effect on 6D behaviour.
-    //   duration=3: new orientation must be held ≥ 60 ms before INT2 fires.
-    //   This rejects brief tilts from bumps while catching deliberate re-orientation.
-    .threshold_mg_int2 = 2000, // ignored by 6D engine
+    .threshold_mg_int2 = 2000, // posture/orientation 
     .duration_int2 = 2,
 };
 

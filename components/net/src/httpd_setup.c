@@ -70,6 +70,14 @@ static esp_err_t send_file(httpd_req_t *req, const char *path)
 
     httpd_resp_set_type(req, guess_content_type(path));
 
+    // For HEAD requests, we should not send the body
+    if (req->method == HTTP_HEAD)
+    {
+        fclose(f);
+        // Just send headers without body
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     char buf[1024];
     size_t read_bytes = 0;
     while ((read_bytes = fread(buf, 1, sizeof(buf), f)) > 0)
@@ -207,6 +215,12 @@ esp_err_t web_server_start(void)
         .handler = captive_get_handler,
         .user_ctx = NULL,
     };
+    httpd_uri_t catch_all_head = {
+        .uri = "/*",
+        .method = HTTP_HEAD,
+        .handler = captive_get_handler,
+        .user_ctx = NULL,
+    };
 
     httpd_register_uri_handler(s_server, &api_load_config);
     httpd_register_uri_handler(s_server, &api_save_config);
@@ -215,6 +229,7 @@ esp_err_t web_server_start(void)
     httpd_register_uri_handler(s_server, &api_consumption);
     httpd_register_uri_handler(s_server, &catch_all);
     httpd_register_uri_handler(s_server, &catch_all_post);
+    httpd_register_uri_handler(s_server, &catch_all_head);
 
     LOG_INFO("Web server started");
     return ESP_OK;
