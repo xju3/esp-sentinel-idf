@@ -92,7 +92,7 @@ static void rms_task_entry(void *arg)
     }
 }
 
-void start_rms_diagnosis(void)
+esp_err_t start_rms_task(void)
 {
     if (g_rms_job_queue == NULL)
     {
@@ -103,6 +103,8 @@ void start_rms_diagnosis(void)
     if (xTaskCreate(rms_task_entry, "rms_task", 4096, NULL, 4, NULL) != pdPASS)
     {
         LOG_ERROR("[TASK_RMS] Failed to create RMS task");
+        return ESP_ERR_INVALID_STATE;
     }
     LOG_INFO("[TASK_RMS] RMS diagnosis task started"); 
+    return ESP_OK;
 }

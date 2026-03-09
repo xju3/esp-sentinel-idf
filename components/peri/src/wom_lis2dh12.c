@@ -1,11 +1,13 @@
 #include "wom_lis2dh12.h"
+#include "drv_lis2dh12.h"
+#include "logger.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include "logger.h"
-#include "drv_lis2dh12.h"
+#include "esp_sleep.h"
 
 static const char *TAG = "WOM_LIS2DH12";
 
@@ -35,7 +37,7 @@ static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     // INT1: vibration/shock — HPF autoreset, threshold = delta from current state.
     //   2000 mg / 186 = 10 LSb → actual threshold 1860 mg (~2g impulse)
     //   duration=3: impulse must persist ≥ 60 ms (rejects single-sample noise)
-    .threshold_mg_int1 = 360,
+    .threshold_mg_int1 = 380,
     .duration_int1 = 2,
 
     // INT2: 6D posture/orientation change detection.
@@ -48,6 +50,15 @@ static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     .duration_int2 = 2,
 };
 
+
+static void enable_lis2dh12_gpoi_wakeup()
+{
+    // Configure LIS2DH12 Interrupt pins as wakeup sources
+    // LIS2DH12 interrupts are Active High (configured in drv_lis2dh12.c)
+    gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_HIGH_LEVEL);
+    gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_HIGH_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+}
 // ---------------------------------------------------------------------------
 // ISR handler
 //
@@ -85,42 +96,22 @@ static void wom_listener_task(void *arg)
         if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
         {
 
-            // Brief debounce — also gives the sensor output time to settle
             vTaskDelay(pdMS_TO_TICKS(20));
-
-            // --- Read and clear the interrupt source register ---
-            // Doing this here (in task context) is safe for SPI I/O.
-            // Reading INTx_SRC clears the latched event flag inside the sensor.
             uint8_t int_src = 0;
             if (io_num == LIS2DH12_PIN_NUM_INT1)
             {
                 drv_lis2dh12_read_int1_source(&int_src);
                 LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
                           s_default_wom_cfg.threshold_mg_int1, int_src);
-                // Decode active axes for quick diagnosis
-                ESP_LOGI(TAG, "  Active axes → XL=%d XH=%d YL=%d YH=%d ZL=%d ZH=%d",
-                         (int_src >> 0) & 1, (int_src >> 1) & 1,
-                         (int_src >> 2) & 1, (int_src >> 3) & 1,
-                         (int_src >> 4) & 1, (int_src >> 5) & 1);
             }
             else if (io_num == LIS2DH12_PIN_NUM_INT2)
             {
                 drv_lis2dh12_read_int2_source(&int_src);
                 LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);
-                ESP_LOGI(TAG, "  Active axes → XL=%d XH=%d YL=%d YH=%d ZL=%d ZH=%d",
-                         (int_src >> 0) & 1, (int_src >> 1) & 1,
-                         (int_src >> 2) & 1, (int_src >> 3) & 1,
-                         (int_src >> 4) & 1, (int_src >> 5) & 1);
             }
 
-            // Note: OUT_X/Y/Z registers reflect raw (non-HPF) acceleration.
-            // HPF only affects the interrupt comparator, not the output registers
-            // (unless FDS=1 in CTRL_REG2). No diagnostic sample logged here.
-
-            // --- Re-enable GPIO interrupt for this pin ---
             gpio_intr_enable(io_num);
-
             ESP_LOGI(TAG, "WoM event handled. Listening...");
 
             // TODO: trigger health-check or wakeup sequence here
@@ -139,7 +130,8 @@ esp_err_t start_wom_lis2dh12_listener(void)
         ESP_LOGE(TAG, "Failed to initialize LIS2DH12: %s", esp_err_to_name(ret));
         return ret;
     }
-
+    
+    enable_lis2dh12_gpoi_wakeup();
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     if (!gpio_evt_queue)
     {

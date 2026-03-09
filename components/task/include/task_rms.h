@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "task_stash.h"
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -21,7 +22,7 @@ typedef struct {
 
 extern QueueHandle_t g_rms_job_queue;
 
-void start_rms_diagnosis(void);
+esp_err_t start_rms_task(void);
 
 #ifdef __cplusplus
 }

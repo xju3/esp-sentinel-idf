@@ -12,7 +12,8 @@ extern "C" {
  * @brief 初始化 4G 模组并启动 PPP 拨号
  * * 用于在没有 Wi-Fi 环境时，通过蜂窝网络上报数据。
  */
-void ppp_init_4g(void);
+
+esp_err_t ppp_4g_init();
 
 
 #ifdef __cplusplus

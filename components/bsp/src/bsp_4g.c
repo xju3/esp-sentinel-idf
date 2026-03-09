@@ -335,7 +335,7 @@ static esp_err_t detect_baudrate(uint32_t *detected_baud)
     return ESP_FAIL;
 }
 
-esp_err_t ppp_4g_init(void)
+esp_err_t ppp_4g_init()
 {
     init_stage_t stage = INIT_STAGE_START;
     log_stage(stage);

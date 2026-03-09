@@ -35,8 +35,25 @@ static inline void daq_push_sample(float x, float y, float z)
     s_buffer_write_idx++;
 }
 
-// 通用数据处理回调：将数据解交错并存入静态 Buffer
-static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, void *ctx);
+// ICM-42688-P 专用处理函数 (Big-Endian)
+// 注意：这是一个临时方案，用于 PoV 阶段。
+// 未来替换为 ST IIS3DWB 后，将与 LIS2DH12 一样使用 Little-Endian 处理逻辑，
+// 届时可以考虑合并 Handler 或使用统一的 ST 处理模板。
+static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, void *ctx)
+{
+    for (size_t i = 0; i < count; i++)
+    {
+        if (s_buffer_write_idx >= MAX_DAQ_SAMPLES)
+        {
+            break;
+        }
+        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
+        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
+        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
+        daq_push_sample(x_g, y_g, z_g);
+    }
+}
+
 
 /**
  * @brief 启动巡逻工作
@@ -65,11 +82,10 @@ esp_err_t start_patrolling_work()
 
     // 方案调整：LIS2DH12 仅用于报警，数据采集统一使用 ICM-42688-P
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
-    float lsb_to_g = LSB_TO_G_16G;
 
     LOG_INFOF("[DAQ_WORKER] Starting ICM-42688-P capture for %lu ms (Patrol)", duration_ms);
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler_icm, &lsb_to_g, 512, 20);
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, 512, 20);
 
     if (ret != ESP_OK)
     {
@@ -77,8 +93,6 @@ esp_err_t start_patrolling_work()
         return ret;
     }
     LOG_INFOF("[DAQ_WORKER] Patrol complete. Samples: %lu", s_buffer_write_idx);
-
-    // TODO: Add job to queue for processing patrol data
 
     return ESP_OK;
 }
@@ -103,14 +117,6 @@ esp_err_t start_diagnosing_work()
     s_buffer_write_idx = 0; // 重置写入索引
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
 
-    // 根据配置的量程选择对应的 LSB 转换系数
-    float lsb_to_g = LSB_TO_G_16G;
-    switch (capture_cfg.fs) {
-        case ICM_FS_2G:  lsb_to_g = LSB_TO_G_2G; break;
-        case ICM_FS_4G:  lsb_to_g = LSB_TO_G_4G; break;
-        case ICM_FS_8G:  lsb_to_g = LSB_TO_G_8G; break;
-        case ICM_FS_16G: lsb_to_g = LSB_TO_G_16G; break;
-    }
 
     // 计算采集时长 (ms)
     uint32_t duration_ms = (uint32_t)(diagnosis_config.actual_time * 1000.0f);
@@ -118,7 +124,7 @@ esp_err_t start_diagnosing_work()
         duration_ms = 100;
 
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler_icm, &lsb_to_g, 512, 20);
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, 512, 20);
 
     if (ret != ESP_OK)
     {
@@ -188,27 +194,6 @@ void init_config(daq_worker_param_t *param)
     }
 }
 
-// ICM-42688-P 专用处理函数 (Big-Endian)
-// 注意：这是一个临时方案，用于 PoV 阶段。
-// 未来替换为 ST IIS3DWB 后，将与 LIS2DH12 一样使用 Little-Endian 处理逻辑，
-// 届时可以考虑合并 Handler 或使用统一的 ST 处理模板。
-static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, void *ctx)
-{
-
-    for (size_t i = 0; i < count; i++)
-    {
-        if (s_buffer_write_idx >= MAX_DAQ_SAMPLES)
-        {
-            break;
-        }
-
-        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
-        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
-        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
-
-        daq_push_sample(x_g, y_g, z_g);
-    }
-}
 
 esp_err_t start_daq_worker(daq_worker_param_t *param)
 {

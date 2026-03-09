@@ -36,8 +36,7 @@ static void fft_task_entry(void *arg)
         }
     }
 }
-
-void start_fft_task(void)
+esp_err_t start_fft_task(void)
 {
     if (g_fft_job_queue == NULL)
     {
@@ -51,5 +50,7 @@ void start_fft_task(void)
     else
     {
         LOG_INFO("[TASK_FFT] FFT analysis task started");
+        return ESP_OK;
     }
+    return ESP_ERR_INVALID_STATE;
 }
