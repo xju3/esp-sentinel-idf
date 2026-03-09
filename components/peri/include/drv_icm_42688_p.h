@@ -60,7 +60,7 @@ typedef void (*icm_data_cb_t)(const imu_raw_data_t *data, size_t count);
 extern SensorDriver_t icm42688_driver;
 
 /* --- 驱动 API --- */
-esp_err_t drv_icm42688_init(void);
+esp_err_t drv_icm42688_init();
 esp_err_t drv_icm42688_config(const icm_cfg_t *cfg);
 esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb);
 esp_err_t drv_icm42688_stop_stream(void);

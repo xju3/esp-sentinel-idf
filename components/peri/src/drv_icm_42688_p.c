@@ -148,7 +148,7 @@ esp_err_t disable_icm42688p_wom(void) {
 /* ========================================================================= *
  * 基础硬件初始化与配置
  * ========================================================================= */
-esp_err_t drv_icm42688_init(void) {
+esp_err_t drv_icm42688_init() {
     if (icm_42688_p_initialized) return ESP_OK;
     if (s_spi_mutex == NULL) s_spi_mutex = xSemaphoreCreateMutex();
 
