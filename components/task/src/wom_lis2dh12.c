@@ -34,7 +34,7 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .threshold_mg_int1 = 358, // vibration/shock
+    .threshold_mg_int1 = 398, // vibration/shock
     .duration_int1 = 1,
     .threshold_mg_int2 = 2000, // posture/orientation 
     .duration_int2 = 5,
@@ -100,10 +100,7 @@ static void wom_listener_task(void *arg)
                 LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);
             }
-
             gpio_intr_enable(io_num);
-            ESP_LOGI(TAG, "WoM event handled. Listening...");
-
             // TODO: trigger health-check or wakeup sequence here
         }
     }

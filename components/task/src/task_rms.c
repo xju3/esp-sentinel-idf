@@ -56,6 +56,12 @@ static void rms_task_entry(void *arg)
             max_v = (max_v > rms.z) ? max_v : rms.z;
 
             iso_alarm_status_t status = ISO_STATUS_INVALID_CONFIG;
+
+            if (g_user_config.iso.standard == 0) // 1 = ISO10816
+            {
+                g_user_config.iso.standard = 1; // 默认使用 ISO10816
+            }
+       
             if (g_user_config.iso.standard == 1) // 1 = ISO10816
             {
                 status = iso10816_check(max_v, &g_user_config.iso);
@@ -65,7 +71,10 @@ static void rms_task_entry(void *arg)
                 status = iso20816_check(max_v, &g_user_config.iso);
             }
 
-            LOG_INFOF("vibration status: %s", iso_status_to_string(status));
+            LOG_INFOF("vibration status: %s, max_v: %.2f, iso: %d",
+                      iso_status_to_string(status), 
+                      max_v,
+                      g_user_config.iso.standard);
 
             // 5. 根据状态触发报警和进一步分析
             if (status >= ISO_STATUS_UNSATISFACTORY)
@@ -111,6 +120,5 @@ esp_err_t start_rms_task(void)
         LOG_ERROR("[TASK_RMS] Failed to create RMS task");
         return ESP_ERR_INVALID_STATE;
     }
-    LOG_INFO("[TASK_RMS] RMS diagnosis task started");
     return ESP_OK;
 }
