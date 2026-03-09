@@ -2,9 +2,12 @@
 #include "task_stash.h" // for vib_job_t
 #include "algo_kurtosis.h"
 #include "logger.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 
 #define KURTOSIS_QUEUE_LEN 5
 #define MAX_DAQ_SAMPLES 8192
+#define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 QueueHandle_t g_kurtosis_job_queue = NULL;
 
@@ -36,11 +39,16 @@ esp_err_t start_kurtosis_task(void)
 {
     if (g_kurtosis_job_queue == NULL)
     {
-        g_kurtosis_job_queue = xQueueCreate(KURTOSIS_QUEUE_LEN, sizeof(vib_job_t));
+        g_kurtosis_job_queue = xQueueCreateWithCaps(KURTOSIS_QUEUE_LEN, sizeof(vib_job_t), TASK_MEM_CAPS);
+        if (g_kurtosis_job_queue == NULL)
+        {
+            LOG_ERROR("Failed to create KURTOSIS queue");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     // 创建处理任务
-    if (xTaskCreate(kurtosis_task_entry, "kurtosis_task", 4096, NULL, 4, NULL) != pdPASS)
+    if (xTaskCreateWithCaps(kurtosis_task_entry, "kurtosis_task", 4096, NULL, 4, NULL, TASK_MEM_CAPS) != pdPASS)
     {
         LOG_ERROR("Failed to create KURTOSIS task");
         return ESP_ERR_INVALID_STATE;

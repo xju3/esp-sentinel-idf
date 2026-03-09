@@ -5,10 +5,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/idf_additions.h"
 #include "driver/gpio.h"
 #include "esp_sleep.h"
+#include "esp_heap_caps.h"
 
 static QueueHandle_t gpio_evt_queue = NULL;
+#define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 // ---------------------------------------------------------------------------
 // Default WoM thresholds
@@ -109,18 +112,18 @@ static void wom_listener_task(void *arg)
 esp_err_t start_wom_lis2dh12_listener(void)
 {
     enable_lis2dh12_gpoi_wakeup();
-    gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
+    gpio_evt_queue = xQueueCreateWithCaps(10, sizeof(uint32_t), TASK_MEM_CAPS);
     if (!gpio_evt_queue)
     {
         LOG_ERRORF("Failed to create GPIO event queue");
         return ESP_ERR_NO_MEM;
     }
 
-    BaseType_t task_created = xTaskCreate(wom_listener_task, "wom_listener", 4096, NULL, 10, NULL);
+    BaseType_t task_created = xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, NULL, TASK_MEM_CAPS);
     if (task_created != pdPASS)
     {
         LOG_ERRORF("Failed to create WoM listener task");
-        vQueueDelete(gpio_evt_queue);
+        vQueueDeleteWithCaps(gpio_evt_queue);
         gpio_evt_queue = NULL;
         return ESP_FAIL;
     }

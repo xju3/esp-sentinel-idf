@@ -7,9 +7,12 @@
 #include "task_fft.h"
 
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 // 必须与 daq_worker.c 中的定义保持一致
 #define MAX_DAQ_SAMPLES 8192
 #define RMS_QUEUE_LEN 5
+#define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 QueueHandle_t g_rms_job_queue = NULL;
 
@@ -111,11 +114,16 @@ esp_err_t start_rms_task(void)
 {
     if (g_rms_job_queue == NULL)
     {
-        g_rms_job_queue = xQueueCreate(RMS_QUEUE_LEN, sizeof(vib_job_t));
+        g_rms_job_queue = xQueueCreateWithCaps(RMS_QUEUE_LEN, sizeof(vib_job_t), TASK_MEM_CAPS);
+        if (g_rms_job_queue == NULL)
+        {
+            LOG_ERROR("Failed to create RMS queue");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     // 创建处理任务
-    if (xTaskCreate(rms_task_entry, "rms_task", 4096, NULL, 4, NULL) != pdPASS)
+    if (xTaskCreateWithCaps(rms_task_entry, "rms_task", 4096, NULL, 4, NULL, TASK_MEM_CAPS) != pdPASS)
     {
         LOG_ERROR("Failed to create RMS task");
         return ESP_ERR_INVALID_STATE;

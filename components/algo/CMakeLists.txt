@@ -6,6 +6,7 @@ idf_component_register(
         "src/algo_welford.c"
         "src/algo_rms.c"
         "src/algo_fft.c"
+        "src/algo_kurtosis.c"
     INCLUDE_DIRS
         "include"
 

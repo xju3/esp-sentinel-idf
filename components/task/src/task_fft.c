@@ -3,14 +3,18 @@
 #include "logger.h"
 #include "data_dispatcher.h"
 #include "esp_timer.h"
+#include "esp_attr.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 
 #define MAX_DAQ_SAMPLES 8192
 #define FFT_QUEUE_LEN   5
+#define TASK_MEM_CAPS   (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 QueueHandle_t g_fft_job_queue = NULL;
-static float s_fft_mag_x[MAX_DAQ_SAMPLES / 2];
-static float s_fft_mag_y[MAX_DAQ_SAMPLES / 2];
-static float s_fft_mag_z[MAX_DAQ_SAMPLES / 2];
+EXT_RAM_BSS_ATTR static float s_fft_mag_x[MAX_DAQ_SAMPLES / 2];
+EXT_RAM_BSS_ATTR static float s_fft_mag_y[MAX_DAQ_SAMPLES / 2];
+EXT_RAM_BSS_ATTR static float s_fft_mag_z[MAX_DAQ_SAMPLES / 2];
 
 static void fft_task_entry(void *arg)
 {
@@ -103,10 +107,15 @@ esp_err_t start_fft_task(void)
 {
     if (g_fft_job_queue == NULL)
     {
-        g_fft_job_queue = xQueueCreate(FFT_QUEUE_LEN, sizeof(vib_job_t));
+        g_fft_job_queue = xQueueCreateWithCaps(FFT_QUEUE_LEN, sizeof(vib_job_t), TASK_MEM_CAPS);
+        if (g_fft_job_queue == NULL)
+        {
+            LOG_ERROR("Failed to create FFT queue");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
-    if (xTaskCreate(fft_task_entry, "fft_task", 4096 * 2, NULL, 3, NULL) != pdPASS)
+    if (xTaskCreateWithCaps(fft_task_entry, "fft_task", 4096 * 2, NULL, 3, NULL, TASK_MEM_CAPS) != pdPASS)
     {
         LOG_ERROR("Failed to create FFT task");
     }

@@ -7,7 +7,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
+#include "freertos/idf_additions.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include <time.h>
 #include <string.h>
 #include <math.h>
@@ -35,6 +37,7 @@ static SemaphoreHandle_t s_daq_mutex = NULL;
 // FreeRTOS 软件定时器句柄
 static TimerHandle_t patrol_timer_handle = NULL;
 static TimerHandle_t diagnosis_timer_handle = NULL;
+#define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 // 任务上下文结构体
 typedef struct {
@@ -176,14 +179,14 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     };
     
     // 创建巡逻任务
-    BaseType_t result = xTaskCreate(
+    BaseType_t result = xTaskCreateWithCaps(
         generic_task_handler,
         "patrol_task",
         4096,
         &patrol_ctx,
-        2,  // 优先级较低
-        &patrol_task_handle
-    );
+        2,
+        &patrol_task_handle,
+        TASK_MEM_CAPS);
     
     if (result != pdPASS)
     {
@@ -193,19 +196,19 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     }
     
     // 创建诊断任务
-    result = xTaskCreate(
+    result = xTaskCreateWithCaps(
         generic_task_handler,
         "diagnosis_task",
         4096,
         &diagnosis_ctx,
-        3,  // 优先级较高
-        &diagnosis_task_handle
-    );
+        3,
+        &diagnosis_task_handle,
+        TASK_MEM_CAPS);
     
     if (result != pdPASS)
     {
         LOG_ERROR("Failed to create diagnosis task");
-        vTaskDelete(patrol_task_handle);
+        vTaskDeleteWithCaps(patrol_task_handle);
         vSemaphoreDelete(s_daq_mutex);
         return ESP_ERR_INVALID_STATE;
     }

@@ -47,7 +47,7 @@ static void calib_data_handler(const imu_raw_data_t *data, size_t count, void *c
     }
 }
 
-esp_err_t speed_calibration_start(int32_t *out_rpm)
+esp_err_t speed_calibration_start(int32_t expected_rpm, int32_t *out_rpm)
 {
     if (!out_rpm) return ESP_ERR_INVALID_ARG;
     
@@ -90,73 +90,89 @@ esp_err_t speed_calibration_start(int32_t *out_rpm)
         goto cleanup;
     }
 
-    // 3. 信号处理与 FFT
-    // 我们需要找到三轴中能量最大的那个频率点。
-    // 策略：分别计算 X, Y, Z 的 FFT 幅值谱，然后将它们叠加，在叠加谱上寻峰。
-    
-    // 分配叠加谱 Buffer (Spectrum Sum)
-    float *spectrum_sum = (float *)heap_caps_calloc((CALIB_FFT_SIZE / 2), sizeof(float), MALLOC_CAP_SPIRAM);
-    if (!spectrum_sum) {
-        ret = ESP_ERR_NO_MEM;
-        goto cleanup;
-    }
-
+    // 3. 优势轴选择 (Dominant Axis Selection)
+    // 优化策略：不在时域做 SVM (会导致频率倍增或基频丢失)，也不做三轴 FFT 叠加 (耗时)。
+    // 而是先在时域找出峰峰值(P-P)最大的轴，只对该轴做 FFT。
     const float *ptrs[3] = {
         s_calib_raw_buf,
         s_calib_raw_buf + CALIB_FFT_SIZE,
         s_calib_raw_buf + CALIB_FFT_SIZE * 2
     };
 
+    int best_axis = 0;
+    float max_pp = -1.0f;
+
     for (int axis = 0; axis < 3; axis++) {
-        // 去直流 (Detrend/Mean Removal) - 简单的去均值
-        float mean = 0.0f;
-        for (int i = 0; i < CALIB_FFT_SIZE; i++) mean += ptrs[axis][i];
-        mean /= CALIB_FFT_SIZE;
-        
-        // 原地去均值 (注意：algo_fft 内部会加窗，所以这里只需去直流)
-        // 由于 algo_fft_calculate 输入是 const，我们需要拷贝到临时 buffer 或者修改 algo_fft 接口
-        // 这里 algo_fft_calculate 会申请自己的 scratch，但输入必须是纯净的。
-        // 为了简单，我们直接修改 s_calib_raw_buf 中的数据（虽然指针是 const，但内存是我们分配的）
-        float *mutable_ptr = (float *)ptrs[axis];
-        for (int i = 0; i < CALIB_FFT_SIZE; i++) mutable_ptr[i] -= mean;
-
-        // 计算 FFT
-        ret = algo_fft_calculate(ptrs[axis], s_calib_fft_mag, CALIB_FFT_SIZE);
-        if (ret != ESP_OK) {
-            LOG_ERRORF("FFT failed on axis %d", axis);
-            heap_caps_free(spectrum_sum);
-            goto cleanup;
+        float min_v = 1000.0f;
+        float max_v = -1000.0f;
+        for (int i = 0; i < CALIB_FFT_SIZE; i++) {
+            float v = ptrs[axis][i];
+            if (v < min_v) min_v = v;
+            if (v > max_v) max_v = v;
         }
-
-        // 累加到总谱
-        for (int i = 0; i < CALIB_FFT_SIZE / 2; i++) {
-            spectrum_sum[i] += s_calib_fft_mag[i];
+        float pp = max_v - min_v;
+        if (pp > max_pp) {
+            max_pp = pp;
+            best_axis = axis;
         }
     }
+    LOG_DEBUGF("Dominant axis: %d, P-P: %.3fg", best_axis, max_pp);
 
-    // 4. 寻峰 (Peak Picking)
-    float bin_res = CALIB_ODR_HZ / (float)CALIB_FFT_SIZE;
-    int min_bin = (int)(CALIB_MIN_RPM / 60.0f / bin_res);
-    int max_bin = (int)(CALIB_MAX_RPM / 60.0f / bin_res);
+    // 4. 信号处理与 FFT (仅针对优势轴)
+    // 去直流
+    float mean = 0.0f;
+    for (int i = 0; i < CALIB_FFT_SIZE; i++) mean += ptrs[best_axis][i];
+    mean /= CALIB_FFT_SIZE;
     
+    float *mutable_ptr = (float *)ptrs[best_axis];
+    for (int i = 0; i < CALIB_FFT_SIZE; i++) mutable_ptr[i] -= mean;
+
+    // 计算 FFT
+    ret = algo_fft_calculate(ptrs[best_axis], s_calib_fft_mag, CALIB_FFT_SIZE);
+    if (ret != ESP_OK) {
+        LOG_ERRORF("FFT failed on axis %d", best_axis);
+        goto cleanup;
+    }
+
+    // 5. 寻峰 (Peak Picking)
+    float bin_res = CALIB_ODR_HZ / (float)CALIB_FFT_SIZE;
+    int min_bin, max_bin;
+
+    if (expected_rpm > 0) {
+        // 有参考转速：开窗搜索 (±30%)
+        // 目的：区分基频(1X)与谐波(2X, 3X)或皮带轮分频(0.5X)
+        // 例如：铭牌 1500 RPM，搜索范围约 1050 ~ 1950 RPM，排除了 3000 RPM (2X) 的干扰
+        float center_freq = (float)expected_rpm / 60.0f;
+        float low_freq = center_freq * 0.7f;
+        float high_freq = center_freq * 1.3f;
+        
+        min_bin = (int)(low_freq / bin_res);
+        max_bin = (int)(high_freq / bin_res);
+        LOG_INFOF("Calibration hint: %ld RPM. Searching window: %.1f - %.1f Hz", expected_rpm, low_freq, high_freq);
+    } else {
+        // 无参考转速：全范围盲搜
+        min_bin = (int)(CALIB_MIN_RPM / 60.0f / bin_res);
+        max_bin = (int)(CALIB_MAX_RPM / 60.0f / bin_res);
+        LOG_INFO("Calibration blind mode (Full range search)");
+    }
+
+    // 边界安全检查
+    if (min_bin < 1) min_bin = 1; // 避开直流分量(Bin 0)
     if (max_bin >= CALIB_FFT_SIZE / 2) max_bin = CALIB_FFT_SIZE / 2 - 1;
 
     float max_val = 0.0f;
     int peak_idx = 0;
 
     for (int i = min_bin; i <= max_bin; i++) {
-        if (spectrum_sum[i] > max_val) {
-            max_val = spectrum_sum[i];
+        if (s_calib_fft_mag[i] > max_val) {
+            max_val = s_calib_fft_mag[i];
             peak_idx = i;
         }
     }
 
-    heap_caps_free(spectrum_sum);
-
-    // 5. 结果验证
+    // 6. 结果验证
     // 检查幅值是否足够大 (避免在静止时标定出噪声频率)
-    // spectrum_sum 是三轴叠加，所以阈值要适当放宽或除以3
-    if (max_val < (CALIB_MIN_MAG_THR * 3.0f)) {
+    if (max_val < CALIB_MIN_MAG_THR) {
         LOG_WARNF("Vibration too low for calibration (Max: %.4fg)", max_val);
         ret = ESP_FAIL;
     } else {

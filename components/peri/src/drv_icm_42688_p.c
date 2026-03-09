@@ -244,7 +244,13 @@ esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb) {
     icm_write_reg(ICM_REG_FIFO_CONFIG, 0x40);
     vTaskDelay(pdMS_TO_TICKS(2));
 
-    xTaskCreatePinnedToCore(icm_dma_worker_task, "icm_dma_task", 4096, NULL, configMAX_PRIORITIES - 1, &s_dma_task_handle, 1);
+    if (xTaskCreatePinnedToCore(icm_dma_worker_task, "icm_dma_task", 4096, NULL,
+                                configMAX_PRIORITIES - 1, &s_dma_task_handle, 1) != pdPASS)
+    {
+        s_stream_running = false;
+        s_data_cb = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     return ESP_OK;
 }
 

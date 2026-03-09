@@ -1,5 +1,6 @@
 #include "algo_kurtosis.h"
 #include "dsps_math.h"
+#include "dsps_dotprod.h"
 #include "esp_log.h"
 #include "esp_attr.h"
 #include <string.h>
@@ -7,7 +8,7 @@
 
 static const char *TAG = "ALGO_KURT";
 
-#define MAX_PROCESS_POINTS 8192
+#define MAX_PROCESS_POINTS 2048
 
 // Use external RAM for large scratch buffer, aligned for SIMD
 EXT_RAM_BSS_ATTR static float s_kurt_scratch[MAX_PROCESS_POINTS] __attribute__((aligned(16)));
@@ -43,7 +44,7 @@ static float process_axis(const float *input, uint32_t len)
     // Variance = sum((x-mean)^2) / N
     // We use dot product of buf with itself to get sum of squares
     float sum_sq = 0.0f;
-    dsps_dotprod_f32(buf, buf, len, &sum_sq);
+    dsps_dotprod_f32(buf, buf, &sum_sq, len);
     
     float variance = sum_sq / len;
 
@@ -55,7 +56,7 @@ static float process_axis(const float *input, uint32_t len)
 
     // Now calculate sum of squares of the squared data: sum(((x-mean)^2)^2) = sum((x-mean)^4)
     float sum_quad = 0.0f;
-    dsps_dotprod_f32(buf, buf, len, &sum_quad);
+    dsps_dotprod_f32(buf, buf, &sum_quad, len);
 
     float m4 = sum_quad / len;
 

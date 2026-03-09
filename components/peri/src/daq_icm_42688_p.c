@@ -1,14 +1,27 @@
 #include "daq_icm_42688_p.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/stream_buffer.h"
+#include "freertos/idf_additions.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <stdlib.h> // for malloc/free
 #include "esp_heap_caps.h"
 
 #define IMU_ODR_SIZE 16384
+static const char *TAG = "DAQ_ICM";
 static int16_t s_last_chunck_count = 0;
 static StreamBufferHandle_t s_daq_stream = NULL;
+
+static void log_heap_snapshot(const char *hint)
+{
+    ESP_LOGE(TAG,
+             "%s | internal free=%u largest=%u, psram free=%u largest=%u",
+             hint ? hint : "heap snapshot",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+}
 
 esp_err_t daq_icm_42688_p_init(void) {
     return drv_icm42688_init();
@@ -38,8 +51,11 @@ esp_err_t daq_icm_42688_p_capture(
 
     // 动态调整 StreamBuffer 的触发水位
     if (s_last_chunck_count == 0) {
-        s_daq_stream = xStreamBufferCreate(IMU_ODR_SIZE, sizeof(imu_raw_data_t) * chunck_size);
+        s_daq_stream = xStreamBufferCreateWithCaps(IMU_ODR_SIZE,
+                                                   sizeof(imu_raw_data_t) * chunck_size,
+                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_daq_stream == NULL) {
+            log_heap_snapshot("xStreamBufferCreateWithCaps failed");
             return ESP_ERR_NO_MEM;
         }
     } else if (s_last_chunck_count != chunck_size) {
@@ -48,15 +64,25 @@ esp_err_t daq_icm_42688_p_capture(
     s_last_chunck_count = chunck_size; 
 
     // 启动底层硬件 DMA 自动流水线
-    drv_icm42688_start_stream(daq_internal_dma_callback);
+    esp_err_t stream_err = drv_icm42688_start_stream(daq_internal_dma_callback);
+    if (stream_err != ESP_OK) {
+        log_heap_snapshot("drv_icm42688_start_stream failed");
+        return stream_err;
+    }
 
     int64_t start_time_us = esp_timer_get_time();
     int64_t end_time_us = start_time_us + (int64_t)duration_ms * 1000;
     int64_t skip_until_us = start_time_us + (int64_t)skip_ms * 1000;
     
     // 从系统堆分配接收缓冲
-    imu_raw_data_t *rx_buf = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * chunck_size, MALLOC_CAP_SPIRAM);
+    imu_raw_data_t *rx_buf = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * chunck_size,
+                                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!rx_buf) {
+        ESP_LOGW(TAG, "RX buffer PSRAM alloc failed, trying generic 8-bit heap");
+        rx_buf = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * chunck_size, MALLOC_CAP_8BIT);
+    }
+    if (!rx_buf) {
+        log_heap_snapshot("RX buffer alloc failed");
         drv_icm42688_stop_stream();
         return ESP_ERR_NO_MEM;
     }
