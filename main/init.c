@@ -20,6 +20,8 @@
 #include "sdkconfig.h"
 #include <string.h>
 
+bool is_network_available = false;
+
 void enable_tasks()
 {
     ESP_ERROR_CHECK(start_task_daq());
@@ -30,8 +32,10 @@ void enable_tasks()
 
 esp_err_t init_imu_sensors()
 {
-    ESP_ERROR_CHECK(drv_icm42688_init());
-    ESP_ERROR_CHECK(drv_lis2dh12_init());
+    // ESP_ERROR_CHECK(drv_icm42688_init());
+    // ESP_ERROR_CHECK(drv_lis2dh12_init());
+    drv_lis2dh12_init();
+    drv_icm42688_init();
     return ESP_OK;
 }
 

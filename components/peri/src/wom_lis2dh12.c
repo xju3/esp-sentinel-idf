@@ -114,13 +114,6 @@ static void wom_listener_task(void *arg)
 // ---------------------------------------------------------------------------
 esp_err_t start_wom_lis2dh12_listener(void)
 {
-    esp_err_t ret = drv_lis2dh12_init();
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to initialize LIS2DH12: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    
     enable_lis2dh12_gpoi_wakeup();
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     if (!gpio_evt_queue)
@@ -146,7 +139,7 @@ esp_err_t start_wom_lis2dh12_listener(void)
         .pull_down_en = 0,
         .pull_up_en = 0,
     };
-    ret = gpio_config(&io_conf);
+    esp_err_t ret = gpio_config(&io_conf);
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "GPIO config failed: %s", esp_err_to_name(ret));
