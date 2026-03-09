@@ -12,11 +12,6 @@
 #define ICM_REG_WHO_AM_I       0x75
 #define ICM_REG_FIFO_DATA      0x30
 
-#define PIN_NUM_MISO GPIO_NUM_9
-#define PIN_NUM_MOSI GPIO_NUM_11
-#define PIN_NUM_CLK  GPIO_NUM_12
-#define PIN_NUM_CS   GPIO_NUM_10
-
 #define DMA_CHUNK_SAMPLES 128
 #define DMA_CHUNK_BYTES   (DMA_CHUNK_SAMPLES * sizeof(imu_raw_data_t))
 

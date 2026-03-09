@@ -157,7 +157,6 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
 
  esp_err_t start_task_daq(void) {
     LOG_INFO("[TASK_DAQ] Starting DAQ tasks...");
-    drv_icm42688_init(); // 确保 IMU 驱动已初始化
     // 创建互斥锁 (Mutex)
     s_daq_mutex = xSemaphoreCreateMutex();
     if (s_daq_mutex == NULL)

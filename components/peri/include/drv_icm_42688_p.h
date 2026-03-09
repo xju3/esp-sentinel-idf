@@ -12,9 +12,9 @@
 #include "freertos/task.h"
 #include "imu_config.h" // 引入 HAL 层抽象结构
 
-#define PIN_NUM_MISO GPIO_NUM_9
-#define PIN_NUM_MOSI GPIO_NUM_11
-#define PIN_NUM_CLK  GPIO_NUM_12
+#define PIN_NUM_MISO GPIO_NUM_11
+#define PIN_NUM_MOSI GPIO_NUM_12
+#define PIN_NUM_CLK  GPIO_NUM_9
 #define PIN_NUM_CS   GPIO_NUM_10
 
 // WoM 核心寄存器宏定义
