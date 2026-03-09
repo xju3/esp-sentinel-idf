@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "esp_err.h"
 #include "task_rms.h"
+#include "task_kurtosis.h"
 #include <math.h>
 #include "esp_attr.h"
 
@@ -18,6 +19,7 @@ esp_err_t start_patrolling_work();
 esp_err_t start_diagnosing_work();
 
 #define MAX_DAQ_SAMPLES 8192
+#define DMA_CHUNK_SIZE 128
 EXT_RAM_BSS_ATTR static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
 static uint32_t s_buffer_write_idx = 0;
 
@@ -82,16 +84,16 @@ esp_err_t start_patrolling_work()
         duration_ms = 1000;
 
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
-    LOG_DEBUGF("duration: %lu ms (Patrol)", duration_ms);
+    LOG_DEBUGF("Sampling Duration: %lu ms (Patrol)", duration_ms);
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, 512, 20);
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, DMA_CHUNK_SIZE, 20);
 
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Patrol capture failed: %d", ret);
         return ret;
     }
-    LOG_DEBUGF("samples: %lu", s_buffer_write_idx);
+    LOG_DEBUGF("Samples: %lu", s_buffer_write_idx * DMA_CHUNK_SIZE);
 
     // 巡逻工作完成后，将数据发送给 RMS 任务进行分析
     vib_job_t job = {
@@ -102,7 +104,6 @@ esp_err_t start_patrolling_work()
     if (g_rms_job_queue)
     {
         xQueueSend(g_rms_job_queue, &job, 0);
-        LOG_DEBUGF("patrol data sent to RMS task for analysis");
     }
 
     return ESP_OK;
@@ -142,7 +143,7 @@ esp_err_t start_diagnosing_work()
         LOG_ERRORF(" Diagnosis capture failed: %d", ret);
         return ret;
     }
-    LOG_INFOF(" Diagnosis complete. Samples: %lu", s_buffer_write_idx);
+    LOG_INFOF("Samples: %lu", s_buffer_write_idx);
 
     vib_job_t job = {
         .raw_data = s_vib_buffer,
@@ -151,7 +152,7 @@ esp_err_t start_diagnosing_work()
         .task_mode = TASK_MODE_DIAGNOSIS};
     if (g_rms_job_queue)
     {
-        xQueueSend(g_rms_job_queue, &job, 0);
+        xQueueSend(g_kurtosis_job_queue, &job, 0);
     }
 
     return ESP_OK;
@@ -216,12 +217,12 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     // 根据任务模式启动相应的工作
     if (param->task_mode == TASK_MODE_PATROLING)
     {
-        LOG_INFO("Starting patrol work...");
+        LOG_DEBUG("Starting patrol work...");
         return start_patrolling_work();
     }
     else if (param->task_mode == TASK_MODE_DIAGNOSIS)
     {
-        LOG_INFO("Starting diagnosis work...");
+        LOG_DEBUG("Starting diagnosis work...");
         return start_diagnosing_work();
     }
     else

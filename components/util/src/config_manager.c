@@ -176,19 +176,18 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     const cJSON *iso = cJSON_GetObjectItemCaseSensitive(root, "iso");
     if (cJSON_IsObject(iso))
     {
-
-        item = cJSON_GetObjectItemCaseSensitive(root, "standard");
+        item = cJSON_GetObjectItemCaseSensitive(iso, "standard");
         if (cJSON_IsNumber(item))
         {
             cfg->iso.standard = (int8_t)item->valueint;
         }
-        item = cJSON_GetObjectItemCaseSensitive(root, "category");
+        item = cJSON_GetObjectItemCaseSensitive(iso, "category");
         if (cJSON_IsNumber(item))
         {
             cfg->iso.category = (int8_t)item->valueint;
         }
 
-        item = cJSON_GetObjectItemCaseSensitive(root, "foundation");
+        item = cJSON_GetObjectItemCaseSensitive(iso, "foundation");
         if (cJSON_IsNumber(item))
         {
             cfg->iso.foundation = (int8_t)item->valueint;

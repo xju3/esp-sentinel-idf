@@ -4,9 +4,9 @@
 #include "logger.h"
 #include "config_manager.h"
 #include "data_dispatcher.h"
-#include "esp_timer.h"
 #include "task_fft.h"
 
+#include "esp_timer.h"
 // 必须与 daq_worker.c 中的定义保持一致
 #define MAX_DAQ_SAMPLES 8192
 #define RMS_QUEUE_LEN 5
@@ -21,8 +21,8 @@ static void rms_task_entry(void *arg)
         // 阻塞等待采集任务发来的数据指针
         if (xQueueReceive(g_rms_job_queue, &job, portMAX_DELAY))
         {
-            LOG_INFOF("[TASK_RMS] Received job. Mode: %d, Len: %lu, SR: %.1f",
-                      job.task_mode, job.length, job.sample_rate);
+            LOG_DEBUGF("Received job. Mode: %d, Len: %lu, SR: %.1f",
+                       job.task_mode, job.length, job.sample_rate);
 
             // 1. 根据平面化布局 (Planar Layout) 获取各轴指针
             // 内存布局: [X0...Xn | Y0...Yn | Z0...Zn]
@@ -34,7 +34,7 @@ static void rms_task_entry(void *arg)
             // 2. 调用纯算法库计算 RMS (包含 HPF/LPF/积分)
             vib_rms_t rms = algo_rms_calculate(x_ptr, y_ptr, z_ptr, job.length, job.sample_rate);
 
-            LOG_INFOF("[TASK_RMS] Result (mm/s): X=%.2f, Y=%.2f, Z=%.2f", rms.x, rms.y, rms.z);
+            LOG_DEBUGF("Result (mm/s): X=%.2f, Y=%.2f, Z=%.2f", rms.x, rms.y, rms.z);
 
             // 3. 将结果发送给数据分发器 (Data Dispatcher)
             // if (g_monitor_message_queue)
@@ -51,28 +51,32 @@ static void rms_task_entry(void *arg)
             //     xQueueSend(g_monitor_message_queue, &msg, 0);
             // }
 
-            // 4. 根据 ISO 10816 标准判断振动状态
+            // 4. 根据 ISO 标准判断振动状态
             float max_v = (rms.x > rms.y) ? rms.x : rms.y;
             max_v = (max_v > rms.z) ? max_v : rms.z;
 
             iso_alarm_status_t status = ISO_STATUS_INVALID_CONFIG;
 
-            if (g_user_config.iso.standard == 0) // 1 = ISO10816
+            // 使用临时配置，避免修改全局配置
+            iso_config_t temp_config = g_user_config.iso;
+
+            // 如果standard为0，使用ISO10816作为默认值
+            if (temp_config.standard == 0)
             {
-                g_user_config.iso.standard = 1; // 默认使用 ISO10816
-            }
-       
-            if (g_user_config.iso.standard == 1) // 1 = ISO10816
-            {
-                status = iso10816_check(max_v, &g_user_config.iso);
-            }
-            else if (g_user_config.iso.standard == 2)
-            {
-                status = iso20816_check(max_v, &g_user_config.iso);
+                temp_config.standard = 1; // 默认使用 ISO10816
             }
 
-            LOG_INFOF("vibration status: %s, max_v: %.2f, iso: %d",
-                      iso_status_to_string(status), 
+            if (temp_config.standard == 1) // 1 = ISO10816
+            {
+                status = iso10816_check(max_v, &temp_config);
+            }
+            else if (temp_config.standard == 2) // 2 = ISO20816
+            {
+                status = iso20816_check(max_v, &temp_config);
+            }
+
+            LOG_INFOF("Vibration Status: %s, Max Vibration: %.2f, ISO: %d",
+                      iso_status_to_string(status),
                       max_v,
                       g_user_config.iso.standard);
 
@@ -81,26 +85,22 @@ static void rms_task_entry(void *arg)
             {
                 if (status == ISO_STATUS_UNACCEPTABLE)
                 {
-                    LOG_ERRORF("[TASK_RMS] CRITICAL ALARM! Vibration level is unacceptable. Max: %.2f mm/s", max_v);
+                    LOG_ERRORF("CRITICAL ALARM! Vibration level is unacceptable. Max: %.2f mm/s", max_v);
                 }
                 else
                 {
-                    LOG_WARNF("[TASK_RMS] Vibration Alarm! Level is unsatisfactory. Max: %.2f mm/s", max_v);
+                    LOG_WARNF("Vibration Alarm! Level is unsatisfactory. Max: %.2f mm/s", max_v);
                 }
                 // 状态不佳时，触发FFT分析
-                LOG_INFO("[TASK_RMS] Triggering advanced analysis (FFT) due to alarm...");
-                if (g_fft_job_queue != NULL)
+                if (job.task_mode == TASK_MODE_PATROLING)
                 {
-                    xQueueSend(g_fft_job_queue, &job, 0);
+                    if (g_fft_job_queue != NULL)
+                    {
+                        xQueueSend(g_fft_job_queue, &job, 0);
+                    }
                 }
-            }
-            else if (job.task_mode == TASK_MODE_DIAGNOSIS)
-            {
-                // 即使状态良好，诊断模式也需要FFT
-                LOG_INFO("[TASK_RMS] Diagnosis mode: Triggering advanced analysis (FFT)...");
-                if (g_fft_job_queue != NULL)
+                else
                 {
-                    xQueueSend(g_fft_job_queue, &job, 0);
                 }
             }
         }
@@ -117,7 +117,7 @@ esp_err_t start_rms_task(void)
     // 创建处理任务
     if (xTaskCreate(rms_task_entry, "rms_task", 4096, NULL, 4, NULL) != pdPASS)
     {
-        LOG_ERROR("[TASK_RMS] Failed to create RMS task");
+        LOG_ERROR("Failed to create RMS task");
         return ESP_ERR_INVALID_STATE;
     }
     return ESP_OK;

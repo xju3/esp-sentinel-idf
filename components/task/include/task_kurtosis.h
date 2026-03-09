@@ -1,5 +1,5 @@
-#ifndef TASK_RMS_H
-#define TASK_RMS_H
+#ifndef TASK_KURTOSIS_H
+#define TASK_KURTOSIS_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -13,11 +13,11 @@ extern "C"
 {
 #endif
 
-extern QueueHandle_t g_rms_job_queue;
+extern QueueHandle_t g_kurtosis_job_queue;
 
-esp_err_t start_rms_task(void);
+esp_err_t start_kurtosis_task(void);
 
 #ifdef __cplusplus
 }
-#endif // TASK_RMS_H
-#endif // TASK_RMS_H
+#endif // TASK_KURTOSIS_H
+#endif // TASK_KURTOSIS_H

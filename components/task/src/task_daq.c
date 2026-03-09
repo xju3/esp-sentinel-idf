@@ -73,7 +73,7 @@ static void generic_task_handler(void *arg)
         // 由于 Diagnosis 任务优先级更高，一旦锁释放，它会优先获得锁并立即执行
         if (xSemaphoreTake(s_daq_mutex, portMAX_DELAY) == pdTRUE)
         {
-            LOG_INFOF("[TASK_DAQ] %s task triggered", ctx->task_name);
+            LOG_INFOF("%s task triggered", ctx->task_name);
             
             daq_worker_param_t param = {
                 .rpm = g_user_config.rpm,
@@ -83,7 +83,7 @@ static void generic_task_handler(void *arg)
             esp_err_t err = start_daq_worker(&param);
             if (err != ESP_OK)
             {
-                LOG_ERRORF("[TASK_DAQ] %s work failed: %s", ctx->task_name, esp_err_to_name(err));
+                LOG_ERRORF("%s work failed: %s", ctx->task_name, esp_err_to_name(err));
             }
             
             xSemaphoreGive(s_daq_mutex);
@@ -107,7 +107,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     // 如果间隔为0，则禁用定时器
     if (interval_minutes <= 0)
     {
-        LOG_INFOF("[TASK_DAQ] %s timer disabled (interval = %d minutes)", timer_name, interval_minutes);
+        LOG_INFOF("%s timer disabled (interval = %d minutes)", timer_name, interval_minutes);
         *timer_handle_ptr = NULL;
         return false;
     }
@@ -119,7 +119,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     TickType_t interval_ticks = pdMS_TO_TICKS(interval_ms);
     if (interval_ticks == portMAX_DELAY)
     {
-        LOG_ERRORF("[TASK_DAQ] %s timer interval too large: %d minutes", timer_name, interval_minutes);
+        LOG_ERRORF("%s timer interval too large: %d minutes", timer_name, interval_minutes);
         *timer_handle_ptr = NULL;
         return false;
     }
@@ -135,7 +135,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     
     if (timer_handle == NULL)
     {
-        LOG_ERRORF("[TASK_DAQ] Failed to create %s timer", timer_name);
+        LOG_ERRORF("Failed to create %s timer", timer_name);
         *timer_handle_ptr = NULL;
         return false;
     }
@@ -143,25 +143,24 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     // 启动定时器
     if (xTimerStart(timer_handle, 0) != pdPASS)
     {
-        LOG_ERRORF("[TASK_DAQ] Failed to start %s timer", timer_name);
+        LOG_ERRORF("Failed to start %s timer", timer_name);
         xTimerDelete(timer_handle, 0);
         *timer_handle_ptr = NULL;
         return false;
     }
     
     *timer_handle_ptr = timer_handle;
-    LOG_INFOF("[TASK_DAQ] %s timer initialized with interval: %d minutes (%llu ms)", 
+    LOG_INFOF("%s timer initialized with interval: %d minutes (%llu ms)", 
               timer_name, interval_minutes, interval_ms);
     return true;
 }
 
  esp_err_t start_task_daq(void) {
-    LOG_INFO("[TASK_DAQ] Starting DAQ tasks...");
     // 创建互斥锁 (Mutex)
     s_daq_mutex = xSemaphoreCreateMutex();
     if (s_daq_mutex == NULL)
     {
-        LOG_ERROR("[TASK_DAQ] Failed to create mutex");
+        LOG_ERROR("Failed to create mutex");
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -188,7 +187,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     
     if (result != pdPASS)
     {
-        LOG_ERROR("[TASK_DAQ] Failed to create patrol task");
+        LOG_ERROR("Failed to create patrol task");
         vSemaphoreDelete(s_daq_mutex);
         return ESP_ERR_INVALID_STATE;
     }
@@ -205,7 +204,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     
     if (result != pdPASS)
     {
-        LOG_ERROR("[TASK_DAQ] Failed to create diagnosis task");
+        LOG_ERROR("Failed to create diagnosis task");
         vTaskDelete(patrol_task_handle);
         vSemaphoreDelete(s_daq_mutex);
         return ESP_ERR_INVALID_STATE;
@@ -215,17 +214,17 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     if (!init_task_timer(&patrol_timer_handle, patrol_task_handle, 
                         g_user_config.patrol, "Patrol"))
     {
-        LOG_WARN("[TASK_DAQ] Patrol timer not started");
+        LOG_WARN("Patrol timer not started");
     }
     
     // 初始化诊断定时器（分钟级）
     if (!init_task_timer(&diagnosis_timer_handle, diagnosis_task_handle, 
                         g_user_config.diagnosis, "Diagnosis"))
     {
-        LOG_WARN("[TASK_DAQ] Diagnosis timer not started");
+        LOG_WARN("Diagnosis timer not started");
     }
     
-    LOG_INFO("[TASK_DAQ] DAQ tasks started successfully");
+    LOG_INFO("DAQ tasks started successfully");
 
     return ESP_OK;
  }

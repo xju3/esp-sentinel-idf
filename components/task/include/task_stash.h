@@ -50,6 +50,14 @@ extern "C"
         vib_axis_baseline_t z;
     } vib_baseline_t;
 
+    typedef struct
+    {
+        float *raw_data;       // 指向静态 Buffer 的指针 (平面化布局: X, Y, Z)
+        uint32_t length;       // 单轴有效数据点数
+        float sample_rate;     // 实际采样率
+        task_mode_t task_mode; // 任务模式 (Patrol/Diagnosis)
+    } vib_job_t;
+
 #ifdef __cplusplus
 }
 #endif

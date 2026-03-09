@@ -1,13 +1,12 @@
 #include "drv_lis2dh12.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
-#include "esp_log.h"
+#include "logger.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <string.h>
 
-static const char *TAG = "LIS2DH12";
 
 // Register map
 #define LIS2DH12_REG_WHO_AM_I        0x0F
@@ -183,7 +182,7 @@ esp_err_t drv_lis2dh12_init(void) {
 
     s_spi_mutex = xSemaphoreCreateMutex();
     if (!s_spi_mutex) {
-        ESP_LOGE(TAG, "Failed to create SPI mutex");
+        LOG_ERROR("Failed to create SPI mutex");
         return ESP_ERR_NO_MEM;
     }
 
@@ -197,7 +196,7 @@ esp_err_t drv_lis2dh12_init(void) {
     };
     esp_err_t ret = spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "SPI bus initialize failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("SPI bus initialize failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -210,7 +209,7 @@ esp_err_t drv_lis2dh12_init(void) {
     };
     ret = spi_bus_add_device(SPI_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPI bus add device failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("SPI bus add device failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -218,12 +217,12 @@ esp_err_t drv_lis2dh12_init(void) {
     uint8_t who_am_i = 0;
     ret = lis2dh12_read_reg(LIS2DH12_REG_WHO_AM_I, &who_am_i);
     if (ret != ESP_OK || who_am_i != LIS2DH12_WHO_AM_I_VAL) {
-        ESP_LOGE(TAG, "WHO_AM_I check failed. Got 0x%02x, expected 0x%02x", who_am_i, LIS2DH12_WHO_AM_I_VAL);
-        ESP_LOGE(TAG, "Please verify:");
-        ESP_LOGE(TAG, "  1. Hardware connections (SCL=%d, MOSI=%d, MISO=%d, CS=%d)",
+        LOG_ERRORF("WHO_AM_I check failed. Got 0x%02x, expected 0x%02x", who_am_i, LIS2DH12_WHO_AM_I_VAL);
+        LOG_ERROR("Please verify:");
+        LOG_ERRORF("  1. Hardware connections (SCL=%d, MOSI=%d, MISO=%d, CS=%d)",
                  LIS2DH12_PIN_NUM_SCL, LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_CS);
-        ESP_LOGE(TAG, "  2. LIS2DH12 power supply");
-        ESP_LOGE(TAG, "  3. SPI clock frequency (currently 1 MHz)");
+        LOG_ERROR("  2. LIS2DH12 power supply");
+        LOG_ERROR("  3. SPI clock frequency (currently 1 MHz)");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -232,11 +231,11 @@ esp_err_t drv_lis2dh12_init(void) {
     uint8_t ctrl_reg4_val = (uint8_t)((s_current_fs << 4) | 0x80u);
     ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, ctrl_reg4_val);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set CTRL_REG4");
+        LOG_ERROR("Failed to set CTRL_REG4");
         return ret;
     }
 
-    ESP_LOGI(TAG, "LIS2DH12 initialized successfully");
+    LOG_DEBUG("LIS2DH12 initialized successfully");
     s_initialized = true;
     return ESP_OK;
 }
@@ -281,7 +280,7 @@ lis2dh12_fs_t drv_lis2dh12_get_current_fs(void) {
 }
 
 esp_err_t drv_lis2dh12_self_test(void) {
-    ESP_LOGW(TAG, "drv_lis2dh12_self_test is not implemented");
+    LOG_DEBUG("drv_lis2dh12_self_test is not implemented");
     return ESP_OK;
 }
 
@@ -328,7 +327,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     if (!wom_cfg)        return ESP_ERR_INVALID_ARG;
 
-    ESP_LOGI(TAG, "Enabling WoM mode (FS=±16g, ODR=50Hz, HPF on both INT1+INT2)...");
+    LOG_DEBUG("Enabling WoM mode (FS=±16g, ODR=50Hz, HPF on both INT1+INT2)...");
 
     // Step 1 — Power down and clear all control/interrupt registers.
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
@@ -363,14 +362,14 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     if (thr2 < WOM_THS_MIN) thr2 = WOM_THS_MIN;
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_THS, thr1));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_THS, thr2));
-    ESP_LOGI(TAG, "THS1=%u (~%u mg), THS2=%u (~%u mg) [FS=±16g, 186mg/LSB]",
+    LOG_DEBUGF("THS1=%u (~%u mg), THS2=%u (~%u mg) [FS=±16g, 186mg/LSB]",
              thr1, thr1 * WOM_SENSITIVITY_MG,
              thr2, thr2 * WOM_SENSITIVITY_MG);
 
     // Step 6 — Write duration registers (1 LSB = 20 ms at 50 Hz).
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_DURATION, wom_cfg->duration_int1));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_DURATION, wom_cfg->duration_int2));
-    ESP_LOGI(TAG, "Duration INT1=%u ms, INT2=%u ms",
+    LOG_DEBUGF("Duration INT1=%u ms, INT2=%u ms",
              wom_cfg->duration_int1 * 20u, wom_cfg->duration_int2 * 20u);
 
     // Step 7 — Configure interrupt event logic.
@@ -394,7 +393,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x40)); // I1_IA1
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x20)); // I2_IA2
 
-    ESP_LOGI(TAG, "WoM enabled — INT1: >%u mg, INT2: >%u mg",
+    LOG_DEBUGF("WoM enabled — INT1: >%u mg, INT2: >%u mg",
              thr1 * WOM_SENSITIVITY_MG, thr2 * WOM_SENSITIVITY_MG);
     return ESP_OK;
 }
@@ -402,7 +401,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg) {
 esp_err_t drv_lis2dh12_disable_wom(void) {
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
 
-    ESP_LOGI(TAG, "Disabling WoM mode...");
+    LOG_DEBUG("Disabling WoM mode...");
 
     // Power down first to silence the interrupt generators cleanly
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
@@ -419,6 +418,6 @@ esp_err_t drv_lis2dh12_disable_wom(void) {
     // Restore default operating mode: 100 Hz, normal mode, XYZ enabled
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x57));
 
-    ESP_LOGI(TAG, "WoM mode disabled");
+    LOG_DEBUG("WoM mode disabled");
     return ESP_OK;
 }

@@ -6,10 +6,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
-#include "esp_log.h"
 #include "esp_sleep.h"
-
-static const char *TAG = "WOM_LIS2DH12";
 
 static QueueHandle_t gpio_evt_queue = NULL;
 
@@ -34,8 +31,8 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .threshold_mg_int1 = 398, // vibration/shock
-    .duration_int1 = 1,
+    .threshold_mg_int1 = 388, // vibration/shock
+    .duration_int1 = 2,
     .threshold_mg_int2 = 2000, // posture/orientation 
     .duration_int2 = 5,
 };
@@ -79,7 +76,7 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
 static void wom_listener_task(void *arg)
 {
     uint32_t io_num;
-    ESP_LOGI(TAG, "WoM listener task started.");
+    LOG_DEBUG("WoM listener task started.");
 
     for (;;)
     {
@@ -115,14 +112,14 @@ esp_err_t start_wom_lis2dh12_listener(void)
     gpio_evt_queue = xQueueCreate(10, sizeof(uint32_t));
     if (!gpio_evt_queue)
     {
-        ESP_LOGE(TAG, "Failed to create GPIO event queue");
+        LOG_ERRORF("Failed to create GPIO event queue");
         return ESP_ERR_NO_MEM;
     }
 
     BaseType_t task_created = xTaskCreate(wom_listener_task, "wom_listener", 4096, NULL, 10, NULL);
     if (task_created != pdPASS)
     {
-        ESP_LOGE(TAG, "Failed to create WoM listener task");
+        LOG_ERRORF("Failed to create WoM listener task");
         vQueueDelete(gpio_evt_queue);
         gpio_evt_queue = NULL;
         return ESP_FAIL;
@@ -139,27 +136,27 @@ esp_err_t start_wom_lis2dh12_listener(void)
     esp_err_t ret = gpio_config(&io_conf);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "GPIO config failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("GPIO config failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
     ret = gpio_install_isr_service(0);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
     {
-        ESP_LOGE(TAG, "GPIO ISR service install failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("GPIO ISR service install failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
     ret = gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT1, gpio_isr_handler, (void *)LIS2DH12_PIN_NUM_INT1);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "ISR handler add INT1 failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("ISR handler add INT1 failed: %s", esp_err_to_name(ret));
         return ret;
     }
     ret = gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT2, gpio_isr_handler, (void *)LIS2DH12_PIN_NUM_INT2);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "ISR handler add INT2 failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("ISR handler add INT2 failed: %s", esp_err_to_name(ret));
         gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT1);
         return ret;
     }
@@ -168,7 +165,7 @@ esp_err_t start_wom_lis2dh12_listener(void)
     ret = drv_lis2dh12_enable_wom(&s_default_wom_cfg);
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "Failed to enable WoM: %s", esp_err_to_name(ret));
+        LOG_ERRORF("Failed to enable WoM: %s", esp_err_to_name(ret));
         gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT1);
         gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT2);
         return ret;
@@ -189,16 +186,16 @@ esp_err_t start_wom_lis2dh12_listener(void)
         drv_lis2dh12_read_register(LIS2DH12_REG_INT2_DURATION, &dur2);
         drv_lis2dh12_read_register(LIS2DH12_REG_INT1_CFG, &cfg1);
         drv_lis2dh12_read_register(LIS2DH12_REG_INT2_CFG, &cfg2);
-        ESP_LOGI(TAG, "WoM register dump:");
-        ESP_LOGI(TAG, "  CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL4=0x%02X CTRL5=0x%02X CTRL6=0x%02X",
+        LOG_DEBUG("WoM register dump:");
+        LOG_DEBUGF("  CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL4=0x%02X CTRL5=0x%02X CTRL6=0x%02X",
                  r1, r2, r3, r4, r5, r6);
-        ESP_LOGI(TAG, "  INT1: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
+        LOG_DEBUGF("  INT1: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
                  cfg1, thr1, thr1 * 186u, dur1, dur1 * 20u);
-        ESP_LOGI(TAG, "  INT2: CFG=0x%02X THS=0x%02X (6D mode, THS unused) DUR=0x%02X(%ums)",
+        LOG_DEBUGF("  INT2: CFG=0x%02X THS=0x%02X (6D mode, THS unused) DUR=0x%02X(%ums)",
                  cfg2, thr2, dur2, dur2 * 20u);
     }
 
-    ESP_LOGI(TAG, "WoM listener ready.");
+    LOG_DEBUG("WoM listener ready.");
     return ESP_OK;
 }
 
