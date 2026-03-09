@@ -5,9 +5,11 @@
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 
+
 #define KURTOSIS_QUEUE_LEN 5
 #define MAX_DAQ_SAMPLES 8192
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#define KURTOSIS_ALARM_THRESHOLD 3.5f
 
 QueueHandle_t g_kurtosis_job_queue = NULL;
 
@@ -31,6 +33,17 @@ static void kurtosis_task_entry(void *arg)
             // Normal distribution kurtosis is ~3.0. High values indicate impulsive faults (e.g. bearing clicks).
             LOG_INFOF("Kurtosis Result: X=%.2f, Y=%.2f, Z=%.2f", 
                       result.x, result.y, result.z);
+            
+            // 4. Optional: Trigger alerts if kurtosis exceeds threshold
+            float max_kurt = (result.x > result.y) ? result.x : result.y;
+            max_kurt = (max_kurt > result.z) ? max_kurt : result.z;
+            if (max_kurt > KURTOSIS_ALARM_THRESHOLD) {  
+                LOG_WARNF("High Kurtosis Detected! Max=%.2f", max_kurt);
+                if (g_envelope_job_queue)
+                {
+                    xQueueSend(g_envelope_job_queue, &job, 0);
+                }
+            }
         }
     }
 }

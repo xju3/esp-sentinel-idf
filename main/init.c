@@ -11,6 +11,7 @@
 #include "task_fft.h"
 #include "task_rms.h"
 #include "task_kurtosis.h"
+#include "task_envelope.h"
 #include "wom_lis2dh12.h"
 #include "web_server.h"
 
@@ -29,6 +30,7 @@ void enable_tasks()
     ESP_ERROR_CHECK(start_rms_task());
     ESP_ERROR_CHECK(start_fft_task());
     ESP_ERROR_CHECK(start_kurtosis_task());
+    ESP_ERROR_CHECK(start_envelope_task());
     ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
 }
 

@@ -4,6 +4,7 @@ idf_component_register(
         "src/task_rms.c" 
         "src/task_fft.c"
         "src/task_kurtosis.c"
+        "src/task_envelope.c"
         "src/daq_worker.c" 
         "src/task_baseline.c" 
         "src/speed_calibration.c" 
