@@ -1,14 +1,34 @@
 #include "task_kurtosis.h"
+#include "task_stash.h" // for vib_job_t
+#include "algo_kurtosis.h"
 #include "logger.h"
 
 #define KURTOSIS_QUEUE_LEN 5
+#define MAX_DAQ_SAMPLES 8192
 
 QueueHandle_t g_kurtosis_job_queue = NULL;
 
 static void kurtosis_task_entry(void *arg)
 {
+    vib_job_t job;
     while(1) {
-        
+        if (xQueueReceive(g_kurtosis_job_queue, &job, portMAX_DELAY))
+        {
+            LOG_INFOF("Kurtosis Analysis Start. Len: %lu, SR: %.1f", job.length, job.sample_rate);
+
+            // 1. Parse planar layout pointers (X | Y | Z)
+            const float *x_ptr = job.raw_data;
+            const float *y_ptr = job.raw_data + MAX_DAQ_SAMPLES;
+            const float *z_ptr = job.raw_data + MAX_DAQ_SAMPLES * 2;
+
+            // 2. Perform Kurtosis calculation using ESP-DSP
+            vib_kurtosis_t result = algo_kurtosis_calculate(x_ptr, y_ptr, z_ptr, job.length);
+
+            // 3. Log results
+            // Normal distribution kurtosis is ~3.0. High values indicate impulsive faults (e.g. bearing clicks).
+            LOG_INFOF("Kurtosis Result: X=%.2f, Y=%.2f, Z=%.2f", 
+                      result.x, result.y, result.z);
+        }
     }
 }
 

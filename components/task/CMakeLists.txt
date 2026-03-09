@@ -6,6 +6,7 @@ idf_component_register(
         "src/task_kurtosis.c"
         "src/daq_worker.c" 
         "src/task_baseline.c" 
+        "src/speed_calibration.c" 
         "src/wom_lis2dh12.c" 
     INCLUDE_DIRS 
         "include" 
