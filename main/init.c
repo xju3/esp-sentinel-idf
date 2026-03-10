@@ -56,7 +56,7 @@ esp_err_t init_nvs()
 
 esp_err_t init_comm_channel()
 {
-    esp_err_t err = ESP_OK;
+    esp_err_t err = ppp_4g_init(); // Ensure ppp_4g_init returns esp_err_t
     if (g_user_config.network == 1)
     {
         LOG_INFO("Initializing 4G Module...");
