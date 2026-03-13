@@ -26,12 +26,12 @@ bool is_network_available = false;
 
 void enable_tasks()
 {
-    ESP_ERROR_CHECK(start_task_daq());
     ESP_ERROR_CHECK(start_rms_task());
     ESP_ERROR_CHECK(start_fft_task());
     ESP_ERROR_CHECK(start_kurtosis_task());
     ESP_ERROR_CHECK(start_envelope_task());
     ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
+    ESP_ERROR_CHECK(start_task_daq());
 }
 
 esp_err_t init_imu_sensors()
@@ -76,8 +76,12 @@ esp_err_t init_comm_channel()
         if (err == ESP_OK)
         {
             is_network_available = true;
+#ifdef CONFIG_DEV_MODE // 开发模式下仍保留 Web 调试入口
+            ESP_ERROR_CHECK(web_server_start());
+#endif
         }
     }
+
     return err;
 }
 
