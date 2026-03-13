@@ -84,7 +84,7 @@ esp_err_t start_patrolling_work()
         duration_ms = 1000;
 
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
-    LOG_DEBUGF("Sampling Duration: %lu ms (Patrol)", duration_ms);
+    LOG_DEBUGF("Sampling duration: %lu ms (Patrol)", duration_ms);
     esp_err_t ret = daq_icm_42688_p_capture(
         &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, DMA_CHUNK_SIZE, 20);
 

@@ -36,10 +36,9 @@ static QueueHandle_t gpio_evt_queue = NULL;
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     .threshold_mg_int1 = 388, // vibration/shock
     .duration_int1 = 2,
-    .threshold_mg_int2 = 2000, // posture/orientation 
+    .threshold_mg_int2 = 2000, // posture/orientation
     .duration_int2 = 5,
 };
-
 
 static void enable_lis2dh12_gpoi_wakeup()
 {
@@ -119,7 +118,8 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ESP_ERR_NO_MEM;
     }
 
-    BaseType_t task_created = xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, NULL, TASK_MEM_CAPS);
+    BaseType_t task_created =
+        xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, NULL, TASK_MEM_CAPS);
     if (task_created != pdPASS)
     {
         LOG_ERRORF("Failed to create WoM listener task");
@@ -191,11 +191,11 @@ esp_err_t start_wom_lis2dh12_listener(void)
         drv_lis2dh12_read_register(LIS2DH12_REG_INT2_CFG, &cfg2);
         LOG_DEBUG("WoM register dump:");
         LOG_DEBUGF("  CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL4=0x%02X CTRL5=0x%02X CTRL6=0x%02X",
-                 r1, r2, r3, r4, r5, r6);
+                   r1, r2, r3, r4, r5, r6);
         LOG_DEBUGF("  INT1: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
-                 cfg1, thr1, thr1 * 186u, dur1, dur1 * 20u);
+                   cfg1, thr1, thr1 * 186u, dur1, dur1 * 20u);
         LOG_DEBUGF("  INT2: CFG=0x%02X THS=0x%02X (6D mode, THS unused) DUR=0x%02X(%ums)",
-                 cfg2, thr2, dur2, dur2 * 20u);
+                   cfg2, thr2, dur2, dur2 * 20u);
     }
 
     LOG_DEBUG("WoM listener ready.");

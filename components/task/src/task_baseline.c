@@ -18,22 +18,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 // Define global baseline variable
 vib_baseline_t g_baseline = {0};
-
-// 1. 专属的业务数据处理算子
-static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
-{
-    vib_welford_3d_t *welford_st = (vib_welford_3d_t *)ctx;
-    for (size_t i = 0; i < count; i++)
-    {
-        float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
-        float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
-        float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
-        vib_welford_3d_update(welford_st, x_g, y_g, z_g);
-    }
-}
+static int64_t baseline_sample_count = 0;
 
 static void print_baseline()
 {
@@ -165,14 +152,37 @@ static void append_entry(const char *device_id, const vib_baseline_t *p)
     LOG_DEBUGF("file written: %s", FILE_PATH_DEVICE_PROFILE);
 }
 
+// 专属的业务数据处理算子
+static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
+{
+    vib_welford_3d_t *welford_st = (vib_welford_3d_t *)ctx;
+    for (size_t i = 0; i < count; i++)
+    {
+        float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
+        float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
+        float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
+        vib_welford_3d_update(welford_st, x_g, y_g, z_g);
+    }
+    baseline_sample_count += 1;
+}
+
 esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
 {
-    bool existing = load_existing(device_id, &g_baseline);
-    if (existing)
-    {
-        print_baseline();
-        return ESP_OK;
-    }
+    // bool existing = load_existing(device_id, &g_baseline);
+    // if (existing)
+    // {
+    //     print_baseline();
+    //     return ESP_OK;
+    // }
+
+    DSP_Config_t baseline_dsp_config = IMU_Calculate_DSP_Config(
+        &icm42688_driver,
+        (float)g_user_config.rpm,
+        10.0f,   // C
+        10.0f,   // H
+        1000.0f, // F_env
+        1.0f     // delta_f_max
+    );
 
     // 3. 配置传感器
     icm_cfg_t cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
@@ -180,7 +190,10 @@ esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
     vib_welford_3d_init(&welford_st);
 
     // 召唤引擎！把配置、时间和自己的处理函数传进去
-    esp_err_t err = daq_icm_42688_p_capture(&cfg, duration_ms, baseline_chunk_handler, &welford_st, 128, 0);
+    esp_err_t err = daq_icm_42688_p_capture(&cfg,
+                                            baseline_dsp_config.actual_time * 1000.0f,
+                                            baseline_chunk_handler,
+                                            &welford_st, 64, 0);
     if (err == ESP_OK)
     {
         // ==============================================================
@@ -203,7 +216,10 @@ esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
         LOG_ERROR("Baseline capture failed!");
         return ESP_ERR_INVALID_STATE;
     }
-    append_entry(device_id, &g_baseline);
+    LOG_DEBUGF("Baseline sample count: %lld", baseline_sample_count);
+    baseline_sample_count = 0; // Reset for next time
     print_baseline();
+    // vib_welford_3d_destroy(&welford_st);
+    append_entry(device_id, &g_baseline);
     return ESP_OK;
 }

@@ -185,20 +185,9 @@ esp_err_t drv_lis2dh12_init(void) {
         LOG_ERROR("Failed to create SPI mutex");
         return ESP_ERR_NO_MEM;
     }
-
-    spi_bus_config_t buscfg = {
-        .miso_io_num    = LIS2DH12_PIN_NUM_SDA,
-        .mosi_io_num    = LIS2DH12_PIN_NUM_SDO,
-        .sclk_io_num    = LIS2DH12_PIN_NUM_SCL,
-        .quadwp_io_num  = -1,
-        .quadhd_io_num  = -1,
-        .max_transfer_sz = 4092, // 关键：即使只传小数据，也要为共享总线的大数据设备(ICM)预留空间
-    };
-    esp_err_t ret = spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        LOG_ERRORF("SPI bus initialize failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
+    // SPI 总线改由 peri_spi_bus_init 负责初始化，驱动仅添加设备句柄
+    // 保持向后兼容：不再在此处调用 spi_bus_initialize
+    esp_err_t ret = ESP_OK;
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 1 * 1000 * 1000,  // 1 MHz
@@ -207,7 +196,9 @@ esp_err_t drv_lis2dh12_init(void) {
         .queue_size     = 7,
         .address_bits   = 8,
     };
-    ret = spi_bus_add_device(SPI_HOST, &devcfg, &s_spi_handle);
+    // Ensure bus initialized by caller (peri_spi_bus_init)
+    // Note: spi device expects the bus to be initialized prior to this call.
+    ret = spi_bus_add_device(SPI2_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK) {
         LOG_ERRORF("SPI bus add device failed: %s", esp_err_to_name(ret));
         return ret;
@@ -219,8 +210,6 @@ esp_err_t drv_lis2dh12_init(void) {
     if (ret != ESP_OK || who_am_i != LIS2DH12_WHO_AM_I_VAL) {
         LOG_ERRORF("WHO_AM_I check failed. Got 0x%02x, expected 0x%02x", who_am_i, LIS2DH12_WHO_AM_I_VAL);
         LOG_ERROR("Please verify:");
-        LOG_ERRORF("  1. Hardware connections (SCL=%d, MOSI=%d, MISO=%d, CS=%d)",
-                 LIS2DH12_PIN_NUM_SCL, LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_CS);
         LOG_ERROR("  2. LIS2DH12 power supply");
         LOG_ERROR("  3. SPI clock frequency (currently 1 MHz)");
         return ESP_ERR_NOT_FOUND;

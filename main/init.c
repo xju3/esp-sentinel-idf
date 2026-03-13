@@ -36,10 +36,11 @@ void enable_tasks()
 
 esp_err_t init_imu_sensors()
 {
-    // ESP_ERROR_CHECK(drv_icm42688_init());
-    // ESP_ERROR_CHECK(drv_lis2dh12_init());
-    drv_lis2dh12_init();
+    extern esp_err_t peri_spi_bus_init(void);
+    ESP_ERROR_CHECK(peri_spi_bus_init());
+    ESP_ERROR_CHECK(drv_lis2dh12_init());
     drv_icm42688_init();
+    // ESP_ERROR_CHECK(drv_icm42688_init());
     return ESP_OK;
 }
 
@@ -56,11 +57,12 @@ esp_err_t init_nvs()
 
 esp_err_t init_comm_channel()
 {
-    esp_err_t err = ppp_4g_init(); // Ensure ppp_4g_init returns esp_err_t
+    esp_err_t err = ESP_OK;
     if (g_user_config.network == 1)
     {
         LOG_INFO("Initializing 4G Module...");
-        if (ppp_4g_init() == ESP_OK) // Ensure ppp_4g_init returns esp_err_t
+        err = ppp_4g_init();
+        if (err == ESP_OK) // Ensure ppp_4g_init returns esp_err_t
         {
             is_network_available = true;
         }
