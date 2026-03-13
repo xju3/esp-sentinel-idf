@@ -5,8 +5,8 @@
 #include "esp_err.h"
 
 // Silence unused include warnings when building unit tests / static analysis
-#define PIN_NUM_MISO GPIO_NUM_11
-#define PIN_NUM_MOSI GPIO_NUM_12
+#define PIN_NUM_MISO GPIO_NUM_12
+#define PIN_NUM_MOSI GPIO_NUM_11
 #define PIN_NUM_CLK  GPIO_NUM_9
 
 

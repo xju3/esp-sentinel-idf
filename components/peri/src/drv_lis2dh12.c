@@ -97,8 +97,8 @@ static esp_err_t lis2dh12_read_multiple(uint8_t reg, uint8_t *buffer, size_t len
 static esp_err_t lis2dh12_write_reg(uint8_t reg, uint8_t data) {
     if (!s_spi_mutex) return ESP_FAIL;
     spi_transaction_t t = {
-        .length    = 8,
-        .addr      = reg & 0x7F,   // MSB=0 for write
+        .length    = 16,
+        .cmd       = reg & 0x7F,   // MSB=0 for write
         .tx_buffer = &data,
     };
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
@@ -110,8 +110,8 @@ static esp_err_t lis2dh12_write_reg(uint8_t reg, uint8_t data) {
 static esp_err_t lis2dh12_read_reg(uint8_t reg, uint8_t *data) {
     if (!s_spi_mutex) return ESP_FAIL;
     spi_transaction_t t = {
-        .length    = 8,
-        .addr      = reg | 0x80,   // MSB=1 for read
+        .length    = 16,
+        .cmd       = reg | 0x80,   // MSB=1 for read
         .rx_buffer = data,
     };
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
@@ -123,8 +123,8 @@ static esp_err_t lis2dh12_read_reg(uint8_t reg, uint8_t *data) {
 static esp_err_t lis2dh12_read_multiple(uint8_t reg, uint8_t *buffer, size_t len) {
     if (!s_spi_mutex) return ESP_FAIL;
     spi_transaction_t t = {
-        .length    = len * 8,
-        .addr      = reg | 0x80 | 0x40,  // MSB=1 read, bit6=1 auto-increment
+        .length    = 8+(len*8),
+        .cmd       = reg | 0x80 | 0x40,  // MSB=1 read, bit6=1 auto-increment
         .rx_buffer = buffer,
     };
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
@@ -191,10 +191,10 @@ esp_err_t drv_lis2dh12_init(void) {
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 1 * 1000 * 1000,  // 1 MHz
-        .mode           = 0,
+        .mode           = 3, // Change to Mode 3 (CPOL=1, CPHA=1) for better ST sensor compatibility
         .spics_io_num   = LIS2DH12_PIN_NUM_CS,
         .queue_size     = 7,
-        .address_bits   = 8,
+        .command_bits   = 8,
     };
     // Ensure bus initialized by caller (peri_spi_bus_init)
     // Note: spi device expects the bus to be initialized prior to this call.
@@ -204,10 +204,20 @@ esp_err_t drv_lis2dh12_init(void) {
         return ret;
     }
 
-    // Verify device identity
+    // Give the sensor a moment to stabilize after CS pin config
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Verify device identity with retry
     uint8_t who_am_i = 0;
-    ret = lis2dh12_read_reg(LIS2DH12_REG_WHO_AM_I, &who_am_i);
-    if (ret != ESP_OK || who_am_i != LIS2DH12_WHO_AM_I_VAL) {
+    for (int i = 0; i < 3; i++) {
+        ret = lis2dh12_read_reg(LIS2DH12_REG_WHO_AM_I, &who_am_i);
+        if (ret == ESP_OK && who_am_i == LIS2DH12_WHO_AM_I_VAL) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    if (who_am_i != LIS2DH12_WHO_AM_I_VAL) {
         LOG_ERRORF("WHO_AM_I check failed. Got 0x%02x, expected 0x%02x", who_am_i, LIS2DH12_WHO_AM_I_VAL);
         LOG_ERROR("Please verify:");
         LOG_ERROR("  2. LIS2DH12 power supply");

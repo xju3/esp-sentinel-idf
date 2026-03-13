@@ -85,16 +85,17 @@ static void wom_listener_task(void *arg)
         if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
         {
 
-            vTaskDelay(pdMS_TO_TICKS(20));
             uint8_t int_src = 0;
+            vTaskDelay(pdMS_TO_TICKS(5));
             if (io_num == LIS2DH12_PIN_NUM_INT1)
             {
                 drv_lis2dh12_read_int1_source(&int_src);
+                // 如果只是为了中断而不需要加速度数据，可以将这部分LOG信息注释掉。
                 LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
                           s_default_wom_cfg.threshold_mg_int1, int_src);
             }
             else if (io_num == LIS2DH12_PIN_NUM_INT2)
-            {
+           {
                 drv_lis2dh12_read_int2_source(&int_src);
                 LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);

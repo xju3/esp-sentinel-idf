@@ -33,7 +33,7 @@ static esp_err_t icm_write_reg(uint8_t reg, uint8_t data)
 {
     if (!s_spi_mutex)
         return ESP_FAIL;
-    spi_transaction_t t = {.length = 8, .cmd = reg, .tx_buffer = &data};
+    spi_transaction_t t = {.length = 16, .cmd = reg, .tx_buffer = &data};
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
     esp_err_t ret = spi_device_polling_transmit(s_spi_handle, &t);
     xSemaphoreGive(s_spi_mutex);
@@ -44,7 +44,7 @@ static esp_err_t icm_read_reg(uint8_t reg, uint8_t *data)
 {
     if (!s_spi_mutex)
         return ESP_FAIL;
-    spi_transaction_t t = {.length = 8, .cmd = reg | 0x80, .rx_buffer = data};
+    spi_transaction_t t = {.length = 16, .cmd = reg | 0x80, .rx_buffer = data};
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
     esp_err_t ret = spi_device_polling_transmit(s_spi_handle, &t);
     xSemaphoreGive(s_spi_mutex);
@@ -177,8 +177,8 @@ esp_err_t drv_icm42688_init()
     // SPI 总线初始化由 peri_spi_bus_init 负责（caller 应先调用）
     esp_err_t ret = ESP_OK;
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 10 * 1000 * 1000,
-        .mode = 0,
+        .clock_speed_hz = 1 * 1000 * 1000, // 调试阶段：降速至 1MHz 与 LIS2DH12 保持一致
+        .mode = 3,                         // 核心修改：改为 Mode 3，与 LIS2DH12 统一，减少时钟线跳变
         .spics_io_num = PIN_NUM_CS,
         .queue_size = 7,
         .command_bits = 8,
@@ -198,7 +198,7 @@ esp_err_t drv_icm42688_init()
     vTaskDelay(pdMS_TO_TICKS(2));
     uint8_t who_am_i = 0;
     icm_read_reg(ICM_REG_WHO_AM_I, &who_am_i);
-    LOG_WARNF("WHO_AM_I: 0x%02x", who_am_i);
+    LOG_DEBUGF("WHO_AM_I: 0x%02x", who_am_i);
     if (who_am_i != 0x47)
         return ESP_ERR_NOT_FOUND;
 
