@@ -225,18 +225,22 @@ esp_err_t drv_lis2dh12_init(void)
     }
 
     // Give the sensor a moment to stabilize after CS pin config
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    // Perform a dummy read to wake up SPI interface (ST sensors sometimes need this)
+    uint8_t dummy;
+    lis2dh12_read_reg(LIS2DH12_REG_WHO_AM_I, &dummy);
 
     // Verify device identity with retry
     uint8_t who_am_i = 0;
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 10; i++)
     {
         ret = lis2dh12_read_reg(LIS2DH12_REG_WHO_AM_I, &who_am_i);
         if (ret == ESP_OK && who_am_i == LIS2DH12_WHO_AM_I_VAL)
         {
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     LOG_DEBUGF("WHO_AM_I: 0x%02x", who_am_i);
