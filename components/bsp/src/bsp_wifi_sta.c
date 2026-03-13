@@ -14,46 +14,48 @@ static void (*s_connected_callback)(void) = NULL;
 static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
                                    int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED)
+    {
         LOG_INFO("Wi-Fi STA connected");
     }
-    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         LOG_INFOF("Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
-        
+
         // 等待网络完全就绪
         vTaskDelay(pdMS_TO_TICKS(1000));
-        
-        if (s_connected_callback != NULL) {
+
+        if (s_connected_callback != NULL)
+        {
             s_connected_callback();
         }
     }
 }
 
-esp_err_t wifi_init_sta(const char *ssid, const char *pass, void (*connected_cb)(void))
+esp_err_t wifi_init_sta(const char *ssid, const char *pass)
 {
-    if (!ssid || ssid[0] == '\0') {
+    if (!ssid || ssid[0] == '\0')
+    {
         LOG_ERROR("SSID is empty");
         return ESP_ERR_INVALID_ARG;
     }
 
     // 保存回调函数
-    s_connected_callback = connected_cb;
 
     // 使用公共初始化函数，创建 STA 网络接口（不需要 AP）
     ESP_ERROR_CHECK(wifi_common_init(false, true));
 
     // 注册STA连接成功和IP获取事件处理器
-    if (connected_cb != NULL) {
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(
-            WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &wifi_sta_event_handler, NULL, NULL));
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(
-            IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL, NULL));
-    }
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &wifi_sta_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL, NULL));
 
     wifi_config_t wifi_config = {0};
     strlcpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-    if (pass) {
+    if (pass)
+    {
         strlcpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password));
     }
 
@@ -64,7 +66,8 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass, void (*connected_cb)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     esp_err_t err = esp_wifi_connect();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         LOG_ERRORF("esp_wifi_connect failed: %s", esp_err_to_name(err));
         return err;
     }

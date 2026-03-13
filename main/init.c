@@ -24,7 +24,7 @@
 
 bool is_network_available = false;
 
-void enable_tasks()
+esp_err_t enable_tasks()
 {
     ESP_ERROR_CHECK(start_rms_task());
     ESP_ERROR_CHECK(start_fft_task());
@@ -32,6 +32,7 @@ void enable_tasks()
     ESP_ERROR_CHECK(start_envelope_task());
     ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
     ESP_ERROR_CHECK(start_task_daq());
+    return ESP_OK;
 }
 
 esp_err_t init_imu_sensors()
@@ -40,6 +41,7 @@ esp_err_t init_imu_sensors()
     ESP_ERROR_CHECK(peri_spi_bus_init());
     ESP_ERROR_CHECK(drv_icm42688_init());
     ESP_ERROR_CHECK(drv_lis2dh12_init());
+    ESP_ERROR_CHECK(set_device_baseline(100, g_user_config.device_id));
     return ESP_OK;
 }
 
@@ -72,7 +74,7 @@ esp_err_t init_comm_channel()
     }
     else
     {
-        err = wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, enable_tasks);
+        err = wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass);
         if (err == ESP_OK)
         {
             is_network_available = true;

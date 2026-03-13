@@ -13,6 +13,7 @@ extern bool is_network_available;
 esp_err_t init_nvs();
 void enable_config_service();
 esp_err_t init_imu_sensors();
+esp_err_t enable_tasks();
 esp_err_t init_comm_channel();
 esp_err_t enable_mqtt_proxy();
 #ifdef __cplusplus

@@ -21,7 +21,10 @@ void app_main(void)
         enable_config_service();
         return;
     }
+    // ESP_ERROR_CHECK(init_comm_channel());
     ESP_ERROR_CHECK(init_imu_sensors());
-    ESP_ERROR_CHECK(set_device_baseline(100, g_user_config.device_id)); // 采样 100ms 来建立基线
-    ESP_ERROR_CHECK(init_comm_channel());
+    // ESP_ERROR_CHECK(enable_tasks());
+    // ESP_ERROR_CHECK(enable_mqtt_proxy());
+    // ESP_ERROR_CHECK(web_server_start());
+
 }
