@@ -22,9 +22,9 @@ void app_main(void)
         return;
     }
     ESP_ERROR_CHECK(init_imu_sensors());
-    ESP_ERROR_CHECK(set_device_baseline(100, g_user_config.device_id)); // 采样 100ms 来建立基线
-    ESP_ERROR_CHECK(init_comm_channel());
+    // ESP_ERROR_CHECK(set_device_baseline(100, g_user_config.device_id)); // 采样 100ms 来建立基线
+    // ESP_ERROR_CHECK(init_comm_channel());
 #ifdef CONFIG_DEV_MODE // 开发模式下仍保留 Web 调试入口
-    ESP_ERROR_CHECK(web_server_start());
+    // ESP_ERROR_CHECK(web_server_start());
 #endif
 }
