@@ -26,19 +26,19 @@ bool is_network_available = false;
 
 void enable_tasks()
 {
-    // ESP_ERROR_CHECK(start_task_daq());
-    // ESP_ERROR_CHECK(start_rms_task());
-    // ESP_ERROR_CHECK(start_fft_task());
-    // ESP_ERROR_CHECK(start_kurtosis_task());
-    // ESP_ERROR_CHECK(start_envelope_task());
-    // ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
+    ESP_ERROR_CHECK(start_task_daq());
+    ESP_ERROR_CHECK(start_rms_task());
+    ESP_ERROR_CHECK(start_fft_task());
+    ESP_ERROR_CHECK(start_kurtosis_task());
+    ESP_ERROR_CHECK(start_envelope_task());
+    ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
 }
 
 esp_err_t init_imu_sensors()
 {
     extern esp_err_t peri_spi_bus_init(void);
     ESP_ERROR_CHECK(peri_spi_bus_init());
-    // ESP_ERROR_CHECK(drv_icm42688_init());
+    ESP_ERROR_CHECK(drv_icm42688_init());
     ESP_ERROR_CHECK(drv_lis2dh12_init());
     return ESP_OK;
 }
