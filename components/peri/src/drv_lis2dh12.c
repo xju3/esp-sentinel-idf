@@ -225,8 +225,13 @@ esp_err_t drv_lis2dh12_init(void)
         return ret;
     }
 
+    // Ensure CS is high (inactive) before any transaction
+    // This is critical if the bootloader left it in an undefined state
+    gpio_set_level(LIS2DH12_PIN_NUM_CS, 1);
+    
     // Give the sensor a moment to stabilize after CS pin config
-    vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
+    // Increase from 20ms to 50ms to ensure sensor is ready
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     // Perform a dummy read to wake up SPI interface (ST sensors sometimes need this)
     uint8_t dummy;

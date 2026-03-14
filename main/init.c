@@ -26,23 +26,28 @@ bool is_network_available = false;
 
 esp_err_t enable_tasks()
 {
-    ESP_ERROR_CHECK(start_rms_task());
-    ESP_ERROR_CHECK(start_fft_task());
-    ESP_ERROR_CHECK(start_kurtosis_task());
-    ESP_ERROR_CHECK(start_envelope_task());
-    ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
-    ESP_ERROR_CHECK(start_task_daq());
+    // ESP_ERROR_CHECK(start_rms_task());
+    // ESP_ERROR_CHECK(start_fft_task());
+    // ESP_ERROR_CHECK(start_kurtosis_task());
+    // ESP_ERROR_CHECK(start_envelope_task());
+    // ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
+    // ESP_ERROR_CHECK(start_task_daq());
     return ESP_OK;
 }
 
 esp_err_t init_imu_sensors()
 {
     extern esp_err_t peri_spi_bus_init(void);
-    ESP_ERROR_CHECK(peri_spi_bus_init());
+    esp_err_t ret = peri_spi_bus_init();
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("SPI bus initialization failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(drv_icm42688_init());
     ESP_ERROR_CHECK(drv_lis2dh12_init());
- 
-    return ESP_OK;
+    return ret;
 }
 
 esp_err_t init_nvs()

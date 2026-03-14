@@ -29,8 +29,6 @@ esp_err_t peri_spi_bus_init(void) {
         LOG_ERRORF("peri_spi_bus_init: spi_bus_initialize failed: %s", esp_err_to_name(ret));
         return ret;
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
-
     s_inited = true;
     LOG_DEBUG("Shared SPI2 bus initialized");
     return ESP_OK;
