@@ -26,22 +26,57 @@ bool is_network_available = false;
 
 esp_err_t enable_tasks()
 {
-    ESP_ERROR_CHECK(start_rms_task());
-    ESP_ERROR_CHECK(start_fft_task());
-    ESP_ERROR_CHECK(start_kurtosis_task());
-    ESP_ERROR_CHECK(start_envelope_task());
-    ESP_ERROR_CHECK(start_wom_lis2dh12_listener());
-    ESP_ERROR_CHECK(start_task_daq());
+    esp_err_t ret = start_rms_task();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_fft_task();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_kurtosis_task();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_envelope_task();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_wom_lis2dh12_listener();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_task_daq();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
     return ESP_OK;
 }
 
 esp_err_t init_imu_sensors()
 {
     extern esp_err_t peri_spi_bus_init(void);
-    ESP_ERROR_CHECK(peri_spi_bus_init());
-    vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_ERROR_CHECK(drv_icm42688_init());
-    ESP_ERROR_CHECK(drv_lis2dh12_init());
+    esp_err_t ret = peri_spi_bus_init();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    // ret = drv_icm42688_init();
+    // if (ret != ESP_OK)
+    // {
+    //     return ret;
+    // }
+    ret = drv_lis2dh12_init();
+    if (ret != ESP_OK) {
+        return ret;
+    }
     return ESP_OK;
 }
 
@@ -50,7 +85,11 @@ esp_err_t init_nvs()
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
-        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_erase();
+        if (ret != ESP_OK)
+        {
+            return ret;
+        }
         ret = nvs_flash_init();
     }
     return ret;
@@ -79,7 +118,11 @@ esp_err_t init_comm_channel()
         {
             is_network_available = true;
 #ifdef CONFIG_DEV_MODE // 开发模式下仍保留 Web 调试入口
-            ESP_ERROR_CHECK(web_server_start());
+            err = web_server_start();
+            if (err != ESP_OK)
+            {
+                return err;
+            }
 #endif
         }
     }
@@ -100,5 +143,9 @@ esp_err_t enable_mqtt_proxy()
 void enable_config_service()
 {
     wifi_init_softap();
-    ESP_ERROR_CHECK(web_server_start());
+    esp_err_t ret = web_server_start();
+    if (ret != ESP_OK)
+    {
+        return;
+    }
 }
