@@ -29,6 +29,7 @@
 #define LIS2DH12_REG_FIFO_SRC 0x2F
 
 #define LIS2DH12_WHO_AM_I_VAL 0x33
+#define LIS2DH12_SLEEP_TIME 20
 
 // SPI configuration
 #define SPI_HOST SPI2_HOST
@@ -225,7 +226,7 @@ esp_err_t drv_lis2dh12_init(void)
     }
 
     // Give the sensor a moment to stabilize after CS pin config
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Perform a dummy read to wake up SPI interface (ST sensors sometimes need this)
     uint8_t dummy;
@@ -240,7 +241,7 @@ esp_err_t drv_lis2dh12_init(void)
         {
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
     }
 
     LOG_DEBUGF("WHO_AM_I: 0x%02x", who_am_i);
@@ -382,7 +383,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Step 2 — Set FS=±16g, BDU=1, HR=0 (normal mode → 186 mg/LSB).
     s_current_fs = WOM_FS;
@@ -394,7 +395,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
 
     // Step 4 — Enable ODR=50Hz, normal mode, XYZ axes. Wait for stabilisation.
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, WOM_CTRL_REG1));
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Step 5 — Compute and write interrupt thresholds.
     //   INT_THS is 7-bit unsigned, 1 LSb = 186 mg @ FS=±16g normal mode.
@@ -456,7 +457,7 @@ esp_err_t drv_lis2dh12_disable_wom(void)
 
     // Power down first to silence the interrupt generators cleanly
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
-    vTaskDelay(pdMS_TO_TICKS(5));
+    vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Clear all interrupt routing and event configuration
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x00));

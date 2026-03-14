@@ -41,7 +41,7 @@ esp_err_t init_imu_sensors()
     ESP_ERROR_CHECK(peri_spi_bus_init());
     ESP_ERROR_CHECK(drv_icm42688_init());
     ESP_ERROR_CHECK(drv_lis2dh12_init());
-    ESP_ERROR_CHECK(set_device_baseline(100, g_user_config.device_id));
+ 
     return ESP_OK;
 }
 

@@ -166,7 +166,7 @@ static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, voi
     baseline_sample_count += 1;
 }
 
-esp_err_t set_device_baseline(uint32_t duration_ms, const char *device_id)
+esp_err_t set_device_baseline(const char *device_id)
 {
     // bool existing = load_existing(device_id, &g_baseline);
     // if (existing)

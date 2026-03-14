@@ -111,7 +111,6 @@ static void wom_listener_task(void *arg)
 // ---------------------------------------------------------------------------
 esp_err_t start_wom_lis2dh12_listener(void)
 {
-    enable_lis2dh12_gpoi_wakeup();
     gpio_evt_queue = xQueueCreateWithCaps(10, sizeof(uint32_t), TASK_MEM_CAPS);
     if (!gpio_evt_queue)
     {
@@ -134,7 +133,7 @@ esp_err_t start_wom_lis2dh12_listener(void)
         .intr_type = GPIO_INTR_POSEDGE,
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << LIS2DH12_PIN_NUM_INT1) | (1ULL << LIS2DH12_PIN_NUM_INT2),
-        .pull_down_en = 0,
+        .pull_down_en = 1,
         .pull_up_en = 0,
     };
     esp_err_t ret = gpio_config(&io_conf);
@@ -143,6 +142,9 @@ esp_err_t start_wom_lis2dh12_listener(void)
         LOG_ERRORF("GPIO config failed: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    // Enable wakeup after configuration to ensure pin state is defined
+    enable_lis2dh12_gpoi_wakeup();
 
     ret = gpio_install_isr_service(0);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
