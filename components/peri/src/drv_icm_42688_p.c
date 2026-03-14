@@ -176,13 +176,7 @@ esp_err_t drv_icm42688_init()
 
     // SPI 总线初始化由 peri_spi_bus_init 负责（caller 应先调用）
     esp_err_t ret = ESP_OK;
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1 * 1000 * 1000, // 调试阶段：降速至 1MHz 与 LIS2DH12 保持一致
-        .mode = 3,                         // 核心修改：改为 Mode 3，与 LIS2DH12 统一，减少时钟线跳变
-        .spics_io_num = PIN_NUM_CS,
-        .queue_size = 7,
-        .command_bits = 8,
-    };
+    spi_device_interface_config_t devcfg = build_device_interface_config(PIN_NUM_CS);
     ret = spi_bus_add_device(SPI2_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK)
         return ret;

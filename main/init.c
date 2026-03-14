@@ -26,7 +26,12 @@ bool is_network_available = false;
 
 esp_err_t enable_tasks()
 {
-    esp_err_t ret = start_rms_task();
+    esp_err_t ret = start_task_daq();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_rms_task();
     if (ret != ESP_OK)
     {
         return ret;
@@ -51,11 +56,6 @@ esp_err_t enable_tasks()
     {
         return ret;
     }
-    ret = start_task_daq();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
     return ESP_OK;
 }
 
@@ -74,7 +74,8 @@ esp_err_t init_imu_sensors()
         return ret;
     }
     ret = drv_lis2dh12_init();
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         return ret;
     }
     return ESP_OK;

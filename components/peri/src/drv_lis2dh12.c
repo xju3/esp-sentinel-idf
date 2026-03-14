@@ -208,14 +208,7 @@ esp_err_t drv_lis2dh12_init(void)
     // SPI 总线改由 peri_spi_bus_init 负责初始化，驱动仅添加设备句柄
     // 保持向后兼容：不再在此处调用 spi_bus_initialize
     esp_err_t ret = ESP_OK;
-
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz
-        .mode = 3,                         // Change to Mode 3 (CPOL=1, CPHA=1) for better ST sensor compatibility
-        .spics_io_num = LIS2DH12_PIN_NUM_CS,
-        .queue_size = 7,
-        .command_bits = 8,
-    };
+    spi_device_interface_config_t devcfg = build_device_interface_config(LIS2DH12_PIN_NUM_CS);
     // Ensure bus initialized by caller (peri_spi_bus_init)
     // Note: spi device expects the bus to be initialized prior to this call.
     ret = spi_bus_add_device(SPI2_HOST, &devcfg, &s_spi_handle);
@@ -229,7 +222,8 @@ esp_err_t drv_lis2dh12_init(void)
     // This is crucial after a re-flash, which can leave the sensor
     // in an undefined state that is only cleared by a full power cycle.
     ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x80);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         LOG_ERROR("Failed to soft-reset LIS2DH12");
         return ret;
     }
@@ -239,7 +233,7 @@ esp_err_t drv_lis2dh12_init(void)
     // Ensure CS is high (inactive) before any transaction
     // This is critical if the bootloader left it in an undefined state
     gpio_set_level(LIS2DH12_PIN_NUM_CS, 1);
-    
+
     // Give the sensor a moment to stabilize after CS pin config
     // Increase from 20ms to 50ms to ensure sensor is ready
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -449,6 +443,17 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x2A));
 
+    // 🔴 新增：初始化 HPF 基线
+    // uint8_t hpf_ref = 0;
+    // esp_err_t ret = lis2dh12_read_reg(LIS2DH12_REG_REFERENCE, &hpf_ref);
+    // if (ret != ESP_OK)
+    // {
+    //     LOG_ERRORF("Failed to initialize HPF baseline: %s", esp_err_to_name(ret));
+    //     return ret;
+    // }
+    // LOG_DEBUGF("HPF baseline initialized (REFERENCE=0x%02X)", hpf_ref);
+    // vTaskDelay(pdMS_TO_TICKS(10));
+
     // Step 8 — Pulse mode (no latch). The interrupt pin pulses for 1/ODR = 20 ms
     //   then returns low automatically. The ISR re-enables the GPIO after handling.
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00));
@@ -470,7 +475,6 @@ esp_err_t drv_lis2dh12_disable_wom(void)
         return ESP_ERR_INVALID_STATE;
 
     LOG_DEBUG("Disabling WoM mode...");
-
     // Power down first to silence the interrupt generators cleanly
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
     vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
@@ -482,7 +486,6 @@ esp_err_t drv_lis2dh12_disable_wom(void)
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
-
     // Restore default operating mode: 100 Hz, normal mode, XYZ enabled
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x57));
 

@@ -34,13 +34,13 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .threshold_mg_int1 = 188, // vibration/shock
+    .threshold_mg_int1 = 500, // vibration/shock
     .duration_int1 = 2,
     .threshold_mg_int2 = 2000, // posture/orientation
     .duration_int2 = 5,
 };
 
-static void enable_lis2dh12_gpoi_wakeup()
+static inline void enable_lis2dh12_gpoi_wakeup()
 {
     // Configure LIS2DH12 Interrupt pins as wakeup sources
     // LIS2DH12 interrupts are Active High (configured in drv_lis2dh12.c)
@@ -56,6 +56,8 @@ static void enable_lis2dh12_gpoi_wakeup()
 // The ISR only enqueues the pin number and disables the GPIO until the task
 // has processed the event, preventing burst re-triggering.
 // ---------------------------------------------------------------------------
+
+// 在 wom_lis2dh12.c 的 gpio_isr_handler 中添加延迟
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
     uint32_t gpio_num = (uint32_t)arg;
@@ -67,8 +69,8 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
         if (xHigherPri)
             portYIELD_FROM_ISR();
     }
-
-    // Disable this GPIO line until the listener task has handled the event
+    // 加长禁用时间
+    vTaskDelay(pdMS_TO_TICKS(50));  // 增加延迟
     gpio_intr_disable(gpio_num);
 }
 
