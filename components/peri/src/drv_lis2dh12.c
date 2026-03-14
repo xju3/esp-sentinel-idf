@@ -225,6 +225,17 @@ esp_err_t drv_lis2dh12_init(void)
         return ret;
     }
 
+    // Soft-reset the device to guarantee a known state on startup.
+    // This is crucial after a re-flash, which can leave the sensor
+    // in an undefined state that is only cleared by a full power cycle.
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x80);
+    if (ret != ESP_OK) {
+        LOG_ERROR("Failed to soft-reset LIS2DH12");
+        return ret;
+    }
+    // Datasheet: boot takes <5ms. Add generous delay.
+    vTaskDelay(pdMS_TO_TICKS(50));
+
     // Ensure CS is high (inactive) before any transaction
     // This is critical if the bootloader left it in an undefined state
     gpio_set_level(LIS2DH12_PIN_NUM_CS, 1);

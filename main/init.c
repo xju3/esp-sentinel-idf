@@ -68,11 +68,11 @@ esp_err_t init_imu_sensors()
         return ret;
     }
     vTaskDelay(pdMS_TO_TICKS(1000));
-    // ret = drv_icm42688_init();
-    // if (ret != ESP_OK)
-    // {
-    //     return ret;
-    // }
+    ret = drv_icm42688_init();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
     ret = drv_lis2dh12_init();
     if (ret != ESP_OK) {
         return ret;
