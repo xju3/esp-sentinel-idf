@@ -14,9 +14,9 @@ extern "C" {
 #define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_5
 #define LIS2DH12_PIN_NUM_CS     GPIO_NUM_7      // Independent CS (different from ICM-42688-P)
 // LIS2DH12: 引脚 9 (SCL/SPC), 11 (SDA/SDI), 12 (SDO/SA0)。
-// #define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_9     // Shared with ICM-42688-P (SPI2 SCLK)
-// #define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_11     // SDA就是MOSI，接 ESP32 的 MOSI (GPIO 11)
-// #define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_12
+#define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_37     // Shared with ICM-42688-P (SPI2 SCLK)
+#define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_36     // SDA就是MOSI，接 ESP32 的 MOSI (GPIO 11)
+#define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_21
 
 // Register addresses (exposed for debugging and configuration)
 #define LIS2DH12_REG_WHO_AM_I      0x0F
@@ -62,6 +62,7 @@ typedef void (*lis2dh12_data_cb_t)(const lis2dh12_raw_data_t *data, size_t count
 
 // WoM configuration
 typedef struct {
+    lis2dh12_fs_t fs;        // Full-scale used in WoM mode (affects INT_THS LSB)
     uint16_t threshold_mg_int1; // Threshold for INT1 in mg
     uint16_t threshold_mg_int2; // Threshold for INT2 in mg
     uint8_t duration_int1;      // Duration for INT1 event

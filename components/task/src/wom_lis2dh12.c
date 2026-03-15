@@ -7,6 +7,7 @@
 #include "freertos/queue.h"
 #include "freertos/idf_additions.h"
 #include "driver/gpio.h"
+#include "esp_err.h"
 #include "esp_sleep.h"
 #include "esp_heap_caps.h"
 
@@ -34,10 +35,11 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .threshold_mg_int1 = 500, // vibration/shock
+    .fs = LIS2DH12_FS_16G,
+    .threshold_mg_int1 =6000, // vibration/shock
     .duration_int1 = 2,
-    .threshold_mg_int2 = 2000, // posture/orientation
-    .duration_int2 = 5,
+    .threshold_mg_int2 = 6000, // posture/orientation
+    .duration_int2 = 2,
 };
 
 static inline void enable_lis2dh12_gpoi_wakeup()
@@ -47,6 +49,22 @@ static inline void enable_lis2dh12_gpoi_wakeup()
     gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_HIGH_LEVEL);
     gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_HIGH_LEVEL);
     esp_sleep_enable_gpio_wakeup();
+}
+
+static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
+{
+    switch (fs)
+    {
+    case LIS2DH12_FS_2G:
+        return 16u;
+    case LIS2DH12_FS_4G:
+        return 32u;
+    case LIS2DH12_FS_8G:
+        return 62u;
+    case LIS2DH12_FS_16G:
+    default:
+        return 186u;
+    }
 }
 // ---------------------------------------------------------------------------
 // ISR handler
@@ -63,15 +81,19 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
     uint32_t gpio_num = (uint32_t)arg;
     BaseType_t xHigherPri = pdFALSE;
 
+    // Disable immediately to avoid repeated triggers (level mode) or burst edges.
+    gpio_intr_disable(gpio_num);
+
     if (gpio_evt_queue)
     {
-        (void)xQueueSendFromISR(gpio_evt_queue, &gpio_num, &xHigherPri);
+        if (xQueueSendFromISR(gpio_evt_queue, &gpio_num, &xHigherPri) != pdTRUE)
+        {
+            // Queue is full; re-enable to avoid missing events forever.
+            gpio_intr_enable(gpio_num);
+        }
         if (xHigherPri)
             portYIELD_FROM_ISR();
     }
-    // 加长禁用时间
-    vTaskDelay(pdMS_TO_TICKS(50));  // 增加延迟
-    gpio_intr_disable(gpio_num);
 }
 
 // ---------------------------------------------------------------------------
@@ -80,25 +102,40 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
 static void wom_listener_task(void *arg)
 {
     uint32_t io_num;
-    LOG_DEBUG("WoM listener task started.");
-
     for (;;)
     {
         if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
         {
 
             uint8_t int_src = 0;
-            vTaskDelay(pdMS_TO_TICKS(5));
+
+            // If the pin is already low, this was likely a spurious edge during bring-up.
+            // (In latched + high-level mode, a real interrupt keeps the pin asserted
+            // until INTx_SRC is read.)
+            int level = gpio_get_level(io_num);
+            if (level == 0)
+            {
+                gpio_intr_enable(io_num);
+                continue;
+            }
+
             if (io_num == LIS2DH12_PIN_NUM_INT1)
             {
-                drv_lis2dh12_read_int1_source(&int_src);
+                esp_err_t ret = drv_lis2dh12_read_int1_source(&int_src);
+                if (ret != ESP_OK)
+                {
+                    LOG_ERRORF("Failed to read INT1_SRC: %s", esp_err_to_name(ret));
+                }
                 // 如果只是为了中断而不需要加速度数据，可以将这部分LOG信息注释掉。
-                LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
-                          s_default_wom_cfg.threshold_mg_int1, int_src);
+                LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X", s_default_wom_cfg.threshold_mg_int1, int_src);
             }
             else if (io_num == LIS2DH12_PIN_NUM_INT2)
            {
-                drv_lis2dh12_read_int2_source(&int_src);
+                esp_err_t ret = drv_lis2dh12_read_int2_source(&int_src);
+                if (ret != ESP_OK)
+                {
+                    LOG_ERRORF("Failed to read INT2_SRC: %s", esp_err_to_name(ret));
+                }
                 LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);
             }
@@ -132,7 +169,7 @@ esp_err_t start_wom_lis2dh12_listener(void)
 
     // Configure GPIO inputs for INT1 and INT2
     gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_POSEDGE,
+        .intr_type = GPIO_INTR_DISABLE, // Arm after sensor is configured + sources cleared
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << LIS2DH12_PIN_NUM_INT1) | (1ULL << LIS2DH12_PIN_NUM_INT2),
         .pull_down_en = 1,
@@ -179,6 +216,32 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ret;
     }
 
+    // Clear any pending/boot-time interrupt state before enabling GPIO interrupts.
+    // Reading INTx_SRC clears the corresponding latched interrupt source.
+    {
+        uint8_t src;
+        (void)drv_lis2dh12_read_int1_source(&src);
+        (void)drv_lis2dh12_read_int2_source(&src);
+    }
+
+    // Enable GPIO interrupts after the sensor is fully configured.
+    // With INT latching enabled in the sensor, POS edge is sufficient and avoids
+    // interrupt storms if the line is held high (misconfig/polarity issues).
+    ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_POSEDGE);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("gpio_set_intr_type INT1 failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_POSEDGE);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("gpio_set_intr_type INT2 failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    gpio_intr_enable(LIS2DH12_PIN_NUM_INT1);
+    gpio_intr_enable(LIS2DH12_PIN_NUM_INT2);
+
     // Dump final register state for verification
     {
         uint8_t r1, r2, r3, r4, r5, r6, thr1, thr2, dur1, dur2, cfg1, cfg2;
@@ -194,13 +257,14 @@ esp_err_t start_wom_lis2dh12_listener(void)
         drv_lis2dh12_read_register(LIS2DH12_REG_INT2_DURATION, &dur2);
         drv_lis2dh12_read_register(LIS2DH12_REG_INT1_CFG, &cfg1);
         drv_lis2dh12_read_register(LIS2DH12_REG_INT2_CFG, &cfg2);
+        const uint16_t ths_step_mg = lis2dh12_int_ths_step_mg(drv_lis2dh12_get_current_fs());
         LOG_DEBUG("WoM register dump:");
         LOG_DEBUGF("  CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL4=0x%02X CTRL5=0x%02X CTRL6=0x%02X",
                    r1, r2, r3, r4, r5, r6);
         LOG_DEBUGF("  INT1: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
-                   cfg1, thr1, thr1 * 186u, dur1, dur1 * 20u);
-        LOG_DEBUGF("  INT2: CFG=0x%02X THS=0x%02X (6D mode, THS unused) DUR=0x%02X(%ums)",
-                   cfg2, thr2, dur2, dur2 * 20u);
+                   cfg1, thr1, thr1 * ths_step_mg, dur1, dur1 * 20u);
+        LOG_DEBUGF("  INT2: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
+                   cfg2, thr2, thr2 * ths_step_mg, dur2, dur2 * 20u);
     }
 
     LOG_DEBUG("WoM listener ready.");

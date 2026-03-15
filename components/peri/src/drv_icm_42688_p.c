@@ -16,6 +16,10 @@
 #define DMA_CHUNK_SAMPLES 128
 #define DMA_CHUNK_BYTES (DMA_CHUNK_SAMPLES * sizeof(imu_raw_data_t))
 
+#define PIN_NUM_MISO GPIO_NUM_12
+#define PIN_NUM_MOSI GPIO_NUM_11
+#define PIN_NUM_CLK  GPIO_NUM_9
+
 static SemaphoreHandle_t s_spi_mutex = NULL;
 static spi_device_handle_t s_spi_handle = NULL;
 static icm_data_cb_t s_data_cb = NULL;
@@ -174,9 +178,27 @@ esp_err_t drv_icm42688_init()
     if (!s_spi_mutex)
         return ESP_ERR_NO_MEM;
 
-    // SPI 总线初始化由 peri_spi_bus_init 负责（caller 应先调用）
-    esp_err_t ret = ESP_OK;
-    spi_device_interface_config_t devcfg = build_device_interface_config(PIN_NUM_CS);
+    // Use canonical pin macros where possible; prefer ICM defines for MISO/MOSI/CLK
+    spi_bus_config_t buscfg = {
+        .miso_io_num    = PIN_NUM_MISO,
+        .mosi_io_num    = PIN_NUM_MOSI,
+        .sclk_io_num    = PIN_NUM_CLK,
+        .quadwp_io_num  = -1,
+        .quadhd_io_num  = -1,
+        .max_transfer_sz = 4092,
+    };
+    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        LOG_ERRORF("peri_spi_bus_init: spi_bus_initialize failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 10 * 1000 * 1000, // 调试阶段：降速至 1MHz 与 LIS2DH12 保持一致
+        .mode = 0,                         // 核心修改：改为 Mode 3，与 LIS2DH12 统一，减少时钟线跳变
+        .spics_io_num = PIN_NUM_CS,
+        .queue_size = 7,
+        .command_bits = 8,
+    };
     ret = spi_bus_add_device(SPI2_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK)
         return ret;

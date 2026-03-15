@@ -61,14 +61,7 @@ esp_err_t enable_tasks()
 
 esp_err_t init_imu_sensors()
 {
-    extern esp_err_t peri_spi_bus_init(void);
-    esp_err_t ret = peri_spi_bus_init();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    ret = drv_icm42688_init();
+    esp_err_t ret = drv_icm42688_init();
     if (ret != ESP_OK)
     {
         return ret;

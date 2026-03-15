@@ -61,19 +61,6 @@ extern "C"
         float H,
         float F_env,
         float delta_f_max);
-
-    static inline spi_device_interface_config_t build_device_interface_config(int8_t PIN_CS)
-    {
-
-        return (spi_device_interface_config_t){
-            .clock_speed_hz = 1 * 1000 * 1000, // 调试阶段：降速至 1MHz 与 LIS2DH12 保持一致
-            .mode = 3,                         // 核心修改：改为 Mode 3，与 LIS2DH12 统一，减少时钟线跳变
-            .spics_io_num = PIN_CS,
-            .queue_size = 7,
-            .command_bits = 8,
-        };
-    };
-
 #ifdef __cplusplus
 }
 #endif

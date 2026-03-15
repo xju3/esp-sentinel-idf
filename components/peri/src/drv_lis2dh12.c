@@ -35,19 +35,15 @@
 #define SPI_HOST SPI2_HOST
 
 // WoM operating parameters
-// FS=±16g, normal mode (10-bit)
-// Sensitivity per datasheet Table 59/68: 1 LSb = 186 mg @ FS=±16g, normal mode
-// (Note: 48 mg/LSb is the HIGH-RESOLUTION mode value — do not use that here)
-// INT_THS register is 7-bit (bit[6:0]), max value = 127 → 127 × 186 = 23622 mg
-#define WOM_FS LIS2DH12_FS_16G
-#define WOM_SENSITIVITY_MG 186u // mg per LSB, normal mode, FS=±16g (datasheet Table 59)
-#define WOM_THS_MAX 127u        // INT_THS bit[6:0] maximum
-#define WOM_THS_MIN 1u          // minimum (1 LSb = 186 mg @ 186mg/LSB)
-#define WOM_ODR_HZ 50.0f        // 50 Hz → 1 LSB duration = 20 ms
+// INT_THS register is 7-bit (bit[6:0]), threshold step depends on FS:
+//   16mg @ ±2g, 32mg @ ±4g, 62mg @ ±8g, 186mg @ ±16g (datasheet Table 59).
+// Max register value 127 → max threshold ≈ 127 * step_mg.
+#define WOM_THS_MAX 127u // INT_THS bit[6:0] maximum
+#define WOM_THS_MIN 1u   // minimum (1 LSb = step_mg, depends on FS)
+#define WOM_ODR_HZ 50.0f // 50 Hz → 1 LSB duration = 20 ms
 // CTRL_REG1 value for WoM: ODR=50Hz (0x4), LP=0, XYZ enabled
 #define WOM_CTRL_REG1 0x47u
-// CTRL_REG4 value for WoM: BDU=1, FS=±16g (0x3<<4), HR=0 (normal mode)
-#define WOM_CTRL_REG4 ((uint8_t)((LIS2DH12_FS_16G << 4) | 0x80u))
+// CTRL_REG4 value for WoM: BDU=1, FS selectable, HR=0 (normal mode)
 // CTRL_REG2 value:
 //   CTRL_REG2: [HPM1|HPM0|HPCF2|HPCF1|FDS|HPCLICK|HP_IA2|HP_IA1]
 //               bit7  bit6  bit5  bit4  bit3  bit2   bit1   bit0
@@ -87,6 +83,38 @@ static bool s_initialized = false;
 static float s_current_odr = 0.0f;
 static lis2dh12_fs_t s_current_fs = LIS2DH12_FS_2G;
 
+static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
+{
+    switch (fs)
+    {
+    case LIS2DH12_FS_2G:
+        return 16u;
+    case LIS2DH12_FS_4G:
+        return 32u;
+    case LIS2DH12_FS_8G:
+        return 62u;
+    case LIS2DH12_FS_16G:
+    default:
+        return 186u;
+    }
+}
+
+static uint8_t lis2dh12_fs_g(lis2dh12_fs_t fs)
+{
+    switch (fs)
+    {
+    case LIS2DH12_FS_2G:
+        return 2u;
+    case LIS2DH12_FS_4G:
+        return 4u;
+    case LIS2DH12_FS_8G:
+        return 8u;
+    case LIS2DH12_FS_16G:
+    default:
+        return 16u;
+    }
+}
+
 // --- Private Functions (Forward Declaration) ---
 static esp_err_t lis2dh12_write_reg(uint8_t reg, uint8_t data);
 static esp_err_t lis2dh12_read_reg(uint8_t reg, uint8_t *data);
@@ -99,7 +127,7 @@ static esp_err_t lis2dh12_write_reg(uint8_t reg, uint8_t data)
     if (!s_spi_mutex)
         return ESP_FAIL;
     spi_transaction_t t = {
-        .length = 16,
+        .length = 8,
         .cmd = reg & 0x7F, // MSB=0 for write
         .tx_buffer = &data,
     };
@@ -114,7 +142,7 @@ static esp_err_t lis2dh12_read_reg(uint8_t reg, uint8_t *data)
     if (!s_spi_mutex)
         return ESP_FAIL;
     spi_transaction_t t = {
-        .length = 16,
+        .length = 8,
         .cmd = reg | 0x80, // MSB=1 for read
         .rx_buffer = data,
     };
@@ -129,7 +157,7 @@ static esp_err_t lis2dh12_read_multiple(uint8_t reg, uint8_t *buffer, size_t len
     if (!s_spi_mutex)
         return ESP_FAIL;
     spi_transaction_t t = {
-        .length = 8 + (len * 8),
+        .length = len * 8,
         .cmd = reg | 0x80 | 0x40, // MSB=1 read, bit6=1 auto-increment
         .rx_buffer = buffer,
     };
@@ -206,12 +234,32 @@ esp_err_t drv_lis2dh12_init(void)
         return ESP_ERR_NO_MEM;
     }
     // SPI 总线改由 peri_spi_bus_init 负责初始化，驱动仅添加设备句柄
-    // 保持向后兼容：不再在此处调用 spi_bus_initialize
-    esp_err_t ret = ESP_OK;
-    spi_device_interface_config_t devcfg = build_device_interface_config(LIS2DH12_PIN_NUM_CS);
-    // Ensure bus initialized by caller (peri_spi_bus_init)
+
+    // Use canonical pin macros where possible; prefer ICM defines for MISO/MOSI/CLK
+    spi_bus_config_t buscfg = {
+        .miso_io_num = LIS2DH12_PIN_NUM_SDO,
+        .mosi_io_num = LIS2DH12_PIN_NUM_SDA,
+        .sclk_io_num = LIS2DH12_PIN_NUM_SCL,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 4092,
+    };
+    esp_err_t ret = spi_bus_initialize(SPI1_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
+    {
+        LOG_ERRORF("peri_spi_bus_init: spi_bus_initialize failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = 1 * 1000 * 1000, // 调试阶段：降速至 1MHz 与 LIS2DH12 保持一致
+        .mode = 3,                         // 核心修改：改为 Mode 3，与 LIS2DH12 统一，减少时钟线跳变
+        .spics_io_num = LIS2DH12_PIN_NUM_CS,
+        .queue_size = 7,
+        .command_bits = 8,
+    };
     // Note: spi device expects the bus to be initialized prior to this call.
-    ret = spi_bus_add_device(SPI2_HOST, &devcfg, &s_spi_handle);
+    ret = spi_bus_add_device(SPI1_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("SPI bus add device failed: %s", esp_err_to_name(ret));
@@ -395,9 +443,13 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
     vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
-    // Step 2 — Set FS=±16g, BDU=1, HR=0 (normal mode → 186 mg/LSB).
-    s_current_fs = WOM_FS;
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, WOM_CTRL_REG4));
+    // Step 2 — Set FS (from config), BDU=1, HR=0 (normal mode).
+    lis2dh12_fs_t wom_fs = wom_cfg->fs;
+    if (wom_fs > LIS2DH12_FS_16G)
+        wom_fs = LIS2DH12_FS_16G;
+    s_current_fs = wom_fs;
+    uint8_t ctrl_reg4 = (uint8_t)((wom_fs << 4) | 0x80u);
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, ctrl_reg4));
 
     // Step 3 — Enable HPF for both INT1 and INT2 (HPM=11, HP_IA1=1, HP_IA2=1).
     //   CTRL_REG2 = 0xC3
@@ -408,10 +460,10 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Step 5 — Compute and write interrupt thresholds.
-    //   INT_THS is 7-bit unsigned, 1 LSb = 186 mg @ FS=±16g normal mode.
-    //   Clamp to [WOM_THS_MIN, WOM_THS_MAX].
-    uint8_t thr1 = (uint8_t)(wom_cfg->threshold_mg_int1 / WOM_SENSITIVITY_MG);
-    uint8_t thr2 = (uint8_t)(wom_cfg->threshold_mg_int2 / WOM_SENSITIVITY_MG);
+    //   INT_THS is 7-bit unsigned, step depends on FS; clamp to [WOM_THS_MIN, WOM_THS_MAX].
+    const uint16_t ths_step_mg = lis2dh12_int_ths_step_mg(wom_fs);
+    uint8_t thr1 = (uint8_t)(wom_cfg->threshold_mg_int1 / ths_step_mg);
+    uint8_t thr2 = (uint8_t)(wom_cfg->threshold_mg_int2 / ths_step_mg);
     if (thr1 > WOM_THS_MAX)
         thr1 = WOM_THS_MAX;
     if (thr2 > WOM_THS_MAX)
@@ -422,9 +474,10 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
         thr2 = WOM_THS_MIN;
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_THS, thr1));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_THS, thr2));
-    LOG_DEBUGF("THS1=%u (~%u mg), THS2=%u (~%u mg) [FS=±16g, 186mg/LSB]",
-               thr1, thr1 * WOM_SENSITIVITY_MG,
-               thr2, thr2 * WOM_SENSITIVITY_MG);
+    LOG_DEBUGF("THS1=%u (~%u mg req=%u), THS2=%u (~%u mg req=%u) [FS=±%ug, %umg/LSB]",
+               thr1, thr1 * ths_step_mg, wom_cfg->threshold_mg_int1,
+               thr2, thr2 * ths_step_mg, wom_cfg->threshold_mg_int2,
+               lis2dh12_fs_g(wom_fs), ths_step_mg);
 
     // Step 6 — Write duration registers (1 LSB = 20 ms at 50 Hz).
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_DURATION, wom_cfg->duration_int1));
@@ -434,29 +487,35 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
 
     // Step 7 — Configure interrupt event logic.
     //
-    //   INT1 (vibration/shock) — HPF is active, so output is AC-coupled.
-    //     Only high events needed: a shock pushes HPF output positive on impact.
-    //     AOI=0 (OR), XHIE=1, YHIE=1, ZHIE=1 → 0x2A
+    // IMPORTANT:
+    //   Do NOT enable the "low event" bits here. On LIS2DH12, "low event" means
+    //   accel lower than the threshold (not necessarily negative). With a large
+    //   threshold (e.g. 6000 mg) the condition "accel < THS" can be true most of
+    //   the time on all axes at rest, causing continuous interrupts.
     //
-    //   INT1 and INT2 both use OR, high events on X/Y/Z → 0x2A
-    //   Different behaviour comes from different threshold registers only.
+    // INT1/INT2: OR combination, high events on X/Y/Z only → 0x2A
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A));
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x2A));
 
-    // 🔴 新增：初始化 HPF 基线
-    // uint8_t hpf_ref = 0;
-    // esp_err_t ret = lis2dh12_read_reg(LIS2DH12_REG_REFERENCE, &hpf_ref);
-    // if (ret != ESP_OK)
-    // {
-    //     LOG_ERRORF("Failed to initialize HPF baseline: %s", esp_err_to_name(ret));
-    //     return ret;
-    // }
-    // LOG_DEBUGF("HPF baseline initialized (REFERENCE=0x%02X)", hpf_ref);
-    // vTaskDelay(pdMS_TO_TICKS(10));
+    // Initialise HPF baseline.
+    // Reading REFERENCE resets the high-pass filter internal reference.
+    // This helps avoid repeated interrupts caused by undefined HPF state after reset.
+    {
+        uint8_t hpf_ref = 0;
+        esp_err_t ret = lis2dh12_read_reg(LIS2DH12_REG_REFERENCE, &hpf_ref);
+        if (ret != ESP_OK)
+        {
+            LOG_ERRORF("Failed to initialize HPF baseline: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        LOG_DEBUGF("HPF baseline initialized (REFERENCE=0x%02X)", hpf_ref);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 
-    // Step 8 — Pulse mode (no latch). The interrupt pin pulses for 1/ODR = 20 ms
-    //   then returns low automatically. The ISR re-enables the GPIO after handling.
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00));
+    // Step 8 — Latch interrupts on INT1/INT2 (recommended for MCU GPIO + wakeup).
+    //   With latching enabled, INT pins stay asserted until INTx_SRC is read.
+    //   CTRL_REG5: LIR_INT1=1 (bit3), LIR_INT2=1 (bit1) → 0x0A
+    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x0A));
 
     // Step 9 — Route interrupts to physical pins.
     //   CTRL_REG3 bit6 = I1_IA1 → IA1 event drives INT1 pin
@@ -465,7 +524,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x20)); // I2_IA2
 
     LOG_DEBUGF("WoM enabled — INT1: >%u mg, INT2: >%u mg",
-               thr1 * WOM_SENSITIVITY_MG, thr2 * WOM_SENSITIVITY_MG);
+               thr1 * ths_step_mg, thr2 * ths_step_mg);
     return ESP_OK;
 }
 
