@@ -11,8 +11,14 @@
 #include "esp_sleep.h"
 #include "esp_heap_caps.h"
 
-static QueueHandle_t gpio_evt_queue = NULL;
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+
+static TaskHandle_t s_wom_task = NULL;
+static volatile uint32_t s_pending_events = 0;
+
+// Bitmask for pending GPIO events (set in ISR, consumed in task)
+#define WOM_EVT_INT1 (1u << 0)
+#define WOM_EVT_INT2 (1u << 1)
 
 // ---------------------------------------------------------------------------
 // Default WoM thresholds
@@ -35,21 +41,12 @@ static QueueHandle_t gpio_evt_queue = NULL;
 // while confirmed events still trigger reliably.
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
-    .fs = LIS2DH12_FS_16G,
-    .threshold_mg_int1 =6000, // vibration/shock
+    .fs = LIS2DH12_FS_2G,
+    .threshold_mg_int1 =600, // vibration/shock
     .duration_int1 = 2,
-    .threshold_mg_int2 = 6000, // posture/orientation
+    .threshold_mg_int2 = 1000, // posture/orientation
     .duration_int2 = 2,
 };
-
-static inline void enable_lis2dh12_gpoi_wakeup()
-{
-    // Configure LIS2DH12 Interrupt pins as wakeup sources
-    // LIS2DH12 interrupts are Active High (configured in drv_lis2dh12.c)
-    gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_HIGH_LEVEL);
-    gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_HIGH_LEVEL);
-    esp_sleep_enable_gpio_wakeup();
-}
 
 static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
 {
@@ -84,15 +81,21 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
     // Disable immediately to avoid repeated triggers (level mode) or burst edges.
     gpio_intr_disable(gpio_num);
 
-    if (gpio_evt_queue)
-    {
-        if (xQueueSendFromISR(gpio_evt_queue, &gpio_num, &xHigherPri) != pdTRUE)
-        {
-            // Queue is full; re-enable to avoid missing events forever.
-            gpio_intr_enable(gpio_num);
+    uint32_t evt = 0;
+    if (gpio_num == LIS2DH12_PIN_NUM_INT1) {
+        evt = WOM_EVT_INT1;
+    } else if (gpio_num == LIS2DH12_PIN_NUM_INT2) {
+        evt = WOM_EVT_INT2;
+    }
+
+    if (evt) {
+        __atomic_fetch_or(&s_pending_events, evt, __ATOMIC_RELAXED);
+        if (s_wom_task) {
+            vTaskNotifyGiveFromISR(s_wom_task, &xHigherPri);
+            if (xHigherPri) {
+                portYIELD_FROM_ISR();
+            }
         }
-        if (xHigherPri)
-            portYIELD_FROM_ISR();
     }
 }
 
@@ -101,25 +104,25 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
 // ---------------------------------------------------------------------------
 static void wom_listener_task(void *arg)
 {
-    uint32_t io_num;
     for (;;)
     {
-        if (xQueueReceive(gpio_evt_queue, &io_num, portMAX_DELAY))
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        const uint32_t pending = __atomic_exchange_n(&s_pending_events, 0, __ATOMIC_ACQ_REL);
+        if (pending == 0) {
+            continue;
+        }
+
+        if (pending & WOM_EVT_INT1)
         {
-
+            const uint32_t io_num = LIS2DH12_PIN_NUM_INT1;
             uint8_t int_src = 0;
-
-            // If the pin is already low, this was likely a spurious edge during bring-up.
-            // (In latched + high-level mode, a real interrupt keeps the pin asserted
-            // until INTx_SRC is read.)
             int level = gpio_get_level(io_num);
             if (level == 0)
             {
                 gpio_intr_enable(io_num);
-                continue;
             }
-
-            if (io_num == LIS2DH12_PIN_NUM_INT1)
+            else
             {
                 esp_err_t ret = drv_lis2dh12_read_int1_source(&int_src);
                 if (ret != ESP_OK)
@@ -128,9 +131,21 @@ static void wom_listener_task(void *arg)
                 }
                 // 如果只是为了中断而不需要加速度数据，可以将这部分LOG信息注释掉。
                 LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X", s_default_wom_cfg.threshold_mg_int1, int_src);
+                gpio_intr_enable(io_num);
             }
-            else if (io_num == LIS2DH12_PIN_NUM_INT2)
-           {
+        }
+
+        if (pending & WOM_EVT_INT2)
+        {
+            const uint32_t io_num = LIS2DH12_PIN_NUM_INT2;
+            uint8_t int_src = 0;
+            int level = gpio_get_level(io_num);
+            if (level == 0)
+            {
+                gpio_intr_enable(io_num);
+            }
+            else
+            {
                 esp_err_t ret = drv_lis2dh12_read_int2_source(&int_src);
                 if (ret != ESP_OK)
                 {
@@ -138,10 +153,11 @@ static void wom_listener_task(void *arg)
                 }
                 LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                            s_default_wom_cfg.threshold_mg_int2, int_src);
+                gpio_intr_enable(io_num);
             }
-            gpio_intr_enable(io_num);
-            // TODO: trigger health-check or wakeup sequence here
         }
+
+        // TODO: trigger health-check or wakeup sequence here
     }
 }
 
@@ -150,20 +166,12 @@ static void wom_listener_task(void *arg)
 // ---------------------------------------------------------------------------
 esp_err_t start_wom_lis2dh12_listener(void)
 {
-    gpio_evt_queue = xQueueCreateWithCaps(10, sizeof(uint32_t), TASK_MEM_CAPS);
-    if (!gpio_evt_queue)
-    {
-        LOG_ERRORF("Failed to create GPIO event queue");
-        return ESP_ERR_NO_MEM;
-    }
-
     BaseType_t task_created =
-        xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, NULL, TASK_MEM_CAPS);
+        xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, &s_wom_task, TASK_MEM_CAPS);
     if (task_created != pdPASS)
     {
         LOG_ERRORF("Failed to create WoM listener task");
-        vQueueDeleteWithCaps(gpio_evt_queue);
-        gpio_evt_queue = NULL;
+        s_wom_task = NULL;
         return ESP_FAIL;
     }
 
@@ -182,22 +190,23 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ret;
     }
 
-    // Enable wakeup after configuration to ensure pin state is defined
-    enable_lis2dh12_gpoi_wakeup();
-
-    ret = gpio_install_isr_service(0);
+    // Install ISR service; prefer IRAM-safe allocation for stability during flash ops.
+    ret = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
     {
         LOG_ERRORF("GPIO ISR service install failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
+    // Add ISR handlers, then immediately keep interrupts disabled until after the sensor
+    // is configured and any boot-time latched sources are cleared.
     ret = gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT1, gpio_isr_handler, (void *)LIS2DH12_PIN_NUM_INT1);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("ISR handler add INT1 failed: %s", esp_err_to_name(ret));
         return ret;
     }
+    gpio_intr_disable(LIS2DH12_PIN_NUM_INT1);
     ret = gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT2, gpio_isr_handler, (void *)LIS2DH12_PIN_NUM_INT2);
     if (ret != ESP_OK)
     {
@@ -205,6 +214,7 @@ esp_err_t start_wom_lis2dh12_listener(void)
         gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT1);
         return ret;
     }
+    gpio_intr_disable(LIS2DH12_PIN_NUM_INT2);
 
     // Arm the sensor
     ret = drv_lis2dh12_enable_wom(&s_default_wom_cfg);
@@ -277,16 +287,16 @@ esp_err_t start_wom_lis2dh12_listener(void)
 // ---------------------------------------------------------------------------
 void wom_lis2dh12_on_wakeup(void)
 {
-    if (!gpio_evt_queue)
+    if (!s_wom_task)
         return;
     if (gpio_get_level(LIS2DH12_PIN_NUM_INT1))
     {
-        uint32_t io_num = LIS2DH12_PIN_NUM_INT1;
-        xQueueSend(gpio_evt_queue, &io_num, 0);
+        __atomic_fetch_or(&s_pending_events, WOM_EVT_INT1, __ATOMIC_RELAXED);
+        xTaskNotifyGive(s_wom_task);
     }
     if (gpio_get_level(LIS2DH12_PIN_NUM_INT2))
     {
-        uint32_t io_num = LIS2DH12_PIN_NUM_INT2;
-        xQueueSend(gpio_evt_queue, &io_num, 0);
+        __atomic_fetch_or(&s_pending_events, WOM_EVT_INT2, __ATOMIC_RELAXED);
+        xTaskNotifyGive(s_wom_task);
     }
 }

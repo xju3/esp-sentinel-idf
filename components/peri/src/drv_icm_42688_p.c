@@ -37,7 +37,7 @@ static esp_err_t icm_write_reg(uint8_t reg, uint8_t data)
 {
     if (!s_spi_mutex)
         return ESP_FAIL;
-    spi_transaction_t t = {.length = 16, .cmd = reg, .tx_buffer = &data};
+    spi_transaction_t t = {.length = 8, .cmd = reg, .tx_buffer = &data};
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
     esp_err_t ret = spi_device_polling_transmit(s_spi_handle, &t);
     xSemaphoreGive(s_spi_mutex);
@@ -48,7 +48,7 @@ static esp_err_t icm_read_reg(uint8_t reg, uint8_t *data)
 {
     if (!s_spi_mutex)
         return ESP_FAIL;
-    spi_transaction_t t = {.length = 16, .cmd = reg | 0x80, .rx_buffer = data};
+    spi_transaction_t t = {.length = 8, .cmd = reg | 0x80, .rx_buffer = data};
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
     esp_err_t ret = spi_device_polling_transmit(s_spi_handle, &t);
     xSemaphoreGive(s_spi_mutex);
