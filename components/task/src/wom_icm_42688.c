@@ -9,7 +9,7 @@
 
 #define WOM_DEBOUNCE_US 50000
 // 假设 ICM-42688-P 的 INT1 连接到 ESP32 的 GPIO 4`
-#define IMU_INT1_PIN GPIO_NUM_4
+#define IMU_INT1_PIN GPIO_NUM_46 // 暂不用
 #define ESP_INTR_FLAG_DEFAULT 0
 // 定义 imu_task_handle 变量
 TaskHandle_t imu_task_handle = NULL;

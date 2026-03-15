@@ -10,13 +10,13 @@ extern "C" {
 #endif
 
 // GPIO assignments
-#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_6
-#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_5
-#define LIS2DH12_PIN_NUM_CS     GPIO_NUM_7      // Independent CS (different from ICM-42688-P)
+#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_16
+#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_15
+#define LIS2DH12_PIN_NUM_CS     GPIO_NUM_4      // Independent CS (different from ICM-42688-P)
 // LIS2DH12: 引脚 9 (SCL/SPC), 11 (SDA/SDI), 12 (SDO/SA0)。
-#define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_37     // Shared with ICM-42688-P (SPI2 SCLK)
-#define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_36     // SDA就是MOSI，接 ESP32 的 MOSI (GPIO 11)
-#define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_21
+#define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_7     // Shared with ICM-42688-P (SPI2 SCLK)
+#define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_6     // SDA就是MOSI，接 ESP32 的 MOSI (GPIO 11)
+#define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_5
 
 // Register addresses (exposed for debugging and configuration)
 #define LIS2DH12_REG_WHO_AM_I      0x0F

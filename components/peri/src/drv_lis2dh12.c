@@ -32,7 +32,7 @@
 #define LIS2DH12_SLEEP_TIME 20
 
 // SPI configuration
-#define SPI_HOST SPI2_HOST
+#define SPI_HOST SPI3_HOST
 
 // WoM operating parameters
 // INT_THS register is 7-bit (bit[6:0]), threshold step depends on FS:
@@ -237,17 +237,17 @@ esp_err_t drv_lis2dh12_init(void)
 
     // Use canonical pin macros where possible; prefer ICM defines for MISO/MOSI/CLK
     spi_bus_config_t buscfg = {
-        .miso_io_num = LIS2DH12_PIN_NUM_SDO,
-        .mosi_io_num = LIS2DH12_PIN_NUM_SDA,
-        .sclk_io_num = LIS2DH12_PIN_NUM_SCL,
+        .miso_io_num = LIS2DH12_PIN_NUM_SDO,    // 21
+        .mosi_io_num = LIS2DH12_PIN_NUM_SDA,    // 35
+        .sclk_io_num = LIS2DH12_PIN_NUM_SCL,    // 36
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 4092,
     };
-    esp_err_t ret = spi_bus_initialize(SPI1_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    esp_err_t ret = spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
     {
-        LOG_ERRORF("peri_spi_bus_init: spi_bus_initialize failed: %s", esp_err_to_name(ret));
+        LOG_ERRORF("drv_lis2dh12_init: spi_bus_initialize failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -259,7 +259,7 @@ esp_err_t drv_lis2dh12_init(void)
         .command_bits = 8,
     };
     // Note: spi device expects the bus to be initialized prior to this call.
-    ret = spi_bus_add_device(SPI1_HOST, &devcfg, &s_spi_handle);
+    ret = spi_bus_add_device(SPI_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("SPI bus add device failed: %s", esp_err_to_name(ret));
@@ -434,13 +434,27 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     LOG_DEBUG("Enabling WoM mode (FS=±16g, ODR=50Hz, HPF on both INT1+INT2)...");
 
     // Step 1 — Power down and clear all control/interrupt registers.
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
+    esp_err_t ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00);
+    if (ret != ESP_OK)
+        return ret;
     vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Step 2 — Set FS (from config), BDU=1, HR=0 (normal mode).
@@ -449,14 +463,20 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
         wom_fs = LIS2DH12_FS_16G;
     s_current_fs = wom_fs;
     uint8_t ctrl_reg4 = (uint8_t)((wom_fs << 4) | 0x80u);
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, ctrl_reg4));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG4, ctrl_reg4);
+    if (ret != ESP_OK)
+        return ret;
 
     // Step 3 — Enable HPF for both INT1 and INT2 (HPM=11, HP_IA1=1, HP_IA2=1).
     //   CTRL_REG2 = 0xC3
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, WOM_CTRL_REG2));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, WOM_CTRL_REG2);
+    if (ret != ESP_OK)
+        return ret;
 
     // Step 4 — Enable ODR=50Hz, normal mode, XYZ axes. Wait for stabilisation.
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, WOM_CTRL_REG1));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, WOM_CTRL_REG1);
+    if (ret != ESP_OK)
+        return ret;
     vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Step 5 — Compute and write interrupt thresholds.
@@ -472,16 +492,24 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
         thr1 = WOM_THS_MIN;
     if (thr2 < WOM_THS_MIN)
         thr2 = WOM_THS_MIN;
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_THS, thr1));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_THS, thr2));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT1_THS, thr1);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT2_THS, thr2);
+    if (ret != ESP_OK)
+        return ret;
     LOG_DEBUGF("THS1=%u (~%u mg req=%u), THS2=%u (~%u mg req=%u) [FS=±%ug, %umg/LSB]",
                thr1, thr1 * ths_step_mg, wom_cfg->threshold_mg_int1,
                thr2, thr2 * ths_step_mg, wom_cfg->threshold_mg_int2,
                lis2dh12_fs_g(wom_fs), ths_step_mg);
 
     // Step 6 — Write duration registers (1 LSB = 20 ms at 50 Hz).
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_DURATION, wom_cfg->duration_int1));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_DURATION, wom_cfg->duration_int2));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT1_DURATION, wom_cfg->duration_int1);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT2_DURATION, wom_cfg->duration_int2);
+    if (ret != ESP_OK)
+        return ret;
     LOG_DEBUGF("Duration INT1=%u ms, INT2=%u ms",
                wom_cfg->duration_int1 * 20u, wom_cfg->duration_int2 * 20u);
 
@@ -494,15 +522,19 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     //   the time on all axes at rest, causing continuous interrupts.
     //
     // INT1/INT2: OR combination, high events on X/Y/Z only → 0x2A
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x2A));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x2A);
+    if (ret != ESP_OK)
+        return ret;
 
     // Initialise HPF baseline.
     // Reading REFERENCE resets the high-pass filter internal reference.
     // This helps avoid repeated interrupts caused by undefined HPF state after reset.
     {
         uint8_t hpf_ref = 0;
-        esp_err_t ret = lis2dh12_read_reg(LIS2DH12_REG_REFERENCE, &hpf_ref);
+        ret = lis2dh12_read_reg(LIS2DH12_REG_REFERENCE, &hpf_ref);
         if (ret != ESP_OK)
         {
             LOG_ERRORF("Failed to initialize HPF baseline: %s", esp_err_to_name(ret));
@@ -515,13 +547,19 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     // Step 8 — Latch interrupts on INT1/INT2 (recommended for MCU GPIO + wakeup).
     //   With latching enabled, INT pins stay asserted until INTx_SRC is read.
     //   CTRL_REG5: LIR_INT1=1 (bit3), LIR_INT2=1 (bit1) → 0x0A
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x0A));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x0A);
+    if (ret != ESP_OK)
+        return ret;
 
     // Step 9 — Route interrupts to physical pins.
     //   CTRL_REG3 bit6 = I1_IA1 → IA1 event drives INT1 pin
     //   CTRL_REG6 bit5 = I2_IA2 → IA2 event drives INT2 pin
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x40)); // I1_IA1
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x20)); // I2_IA2
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x40); // I1_IA1
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x20); // I2_IA2
+    if (ret != ESP_OK)
+        return ret;
 
     LOG_DEBUGF("WoM enabled — INT1: >%u mg, INT2: >%u mg",
                thr1 * ths_step_mg, thr2 * ths_step_mg);
@@ -535,18 +573,34 @@ esp_err_t drv_lis2dh12_disable_wom(void)
 
     LOG_DEBUG("Disabling WoM mode...");
     // Power down first to silence the interrupt generators cleanly
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00));
+    esp_err_t ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x00);
+    if (ret != ESP_OK)
+        return ret;
     vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
 
     // Clear all interrupt routing and event configuration
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00));
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG2, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG5, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x00);
+    if (ret != ESP_OK)
+        return ret;
+    ret = lis2dh12_write_reg(LIS2DH12_REG_INT2_CFG, 0x00);
+    if (ret != ESP_OK)
+        return ret;
     // Restore default operating mode: 100 Hz, normal mode, XYZ enabled
-    ESP_ERROR_CHECK(lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x57));
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG1, 0x57);
+    if (ret != ESP_OK)
+        return ret;
 
     LOG_DEBUG("WoM mode disabled");
     return ESP_OK;

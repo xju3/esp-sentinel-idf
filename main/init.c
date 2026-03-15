@@ -54,7 +54,8 @@ esp_err_t enable_tasks()
     ret = start_wom_lis2dh12_listener();
     if (ret != ESP_OK)
     {
-        return ret;
+        // Avoid reboot loops when LIS2DH12 is absent/miswired.
+        LOG_ERRORF("LIS2DH12 WoM listener disabled: %s", esp_err_to_name(ret));
     }
     return ESP_OK;
 }
@@ -69,7 +70,9 @@ esp_err_t init_imu_sensors()
     ret = drv_lis2dh12_init();
     if (ret != ESP_OK)
     {
-        return ret;
+        // Allow boot to proceed when LIS2DH12 is absent/miswired; ICM42688 is primary.
+        LOG_ERRORF("drv_lis2dh12_init failed (continuing): %s", esp_err_to_name(ret));
+        return ESP_OK;
     }
     return ESP_OK;
 }
