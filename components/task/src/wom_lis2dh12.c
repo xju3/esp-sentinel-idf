@@ -15,6 +15,10 @@
 
 static TaskHandle_t s_wom_task = NULL;
 static volatile uint32_t s_pending_events = 0;
+static int s_int1_idle_level = -1;
+static int s_int2_idle_level = -1;
+static gpio_int_type_t s_int1_intr_type = GPIO_INTR_DISABLE;
+static gpio_int_type_t s_int2_intr_type = GPIO_INTR_DISABLE;
 
 // Bitmask for pending GPIO events (set in ISR, consumed in task)
 #define WOM_EVT_INT1 (1u << 0)
@@ -42,10 +46,10 @@ static volatile uint32_t s_pending_events = 0;
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     .fs = LIS2DH12_FS_2G,
-    .threshold_mg_int1 =600, // vibration/shock
-    .duration_int1 = 2,
+    .threshold_mg_int1 =500, // vibration/shock
+    .duration_int1 = 0,
     .threshold_mg_int2 = 1000, // posture/orientation
-    .duration_int2 = 2,
+    .duration_int2 = 0,
 };
 
 static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
@@ -117,44 +121,45 @@ static void wom_listener_task(void *arg)
         {
             const uint32_t io_num = LIS2DH12_PIN_NUM_INT1;
             uint8_t int_src = 0;
-            int level = gpio_get_level(io_num);
-            if (level == 0)
+            esp_err_t ret = drv_lis2dh12_read_int1_source(&int_src);
+            if (ret != ESP_OK)
             {
-                gpio_intr_enable(io_num);
+                LOG_ERRORF("Failed to read INT1_SRC: %s", esp_err_to_name(ret));
+            }
+            else if (int_src & 0x40) // IA bit set
+            {
+                // 如果只是为了中断而不需要加速度数据，可以将这部分LOG信息注释掉。
+                LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X",
+                          s_default_wom_cfg.threshold_mg_int1, int_src);
             }
             else
             {
-                esp_err_t ret = drv_lis2dh12_read_int1_source(&int_src);
-                if (ret != ESP_OK)
-                {
-                    LOG_ERRORF("Failed to read INT1_SRC: %s", esp_err_to_name(ret));
-                }
-                // 如果只是为了中断而不需要加速度数据，可以将这部分LOG信息注释掉。
-                LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X", s_default_wom_cfg.threshold_mg_int1, int_src);
-                gpio_intr_enable(io_num);
+                LOG_DEBUGF("WoM INT1: spurious edge? GPIO=%d idle=%d INT1_SRC=0x%02X",
+                           gpio_get_level(io_num), s_int1_idle_level, int_src);
             }
+            gpio_intr_enable(io_num);
         }
 
         if (pending & WOM_EVT_INT2)
         {
             const uint32_t io_num = LIS2DH12_PIN_NUM_INT2;
             uint8_t int_src = 0;
-            int level = gpio_get_level(io_num);
-            if (level == 0)
+            esp_err_t ret = drv_lis2dh12_read_int2_source(&int_src);
+            if (ret != ESP_OK)
             {
-                gpio_intr_enable(io_num);
+                LOG_ERRORF("Failed to read INT2_SRC: %s", esp_err_to_name(ret));
+            }
+            else if (int_src & 0x40) // IA bit set
+            {
+                LOG_WARNF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
+                          s_default_wom_cfg.threshold_mg_int2, int_src);
             }
             else
             {
-                esp_err_t ret = drv_lis2dh12_read_int2_source(&int_src);
-                if (ret != ESP_OK)
-                {
-                    LOG_ERRORF("Failed to read INT2_SRC: %s", esp_err_to_name(ret));
-                }
-                LOG_ERRORF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
-                           s_default_wom_cfg.threshold_mg_int2, int_src);
-                gpio_intr_enable(io_num);
+                LOG_DEBUGF("WoM INT2: spurious edge? GPIO=%d idle=%d INT2_SRC=0x%02X",
+                           gpio_get_level(io_num), s_int2_idle_level, int_src);
             }
+            gpio_intr_enable(io_num);
         }
 
         // TODO: trigger health-check or wakeup sequence here
@@ -180,8 +185,10 @@ esp_err_t start_wom_lis2dh12_listener(void)
         .intr_type = GPIO_INTR_DISABLE, // Arm after sensor is configured + sources cleared
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << LIS2DH12_PIN_NUM_INT1) | (1ULL << LIS2DH12_PIN_NUM_INT2),
-        .pull_down_en = 1,
-        .pull_up_en = 0,
+        // Prefer pull-up: LIS2DH12 INT lines are commonly active-low open-drain on boards,
+        // and pull-down will prevent the line from ever going high.
+        .pull_down_en = 0,
+        .pull_up_en = 1,
     };
     esp_err_t ret = gpio_config(&io_conf);
     if (ret != ESP_OK)
@@ -234,16 +241,26 @@ esp_err_t start_wom_lis2dh12_listener(void)
         (void)drv_lis2dh12_read_int2_source(&src);
     }
 
+    // Detect idle level after configuration + source clear, then select edge accordingly.
+    // This makes the code robust to either active-high (push-pull) or active-low (open-drain) wiring.
+    vTaskDelay(pdMS_TO_TICKS(2));
+    s_int1_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT1);
+    s_int2_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT2);
+    s_int1_intr_type = (s_int1_idle_level == 0) ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
+    s_int2_intr_type = (s_int2_idle_level == 0) ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
+    LOG_DEBUGF("WoM INT idle levels: INT1=%d INT2=%d (intr INT1=%s INT2=%s)",
+               s_int1_idle_level, s_int2_idle_level,
+               (s_int1_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge",
+               (s_int2_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge");
+
     // Enable GPIO interrupts after the sensor is fully configured.
-    // With INT latching enabled in the sensor, POS edge is sufficient and avoids
-    // interrupt storms if the line is held high (misconfig/polarity issues).
-    ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_POSEDGE);
+    ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, s_int1_intr_type);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("gpio_set_intr_type INT1 failed: %s", esp_err_to_name(ret));
         return ret;
     }
-    ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_POSEDGE);
+    ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, s_int2_intr_type);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("gpio_set_intr_type INT2 failed: %s", esp_err_to_name(ret));
@@ -289,12 +306,12 @@ void wom_lis2dh12_on_wakeup(void)
 {
     if (!s_wom_task)
         return;
-    if (gpio_get_level(LIS2DH12_PIN_NUM_INT1))
+    if (s_int1_idle_level >= 0 && gpio_get_level(LIS2DH12_PIN_NUM_INT1) != s_int1_idle_level)
     {
         __atomic_fetch_or(&s_pending_events, WOM_EVT_INT1, __ATOMIC_RELAXED);
         xTaskNotifyGive(s_wom_task);
     }
-    if (gpio_get_level(LIS2DH12_PIN_NUM_INT2))
+    if (s_int2_idle_level >= 0 && gpio_get_level(LIS2DH12_PIN_NUM_INT2) != s_int2_idle_level)
     {
         __atomic_fetch_or(&s_pending_events, WOM_EVT_INT2, __ATOMIC_RELAXED);
         xTaskNotifyGive(s_wom_task);

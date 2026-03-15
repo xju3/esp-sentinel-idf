@@ -422,7 +422,7 @@ esp_err_t drv_lis2dh12_read_register(uint8_t reg, uint8_t *value)
 //   INT2_CFG=0x2A: same logic as INT1, different threshold register.
 //
 // FS=±16g, normal mode → 186 mg/LSB. ODR=50Hz → 1 duration LSB = 20 ms.
-// CTRL_REG3 bit6 = I1_IA1 → INT1 pin. CTRL_REG6 bit5 = I2_IA2 → INT2 pin.
+// CTRL_REG3 bit6 = I1_IA1 → INT1 pin. CTRL_REG6 bit6 = I2_IA2 → INT2 pin.
 // ---------------------------------------------------------------------------
 esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
 {
@@ -522,6 +522,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
     //   the time on all axes at rest, causing continuous interrupts.
     //
     // INT1/INT2: OR combination, high events on X/Y/Z only → 0x2A
+    // 传感器只会对正向（Positive）的冲击或倾斜产生反应
     ret = lis2dh12_write_reg(LIS2DH12_REG_INT1_CFG, 0x2A);
     if (ret != ESP_OK)
         return ret;
@@ -553,11 +554,11 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
 
     // Step 9 — Route interrupts to physical pins.
     //   CTRL_REG3 bit6 = I1_IA1 → IA1 event drives INT1 pin
-    //   CTRL_REG6 bit5 = I2_IA2 → IA2 event drives INT2 pin
+    //   CTRL_REG6 bit6 = I2_IA2 → IA2 event drives INT2 pin
     ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG3, 0x40); // I1_IA1
     if (ret != ESP_OK)
         return ret;
-    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x20); // I2_IA2
+    ret = lis2dh12_write_reg(LIS2DH12_REG_CTRL_REG6, 0x40); // I2_IA2
     if (ret != ESP_OK)
         return ret;
 
