@@ -1,0 +1,24 @@
+menu "Peripheral Drivers"
+
+    menu "TMB12A05 Buzzer"
+
+        config PERI_TMB12A05_GPIO_NUM
+            int "Buzzer GPIO number"
+            default 3
+            range 0 48
+            help
+                GPIO number used to control the TMB12A05 active buzzer.
+                This must be a valid output-capable GPIO on your ESP32 variant
+                and match the board wiring.
+
+        config PERI_TMB12A05_ACTIVE_HIGH
+            bool "Active-high control"
+            default y
+            help
+                If enabled, driving the GPIO high turns the buzzer on.
+                If disabled, driving the GPIO low turns the buzzer on (active-low).
+
+    endmenu
+
+endmenu
+

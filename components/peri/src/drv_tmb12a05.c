@@ -13,6 +13,9 @@ static void beep_timer_callback(TimerHandle_t xTimer);
 static void update_buzzer_state(bool state);
 static void notify_state_change(tmb12a05_mode_t new_mode);
 
+// Task stack: keep generous headroom (ESP-IDF logging can be stack-hungry).
+#define TMB12A05_TASK_STACK 4096
+
 // 驱动状态结构
 typedef struct {
     bool initialized;
@@ -23,6 +26,9 @@ typedef struct {
     TimerHandle_t beep_timer;
     uint8_t remaining_beeps;
     uint64_t last_beep_time;
+    gpio_num_t gpio_num;
+    bool restore_config_pending;
+    tmb12a05_config_t restore_config;
 } drv_tmb12a05_state_t;
 
 // 全局驱动状态
@@ -33,13 +39,31 @@ static drv_tmb12a05_state_t s_state = {
         .beep_duration_ms = 100,
         .beep_interval_ms = 100,
         .beep_count = 1,
-        .active_high = true  // 默认高电平触发
+        .active_high =
+#ifdef CONFIG_PERI_TMB12A05_ACTIVE_HIGH
+            CONFIG_PERI_TMB12A05_ACTIVE_HIGH
+#else
+            true
+#endif
     },
     .state_callback = NULL,
     .beep_task_handle = NULL,
     .beep_timer = NULL,
     .remaining_beeps = 0,
-    .last_beep_time = 0
+    .last_beep_time = 0,
+    .gpio_num = TMB12A05_PIN,
+    .restore_config_pending = false,
+    .restore_config = {
+        .beep_duration_ms = 100,
+        .beep_interval_ms = 100,
+        .beep_count = 1,
+        .active_high =
+#ifdef CONFIG_PERI_TMB12A05_ACTIVE_HIGH
+            CONFIG_PERI_TMB12A05_ACTIVE_HIGH
+#else
+            true
+#endif
+    }
 };
 
 // 蜂鸣任务函数
@@ -61,6 +85,10 @@ static void beep_task(void *pvParameters) {
                 vTaskDelay(pdMS_TO_TICKS(s_state.config.beep_interval_ms));
             } else {
                 // 蜂鸣完成，更新状态
+                if (s_state.restore_config_pending) {
+                    memcpy(&s_state.config, &s_state.restore_config, sizeof(tmb12a05_config_t));
+                    s_state.restore_config_pending = false;
+                }
                 s_state.current_mode = TMB12A05_MODE_OFF;
                 notify_state_change(TMB12A05_MODE_OFF);
             }
@@ -96,13 +124,7 @@ static void update_buzzer_state(bool state) {
         level = !level;
     }
     
-    gpio_set_level(TMB12A05_PIN, level);
-    
-    if (state) {
-        LOG_DEBUG("Buzzer turned ON");
-    } else {
-        LOG_DEBUG("Buzzer turned OFF");
-    }
+    gpio_set_level(s_state.gpio_num, level);
 }
 
 // 通知状态变化
@@ -121,10 +143,17 @@ esp_err_t drv_tmb12a05_init(void) {
     }
     
     LOG_DEBUG("Initializing TMB12A05 buzzer...");
+
+    s_state.gpio_num = TMB12A05_PIN;
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(s_state.gpio_num)) {
+        LOG_ERRORF("Invalid buzzer GPIO (not output-capable): %d", (int)s_state.gpio_num);
+        return ESP_ERR_INVALID_ARG;
+    }
+    LOG_DEBUGF("Buzzer GPIO=%d, active_%s", (int)s_state.gpio_num, s_state.config.active_high ? "high" : "low");
     
     // 配置GPIO
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << TMB12A05_PIN),
+        .pin_bit_mask = (1ULL << s_state.gpio_num),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -136,6 +165,9 @@ esp_err_t drv_tmb12a05_init(void) {
         LOG_ERRORF("Failed to configure buzzer GPIO: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    // Best-effort: stronger drive in case the buzzer input needs it (e.g., via transistor base).
+    (void)gpio_set_drive_capability(s_state.gpio_num, GPIO_DRIVE_CAP_3);
     
     // 初始状态：关闭蜂鸣器
     update_buzzer_state(false);
@@ -144,7 +176,7 @@ esp_err_t drv_tmb12a05_init(void) {
     BaseType_t task_ret = xTaskCreate(
         beep_task,
         "buzzer_task",
-        2048,
+        TMB12A05_TASK_STACK,
         NULL,
         5,  // 中等优先级
         &s_state.beep_task_handle
@@ -152,7 +184,7 @@ esp_err_t drv_tmb12a05_init(void) {
     
     if (task_ret != pdPASS) {
         LOG_ERROR("Failed to create buzzer task");
-        gpio_reset_pin(TMB12A05_PIN);
+        gpio_reset_pin(s_state.gpio_num);
         return ESP_FAIL;
     }
     
@@ -169,7 +201,7 @@ esp_err_t drv_tmb12a05_init(void) {
         LOG_ERROR("Failed to create buzzer timer");
         vTaskDelete(s_state.beep_task_handle);
         s_state.beep_task_handle = NULL;
-        gpio_reset_pin(TMB12A05_PIN);
+        gpio_reset_pin(s_state.gpio_num);
         return ESP_FAIL;
     }
     
@@ -203,11 +235,12 @@ esp_err_t drv_tmb12a05_deinit(void) {
     }
     
     // 重置GPIO
-    gpio_reset_pin(TMB12A05_PIN);
+    gpio_reset_pin(s_state.gpio_num);
     
     s_state.initialized = false;
     s_state.current_mode = TMB12A05_MODE_OFF;
     s_state.state_callback = NULL;
+    s_state.restore_config_pending = false;
     
     LOG_DEBUG("TMB12A05 buzzer deinitialized successfully");
     return ESP_OK;
@@ -235,26 +268,29 @@ esp_err_t drv_tmb12a05_set_mode(tmb12a05_mode_t mode) {
     switch (mode) {
         case TMB12A05_MODE_OFF:
             // 已经关闭
+            s_state.remaining_beeps = 0;
             break;
             
         case TMB12A05_MODE_ON:
+            s_state.remaining_beeps = 0;
             update_buzzer_state(true);
             break;
             
         case TMB12A05_MODE_BEEP_SINGLE:
-            s_state.remaining_beeps = 1;
+            if (s_state.remaining_beeps == 0) s_state.remaining_beeps = 1;
             break;
             
         case TMB12A05_MODE_BEEP_DOUBLE:
-            s_state.remaining_beeps = 2;
+            if (s_state.remaining_beeps == 0) s_state.remaining_beeps = 2;
             break;
             
         case TMB12A05_MODE_BEEP_TRIPLE:
-            s_state.remaining_beeps = 3;
+            if (s_state.remaining_beeps == 0) s_state.remaining_beeps = 3;
             break;
             
         case TMB12A05_MODE_BEEP_CONTINUOUS:
             // 连续模式由任务处理
+            s_state.remaining_beeps = 0;
             break;
             
         default:
@@ -288,8 +324,17 @@ esp_err_t drv_tmb12a05_set_config(const tmb12a05_config_t *config) {
     if (config->beep_count > 10) {
         return ESP_ERR_INVALID_ARG;
     }
-    
-    // 保存配置
+
+    // If a temporary beep is ongoing, update the restore target so that when the
+    // temporary beep finishes it will restore to the user's new config.
+    if (s_state.restore_config_pending) {
+        memcpy(&s_state.restore_config, config, sizeof(tmb12a05_config_t));
+        LOG_DEBUGF("Buzzer restore-config updated while beeping: duration=%dms, interval=%dms, count=%d, active_high=%d",
+                   config->beep_duration_ms, config->beep_interval_ms,
+                   config->beep_count, config->active_high);
+        return ESP_OK;
+    }
+
     memcpy(&s_state.config, config, sizeof(tmb12a05_config_t));
     
     LOG_DEBUGF("Buzzer config updated: duration=%dms, interval=%dms, count=%d, active_high=%d",
@@ -326,20 +371,15 @@ esp_err_t drv_tmb12a05_beep_once(uint16_t duration_ms) {
     }
     
     LOG_DEBUGF("Beeping once for %d ms", duration_ms);
-    
-    // 保存原始配置
-    uint16_t original_duration = s_state.config.beep_duration_ms;
-    
-    // 临时设置持续时间
+
+    if (!s_state.restore_config_pending) {
+        memcpy(&s_state.restore_config, &s_state.config, sizeof(tmb12a05_config_t));
+        s_state.restore_config_pending = true;
+    }
+
     s_state.config.beep_duration_ms = duration_ms;
-    
-    // 执行单次蜂鸣
-    esp_err_t ret = drv_tmb12a05_set_mode(TMB12A05_MODE_BEEP_SINGLE);
-    
-    // 恢复原始配置
-    s_state.config.beep_duration_ms = original_duration;
-    
-    return ret;
+    s_state.remaining_beeps = 1;
+    return drv_tmb12a05_set_mode(TMB12A05_MODE_BEEP_SINGLE);
 }
 
 esp_err_t drv_tmb12a05_beep_multiple(uint8_t count, uint16_t duration_ms, uint16_t interval_ms) {
@@ -361,19 +401,18 @@ esp_err_t drv_tmb12a05_beep_multiple(uint8_t count, uint16_t duration_ms, uint16
     
     LOG_DEBUGF("Beeping %d times (duration=%dms, interval=%dms)", 
                count, duration_ms, interval_ms);
-    
-    // 保存原始配置
-    tmb12a05_config_t original_config = s_state.config;
-    
-    // 临时设置配置
+
+    if (!s_state.restore_config_pending) {
+        memcpy(&s_state.restore_config, &s_state.config, sizeof(tmb12a05_config_t));
+        s_state.restore_config_pending = true;
+    }
+
     s_state.config.beep_duration_ms = duration_ms;
     s_state.config.beep_interval_ms = interval_ms;
     s_state.config.beep_count = count;
-    
-    // 设置蜂鸣次数
     s_state.remaining_beeps = count;
-    
-    // 根据次数设置模式
+
+    // 根据次数选择模式（remaining_beeps 已设置，set_mode 不应覆盖）
     tmb12a05_mode_t mode;
     switch (count) {
         case 1:
@@ -389,13 +428,8 @@ esp_err_t drv_tmb12a05_beep_multiple(uint8_t count, uint16_t duration_ms, uint16
             mode = TMB12A05_MODE_BEEP_SINGLE; // 使用单次模式，但remaining_beeps已设置
             break;
     }
-    
-    esp_err_t ret = drv_tmb12a05_set_mode(mode);
-    
-    // 恢复原始配置
-    memcpy(&s_state.config, &original_config, sizeof(tmb12a05_config_t));
-    
-    return ret;
+
+    return drv_tmb12a05_set_mode(mode);
 }
 
 esp_err_t drv_tmb12a05_start_continuous(uint16_t period_ms) {
@@ -429,6 +463,12 @@ esp_err_t drv_tmb12a05_stop(void) {
     
     // 重置状态
     s_state.remaining_beeps = 0;
+
+    // If we were using a temporary config for a one-shot beep, restore it now.
+    if (s_state.restore_config_pending) {
+        memcpy(&s_state.config, &s_state.restore_config, sizeof(tmb12a05_config_t));
+        s_state.restore_config_pending = false;
+    }
     
     // 如果当前是连续模式，需要停止任务中的循环
     if (s_state.current_mode == TMB12A05_MODE_BEEP_CONTINUOUS) {

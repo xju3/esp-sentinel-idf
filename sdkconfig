@@ -2308,6 +2308,18 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of Wi-Fi Provisioning Manager
 
 #
+# Peripheral Drivers
+#
+
+#
+# TMB12A05 Buzzer
+#
+CONFIG_PERI_TMB12A05_GPIO_NUM=3
+CONFIG_PERI_TMB12A05_ACTIVE_HIGH=y
+# end of TMB12A05 Buzzer
+# end of Peripheral Drivers
+
+#
 # Logger
 #
 CONFIG_LOGGER_ENABLE=y

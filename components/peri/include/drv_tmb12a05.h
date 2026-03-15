@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "driver/gpio.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,8 +69,13 @@ extern "C" {
  * @endcode
  */
 
-// GPIO引脚定义 - 根据用户要求使用GPIO_NUM=3
-#define TMB12A05_PIN  GPIO_NUM_3
+// GPIO引脚定义（可通过 menuconfig 配置）
+#ifdef CONFIG_PERI_TMB12A05_GPIO_NUM
+#define TMB12A05_PIN ((gpio_num_t)CONFIG_PERI_TMB12A05_GPIO_NUM)
+#else
+// Fallback default (legacy)
+#define TMB12A05_PIN GPIO_NUM_3
+#endif
 
 /**
  * @brief 蜂鸣器工作模式枚举

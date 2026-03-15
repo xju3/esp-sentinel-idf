@@ -74,7 +74,8 @@
 //
 //   HPM=11 → bit7=1, bit6=1; HP_IA2=1 → bit1=1; HP_IA1=1 → bit0=1
 //   CTRL_REG2 = 0b11000011 = 0xC3
-#define WOM_CTRL_REG2 0xC3u
+#define WOM_CTRL_REG2 0x03u
+// #define WOM_CTRL_REG2 0xC3u
 
 // --- Driver state ---
 static spi_device_handle_t s_spi_handle = NULL;
