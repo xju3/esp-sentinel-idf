@@ -10,11 +10,13 @@
 #include "logger.h"
 #include "task_baseline.h"
 #include "web_server.h"
+#include "machine_state.h"
 
 void app_main(void)
 {
     // 初始化 NVS (Wi-Fi 驱动必须用到)
-    ESP_ERROR_CHECK(init_nvs());
+    init_nvs();
+    init_machine_state();
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
     if (!g_user_config.is_configured)
     {

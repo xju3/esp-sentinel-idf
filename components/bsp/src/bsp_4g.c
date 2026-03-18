@@ -316,8 +316,8 @@ static esp_err_t detect_baudrate(uint32_t *detected_baud)
         uart_set_baudrate(UART_PORT_NUM, baud_rates[i]);
         vTaskDelay(pdMS_TO_TICKS(100));
 
-        // 尝试 5 次，SIM 初始化时模组响应会更慢
-        for (int retry = 0; retry < 5; retry++)
+        // 尝试 3 次，SIM 初始化时模组响应会更慢
+        for (int retry = 0; retry < 3; retry++)
         {
             if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1500) == ESP_OK)
             {

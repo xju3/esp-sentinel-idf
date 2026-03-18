@@ -8,7 +8,8 @@ idf_component_register(
         "src/daq_worker.c" 
         "src/task_baseline.c" 
         "src/speed_calibration.c" 
-        "src/wom_lis2dh12.c" 
+        "src/wom_lis2dh12.c"
+         "src/task_state_machine.c" 
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
@@ -17,3 +18,4 @@ idf_component_register(
 if(DEFINED DEVICE_ID)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_ID="${DEVICE_ID}")
 endif()
+# target_sources(${COMPONENT_LIB} PRIVATE)

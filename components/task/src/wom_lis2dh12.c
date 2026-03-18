@@ -2,6 +2,7 @@
 #include "drv_lis2dh12.h"
 #include "drv_tmb12a05.h"
 #include "logger.h"
+#include "task_state_machine.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -240,6 +241,10 @@ static void wom_listener_task(void *arg)
         }
 
         // TODO: trigger health-check or wakeup sequence here
+        // Any WoM event means the machine's state might have changed. Trigger the state check handler.
+        if (pending) {
+            xSemaphoreGive(g_state_check_semaphore);
+        }
     }
 }
 

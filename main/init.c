@@ -14,6 +14,7 @@
 #include "task_envelope.h"
 #include "wom_lis2dh12.h"
 #include "web_server.h"
+#include "task_state_machine.h"
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -51,6 +52,10 @@ esp_err_t enable_tasks()
     {
         return ret;
     }
+
+    // Create the task that will handle state determination logic.
+    create_state_check_handler_task();
+
     ret = start_wom_lis2dh12_listener();
     if (ret != ESP_OK)
     {

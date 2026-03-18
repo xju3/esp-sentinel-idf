@@ -8,6 +8,7 @@
 #include "task_kurtosis.h"
 #include <math.h>
 #include "esp_attr.h"
+#include "machine_state.h"
 
 static DSP_Config_t patrol_config = {0};
 static DSP_Config_t diagnosis_config = {0};
@@ -207,31 +208,47 @@ void init_config(daq_worker_param_t *param)
 
 esp_err_t start_daq_worker(daq_worker_param_t *param)
 {
+    // 1. Check if the machine is in a stable state. This is a mandatory precondition.
+    if (get_machine_state() != STATE_STABLE) {
+        LOG_WARN("Cannot start DAQ worker: machine state is not STABLE.");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // 2. Lock the system task mutex to ensure exclusive operation during this DAQ work.
+    // This will block the state check handler from running concurrently.
+    lock_system_task();
+
+    esp_err_t ret;
+
     if (param == NULL)
     {
-        return ESP_ERR_INVALID_ARG;
-    }
-    // 初始化配置
-    init_config(param);
+        ret = ESP_ERR_INVALID_ARG;
+    } else {
+        // The original function body is now protected by the state check and mutex.
+        init_config(param);
 
-    // 根据任务模式启动相应的工作
-    if (param->task_mode == TASK_MODE_PATROLING)
-    {
-        LOG_DEBUG("Starting patrol work...");
-        return start_patrolling_work();
-    }
-    else if (param->task_mode == TASK_MODE_DIAGNOSIS)
-    {
-        LOG_DEBUG("Starting diagnosis work...");
-        return start_diagnosing_work();
-    }
-    else
-    {
-        LOG_ERROR("Invalid task mode");
-        return ESP_ERR_INVALID_ARG;
+        // 根据任务模式启动相应的工作
+        if (param->task_mode == TASK_MODE_PATROLING)
+        {
+            LOG_DEBUG("Starting patrol work...");
+            ret = start_patrolling_work();
+        }
+        else if (param->task_mode == TASK_MODE_DIAGNOSIS)
+        {
+            LOG_DEBUG("Starting diagnosis work...");
+            ret = start_diagnosing_work();
+        }
+        else
+        {
+            LOG_ERROR("Invalid task mode");
+            ret = ESP_ERR_INVALID_ARG;
+        }
     }
 
-    return ESP_OK;
+    // 3. Unlock the mutex now that the blocking DAQ work is complete.
+    unlock_system_task();
+
+    return ret;
 }
 
 // /**
