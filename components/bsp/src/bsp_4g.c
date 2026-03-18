@@ -139,8 +139,8 @@ static void ppp_4g_power_on(void)
     gpio_set_level(PIN_PWK, 1);
 
     // A7670C 在带 SIM 卡时初始化更慢，提前预留更长启动窗口
-    ESP_LOGI(TAG, "→ Waiting for module boot (5 seconds)...");
-    for (int i = 5; i > 0; i--)
+    ESP_LOGI(TAG, "→ Waiting for module boot (3 seconds)...");
+    for (int i = 3; i > 0; i--)
     {
         ESP_LOGI(TAG, "  %d...", i);
         vTaskDelay(pdMS_TO_TICKS(1000));

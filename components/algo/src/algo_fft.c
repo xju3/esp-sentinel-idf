@@ -12,8 +12,8 @@
 static const char *TAG = "ALGO_FFT";
 static bool s_fft_initialized = false;
 
-// 假设最大支持 8192 点 FFT，这决定了查找表的大小
-#define MAX_FFT_SIZE 8192
+// 最大支持 4096 点 FFT（与 CONFIG_DSP_MAX_FFT_SIZE=4096 一致）
+#define MAX_FFT_SIZE 4096
 
 esp_err_t algo_fft_init(void)
 {
