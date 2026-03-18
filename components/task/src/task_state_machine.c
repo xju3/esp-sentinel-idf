@@ -23,6 +23,8 @@ SemaphoreHandle_t g_state_check_semaphore;
 #define MIN_VALID_FREQ_HZ            10.0f    // Ignore frequencies below this value as potential motor speed
 #define MIN_STABLE_DURATION_MS       1000     // Min duration in TRANSIENT before allowing switch to STABLE
 #define MAX_TRANSITION_DURATION_S    15       // Max time to spend trying to find a stable state
+#define MIN_RMS_FOR_STABLE           0.01f    // Minimum RMS acceleration (g) required for STABLE state
+#define MIN_RMS_FOR_OFF              0.005f   // Maximum RMS acceleration (g) for OFF state
 
 // --- Data Structures ---
 
@@ -118,6 +120,7 @@ static void process_analysis_window(StateAnalysisContext_t *ctx) {
  * Per specification section 7.3, stability requires:
  * - R_E(k) = |E_H(k) - E_H(k-1)| / max(E_H(k-1), epsilon) <= T_var_E
  * - R_F(k) = |F_H(k) - F_H(k-1)| / max(F_H(k-1), epsilon) <= T_var_F
+ * - E_H(k) must be above minimum threshold for STABLE (to avoid OFF misclassification)
  */
 static bool check_stability(StateAnalysisContext_t *ctx) {
     if (!ctx->history_filled) return false;
@@ -125,6 +128,7 @@ static bool check_stability(StateAnalysisContext_t *ctx) {
     const float epsilon = 1e-6f;
     float max_energy_rate = 0.0f;
     float max_freq_rate = 0.0f;
+    float avg_rms = 0.0f;
 
     // Calculate adjacent window change rates for all consecutive pairs
     // Ring buffer: oldest window is at index (history_idx % STABILITY_HISTORY_SIZE)
@@ -151,16 +155,20 @@ static bool check_stability(StateAnalysisContext_t *ctx) {
         if (freq_rate > max_freq_rate) {
             max_freq_rate = freq_rate;
         }
+
+        // Accumulate RMS for average
+        avg_rms += curr_rms;
     }
+    avg_rms /= (STABILITY_HISTORY_SIZE - 1);
 
     // Normalize frequency rate threshold: STABILITY_FREQ_VAR_HZ (Hz) / MIN_VALID_FREQ_HZ (Hz)
     // to convert from absolute Hz difference to relative rate
     float freq_rate_threshold = STABILITY_FREQ_VAR_HZ / fmaxf(MIN_VALID_FREQ_HZ, epsilon);
 
-    LOG_DEBUGF("Stability check: Energy Rate=%.3f (Limit %.3f), Freq Rate=%.3f (Limit %.3f)", 
-        max_energy_rate, STABILITY_RMS_VAR_RATIO, max_freq_rate, freq_rate_threshold);
+    LOG_DEBUGF("Stability check: Energy Rate=%.3f (Limit %.3f), Freq Rate=%.3f (Limit %.3f), Avg RMS=%.4f (Min %.4f)", 
+        max_energy_rate, STABILITY_RMS_VAR_RATIO, max_freq_rate, freq_rate_threshold, avg_rms, MIN_RMS_FOR_STABLE);
 
-    if (max_energy_rate <= STABILITY_RMS_VAR_RATIO && max_freq_rate <= freq_rate_threshold) {
+    if (max_energy_rate <= STABILITY_RMS_VAR_RATIO && max_freq_rate <= freq_rate_threshold && avg_rms >= MIN_RMS_FOR_STABLE) {
         LOG_INFO("STABILITY DETECTED!");
         return true;
     }
@@ -265,7 +273,23 @@ static void task_state_check_handler(void *pvParameters)
             }
 
             // Final state decision
-            if (context.stable_detected) {
+            // Calculate average RMS from history to determine if machine is OFF
+            float avg_rms = 0.0f;
+            int count = 0;
+            for (int i = 0; i < STABILITY_HISTORY_SIZE; i++) {
+                if (context.history[i].rms_accel > 0.0f) {  // Only count valid entries
+                    avg_rms += context.history[i].rms_accel;
+                    count++;
+                }
+            }
+            if (count > 0) {
+                avg_rms /= count;
+            }
+
+            if (avg_rms < MIN_RMS_FOR_OFF) {
+                LOG_INFOF("Analysis complete. Machine state is OFF (avg RMS=%.4f g < %.4f g).", avg_rms, MIN_RMS_FOR_OFF);
+                set_machine_state(STATE_OFF);
+            } else if (context.stable_detected) {
                 LOG_INFO("Analysis complete. Machine state is STABLE.");
                 set_machine_state(STATE_STABLE);
             } else {
