@@ -74,7 +74,7 @@ extern "C" {
 #define TMB12A05_PIN ((gpio_num_t)CONFIG_PERI_TMB12A05_GPIO_NUM)
 #else
 // Fallback default (legacy)
-#define TMB12A05_PIN GPIO_NUM_3
+#define TMB12A05_PIN GPIO_NUM_16
 #endif
 
 /**

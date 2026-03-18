@@ -53,7 +53,7 @@ extern "C" {
  */
 
 // GPIO引脚定义
-#define DS18B20_PIN  GPIO_NUM_8
+#define DS18B20_PIN  GPIO_NUM_16
 
 // DS18B20命令定义
 #define DS18B20_CMD_SKIP_ROM         0xCC  ///< 跳过ROM匹配，用于单设备总线

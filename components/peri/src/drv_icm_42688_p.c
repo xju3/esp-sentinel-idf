@@ -16,9 +16,6 @@
 #define DMA_CHUNK_SAMPLES 128
 #define DMA_CHUNK_BYTES (DMA_CHUNK_SAMPLES * sizeof(imu_raw_data_t))
 
-#define PIN_NUM_MISO GPIO_NUM_12
-#define PIN_NUM_MOSI GPIO_NUM_11
-#define PIN_NUM_CLK  GPIO_NUM_9
 
 static SemaphoreHandle_t s_spi_mutex = NULL;
 static spi_device_handle_t s_spi_handle = NULL;

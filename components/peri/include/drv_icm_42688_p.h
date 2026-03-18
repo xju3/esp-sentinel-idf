@@ -13,7 +13,10 @@
 #include "imu_config.h" // 引入 HAL 层抽象结构
 
 // Canonical SPI pin macros used by peri_spi_bus.c
-#define PIN_NUM_CS   GPIO_NUM_10
+#define PIN_NUM_MISO GPIO_NUM_4
+#define PIN_NUM_MOSI GPIO_NUM_5
+#define PIN_NUM_CLK  GPIO_NUM_6
+#define PIN_NUM_CS   GPIO_NUM_7
 
 // WoM 核心寄存器宏定义
 #define ICM42688P_REG_PWR_MGMT0     0x4E

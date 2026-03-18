@@ -91,10 +91,10 @@ static void wom_beep(uint8_t count, uint32_t min_gap_ms)
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     .fs = LIS2DH12_FS_2G,
-    .threshold_mg_int1 = 500, // vibration/shock
+    .threshold_mg_int1 = 300, // vibration/shock
     .duration_int1 = 0,
-    .threshold_mg_int2 = 1000, // posture/orientation
-    .duration_int2 = 25,
+    .threshold_mg_int2 = 500, // posture/orientation
+    .duration_int2 = 5,
 };
 
 static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
@@ -133,7 +133,7 @@ static void wom_int1_clear_and_rearm(bool suppress_log)
         }
         else
         {
-            LOG_DEBUGF("WoM INT1: spurious edge? GPIO=%d idle=%d INT1_SRC=0x%02X", gpio_get_level(io_num), s_int1_idle_level, int_src);
+            // LOG_DEBUGF("WoM INT1: spurious edge? GPIO=%d idle=%d INT1_SRC=0x%02X", gpio_get_level(io_num), s_int1_idle_level, int_src);
         }
     }
     gpio_intr_enable(io_num);
@@ -227,8 +227,7 @@ static void wom_listener_task(void *arg)
             }
             else
             {
-                LOG_DEBUGF("WoM INT2: spurious edge? GPIO=%d idle=%d INT2_SRC=0x%02X",
-                           gpio_get_level(io_num), s_int2_idle_level, int_src);
+                // LOG_DEBUGF("WoM INT2: spurious edge? GPIO=%d idle=%d INT2_SRC=0x%02X", gpio_get_level(io_num), s_int2_idle_level, int_src);
             }
             gpio_intr_enable(io_num);
         }

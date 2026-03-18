@@ -260,7 +260,7 @@ esp_err_t drv_tmb12a05_set_mode(tmb12a05_mode_t mode) {
         return ESP_OK;
     }
     
-    LOG_DEBUGF("Setting buzzer mode: %d", mode);
+    // LOG_DEBUGF("Setting buzzer mode: %d", mode);
     
     // 停止当前模式
     update_buzzer_state(false);
@@ -399,8 +399,7 @@ esp_err_t drv_tmb12a05_beep_multiple(uint8_t count, uint16_t duration_ms, uint16
         return ESP_ERR_INVALID_ARG;
     }
     
-    LOG_DEBUGF("Beeping %d times (duration=%dms, interval=%dms)", 
-               count, duration_ms, interval_ms);
+    LOG_DEBUGF("Beeping %d times (duration=%dms, interval=%dms)", count, duration_ms, interval_ms);
 
     if (!s_state.restore_config_pending) {
         memcpy(&s_state.restore_config, &s_state.config, sizeof(tmb12a05_config_t));

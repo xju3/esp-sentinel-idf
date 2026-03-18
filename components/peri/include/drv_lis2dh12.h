@@ -10,12 +10,12 @@ extern "C" {
 #endif
 
 // GPIO assignments
-#define LIS2DH12_PIN_NUM_CS     GPIO_NUM_4     
-#define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_5
-#define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_6    
-#define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_7    
-#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_15
-#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_16
+#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_8
+#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_3
+#define LIS2DH12_PIN_NUM_CS     GPIO_NUM_9     
+#define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_10
+#define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_11    
+#define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_12   
 
 // Register addresses (exposed for debugging and configuration)
 #define LIS2DH12_REG_WHO_AM_I      0x0F
