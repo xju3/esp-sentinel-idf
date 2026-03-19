@@ -7,33 +7,21 @@
 #include "freertos/queue.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
+    // Binary message: dispatcher 不关心数据内容和结构
+    typedef struct
+    {
+        uint8_t *data;      // 二进制数据指针
+        size_t len;         // 数据长度
+        char topic[128];    // MQTT topic
+    } binary_msg_t;
 
-// RMS 数据结构体
-typedef struct {
-    uint32_t timestamp;  // 时间戳
-    float rms_x;         // X轴RMS值
-    float rms_y;         // Y轴RMS值
-    float rms_z;         // Z轴RMS值
-} imu_rms_data_t;
-
-// Message Types
-#define MSG_TYPE_RMS 1
-#define MSG_TYPE_FFT 2
-
-// Queue Message Wrapper
-typedef struct {
-    uint8_t type;
-    union {
-        imu_rms_data_t rms;
-        // future: monitor_fft_data_t fft;
-    } payload;
-} dispatch_msg_t;
-
-// Queue is created/owned by task_monitor, dispatcher only consumes
-extern QueueHandle_t g_monitor_message_queue;
-esp_err_t data_dispatcher_start(void);
+    // Queue is created/owned by producer, dispatcher only consumes
+    // Queue items are of type binary_msg_t
+    extern QueueHandle_t g_msg_dispatcher_queue;
+    esp_err_t data_dispatcher_start(void);
 
 #ifdef __cplusplus
 }

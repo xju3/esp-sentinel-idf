@@ -52,11 +52,15 @@ extern "C"
 
     typedef struct
     {
-        float *raw_data;       // 指向静态 Buffer 的指针 (平面化布局: X, Y, Z)
+        float task_id;        // 任务 ID (可用于追踪和日志)
+        int32_t timestamp;     // 任务创建时间 (Unix 时间戳)
         uint32_t length;       // 单轴有效数据点数
+        float *raw_data;       // 指向静态 Buffer 的指针 (平面化布局: X, Y, Z)
         float sample_rate;     // 实际采样率
         task_mode_t task_mode; // 任务模式 (Patrol/Diagnosis)
     } vib_job_t;
+
+    binary_msg_t g_binary_msg = {0}; // 全局二进制消息结构体实例，避免频繁分配内存
 
 #ifdef __cplusplus
 }

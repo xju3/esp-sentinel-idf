@@ -116,3 +116,41 @@ vib_rms_t algo_rms_calculate(const float *x, const float *y, const float *z, uin
 
     return result;
 }
+
+vib_3axis_features_t algo_rms_calculate_3axis(const float *x, const float *y, const float *z, uint32_t length, float sample_rate)
+{
+    vib_3axis_features_t features = {0};
+
+    if (x)
+        features.x_axis = calculate_features((int16_t *)x, length);
+    if (y)
+        features.y_axis = calculate_features((int16_t *)y, length);
+    if (z)
+        features.z_axis = calculate_features((int16_t *)z, length);
+
+    return features;
+}
+
+// 输入：原始采样数组，输出：四个时域特征值
+vib_features_t calculate_features(int16_t *samples, int count) {
+    vib_features_t f = {0};
+    float sum_sq = 0;
+    float sum_abs = 0;
+    float max_val = 0;
+
+    for (int i = 0; i < count; i++) {
+        float val = (float)samples[i]; // 转换为物理单位（g）
+        float abs_val = fabsf(val);
+        
+        sum_sq += val * val;
+        sum_abs += abs_val;
+        if (abs_val > max_val) max_val = abs_val;
+    }
+
+    f.rms = sqrtf(sum_sq / count);
+    f.peak = max_val;
+    f.crest_factor = (f.rms > 0.0001f) ? (f.peak / f.rms) : 0;
+    f.impulse_factor = (sum_abs > 0) ? (f.peak / (sum_abs / count)) : 0;
+
+    return f;
+}

@@ -1,7 +1,6 @@
 #include "data_dispatcher.h"
 #include "config_manager.h"
 #include "logger.h"
-#include "cJSON.h"
 #include "mqtt_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,99 +18,73 @@ static bool is_mqtt_connected(void) {
     return g_mqtt_client != NULL;
 }
 
-// 构建 JSON 消息
-static char* build_json_message(const dispatch_msg_t  *msg) {
-    if (!msg) return NULL;
-    
-    cJSON *root = cJSON_CreateObject();
-    if (!root) return NULL;
-    
-    cJSON_AddStringToObject(root, "deviceId", g_user_config.device_id);
-    cJSON_AddNumberToObject(root, "ts", (double)msg->payload.rms.timestamp);
-    
-    if (msg->type == MSG_TYPE_RMS) {
-        cJSON_AddStringToObject(root, "type", "rms");
-        cJSON *data = cJSON_CreateObject();
-        cJSON_AddNumberToObject(data, "x", msg->payload.rms.rms_x);
-        cJSON_AddNumberToObject(data, "y", msg->payload.rms.rms_y);
-        cJSON_AddNumberToObject(data, "z", msg->payload.rms.rms_z);
-        cJSON_AddItemToObject(root, "data", data);
-    }
-    // 未来可以添加其他消息类型处理，如 FFT
-    // else if (msg->type == MONITOR_MSG_TYPE_FFT) { ... }
-    
-    char *json_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    
-    return json_str;
-}
-
-// 发送消息到 MQTT (带重试机制)
-static bool send_to_mqtt(const char *topic, const char *json_str) {
-    if (!is_mqtt_connected()) {
-        LOG_WARN("MQTT client not connected");
+// 发送二进制消息到 MQTT (带重试机制)
+static bool send_binary_to_mqtt(const char *topic, const void *payload, size_t len) {
+    if (!is_mqtt_connected() || payload == NULL || len == 0) {
+        LOG_WARN("MQTT not connected or invalid payload");
         return false;
     }
     
+    // 注意：QoS 设置为 1，确保 Broker 至少收到一次
+    // esp_mqtt_client_publish 的参数：client, topic, data, len, qos, retain
     for (int retry = 0; retry < MAX_SEND_RETRIES; retry++) {
-        int msg_id = esp_mqtt_client_publish(g_mqtt_client, topic, json_str, 0, 1, 0);
+        int msg_id = esp_mqtt_client_publish(g_mqtt_client, topic, (const char *)payload, len, 1, 0);
         
         if (msg_id != -1) {
-            // LOG_INFOF("Data sent successfully (msg_id: %d)", msg_id);
+            // 对于二进制数据，记录长度比记录内容更有意义
+            // LOG_INFOF("Binary data sent: %d bytes (msg_id: %d)", len, msg_id);
             return true;
         }
         
         if (retry < MAX_SEND_RETRIES - 1) {
-            LOG_WARNF("MQTT publish failed, retry %d/%d in %dms", 
-                     retry + 1, MAX_SEND_RETRIES, RETRY_DELAY_MS);
+            LOG_WARNF("MQTT binary publish failed, retry %d/%d", retry + 1, MAX_SEND_RETRIES);
             vTaskDelay(pdMS_TO_TICKS(RETRY_DELAY_MS));
         }
     }
     
-    LOG_ERROR("MQTT publish failed after retries");
+    LOG_ERROR("MQTT binary publish failed after retries");
     return false;
 }
 
-static void dispatcher_task(void *arg) {
-    dispatch_msg_t msg;
-    char topic[128];
-    
-    // 构造 MQTT Topic: /device/{id}/data
-    snprintf(topic, sizeof(topic), "/device/%s/data", g_user_config.device_id);
-    LOG_INFOF("Data dispatcher started. Topic: %s", topic);
 
+static void dispatcher_task(void *arg) {
+    binary_msg_t msg;
+    
+    LOG_INFO("Data dispatcher started. Ready to forward binary data to MQTT");
     while (1) {
-        if (g_monitor_message_queue == NULL) {
+        if (g_msg_dispatcher_queue == NULL) {
             return;
         }
+        
         // 阻塞等待队列消息 (真正的消费者)
-        if (xQueueReceive(g_monitor_message_queue, &msg, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(g_msg_dispatcher_queue, &msg, portMAX_DELAY) == pdTRUE) {
             
-            // 构建 JSON 消息
-            char *json_str = build_json_message(&msg);
-            if (!json_str) {
-                LOG_ERROR("Failed to build JSON message");
+            if (!msg.data || msg.len == 0) {
+                LOG_WARN("Invalid message: data is NULL or length is 0");
                 continue;
             }
             
-            // 发送到 MQTT (网络透明性：不关心底层是 4G 还是 WiFi)
-            bool success = send_to_mqtt(topic, json_str);
+            // 直接发送二进制数据到 MQTT
+            bool success = send_binary_to_mqtt(msg.topic, msg.data, msg.len);
             
             if (!success) {
-                LOG_WARN("Failed to send data, dropping message");
+                LOG_WARNF("Failed to send binary data to %s, dropping message", msg.topic);
                 // 注意：这里选择丢弃消息而不是重新入队，因为：
                 // 1. 保持实时性：旧数据可能已过时
                 // 2. 避免队列积压：网络恢复后会有新数据
-                // 3. 简化设计：符合黑盒模式原则
+                // 3. 简化设计：dispatcher 无需关心数据内容
             }
             
-            free(json_str);
+            // 释放调用者分配的数据内存
+            if (msg.data) {
+                free(msg.data);
+            }
         }
     }
 }
 
 esp_err_t data_dispatcher_start(void) {
-    if (!g_monitor_message_queue) {
+    if (!g_msg_dispatcher_queue) {
         LOG_ERROR("Monitor queue not initialized!");
         return ESP_FAIL;
     }
