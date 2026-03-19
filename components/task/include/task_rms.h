@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "task_stash.h"
+#include "algo_rms.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -13,13 +14,6 @@ extern "C"
 {
 #endif
 
-    typedef struct
-    {
-        float rms;
-        float peak;
-        float crest_factor;   // 峰值因子
-        float impulse_factor; // 脉冲指标
-    } axis_features_t;
 
     typedef struct
     {

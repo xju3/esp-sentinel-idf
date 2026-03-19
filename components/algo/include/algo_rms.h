@@ -7,24 +7,13 @@
 extern "C"
 {
 #endif
-
-    /**
-     * @brief 振动 RMS 结果结构体 (速度有效值)
-     */
-    typedef struct
-    {
-        float x; // X轴速度 RMS (mm/s)
-        float y; // Y轴速度 RMS (mm/s)
-        float z; // Z轴速度 RMS (mm/s)
-    } vib_rms_t;
-
     typedef struct
     {
         float rms;
         float peak;
-        float crest_factor;
-        float impulse_factor;
-    } vib_features_t;
+        float crest_factor;   // 峰值因子
+        float impulse_factor; // 脉冲指标
+    } axis_features_t;
 
     typedef struct
     {
@@ -51,9 +40,9 @@ extern "C"
      * @param z 指向 Z 轴加速度数据的指针 (单位: g, 平面化布局)
      * @param length 单轴数据点数
      * @param sample_rate 实际采样率 (Hz)
-     * @return vib_rms_t 计算出的三轴速度 RMS 值 (mm/s)
+     * @return vib_3axis_features_t 计算出的三轴特征值
      */
-    vib_rms_t algo_rms_calculate(const float *x, const float *y, const float *z, uint32_t length, float sample_rate);
+    vib_3axis_features_t algo_rms_calculate(const float *x, const float *y, const float *z, uint32_t length, float sample_rate);
 
 #ifdef __cplusplus
 }

@@ -14,7 +14,49 @@
 #define MAX_DAQ_SAMPLES 8192
 #define RMS_QUEUE_LEN 5
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-static task_rms_report_t report = {0} QueueHandle_t g_rms_job_queue = NULL;
+
+QueueHandle_t g_rms_job_queue = NULL;
+static task_rms_report_t report = {0};
+static esp_err_t rms_report(int32_t task_id,
+                            vib_3axis_features_t *features,
+                            iso_alarm_status_t status,
+                            task_mode_t mode,
+                            float sample_rate,
+                            float temperature)
+{
+
+    if (g_msg_dispatcher_queue == NULL)
+    {
+        LOG_ERROR("Message dispatcher queue not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    report.task_id = task_id; // 可根据实际情况设置
+    report.timestamp = time(NULL);
+    report.sample_rate = sample_rate; // 可根据实际情况设置
+    report.temperature = temperature; // 可根据实际情况设置
+    report.conclusion = (int8_t)status;
+    report.task_mode = mode;
+    report.x_axis.rms = features->x_axis.rms;
+    report.y_axis.rms = features->y_axis.rms;
+    report.z_axis.rms = features->z_axis.rms;
+    report.x_axis.peak = features->x_axis.peak;
+    report.y_axis.peak = features->y_axis.peak;
+    report.z_axis.peak = features->z_axis.peak;
+    report.x_axis.crest_factor = features->x_axis.crest_factor;
+    report.y_axis.crest_factor = features->y_axis.crest_factor;
+    report.z_axis.crest_factor = features->z_axis.crest_factor;
+    report.x_axis.impulse_factor = features->x_axis.impulse_factor;
+    report.y_axis.impulse_factor = features->y_axis.impulse_factor;
+    report.z_axis.impulse_factor = features->z_axis.impulse_factor;
+    g_binary_msg.data = (uint8_t *)&report;
+    g_binary_msg.len = sizeof(report);
+    strncpy(g_binary_msg.topic, "device/vibration/rms", sizeof(g_binary_msg.topic) - 1);
+    g_binary_msg.topic[sizeof(g_binary_msg.topic) - 1] = '\0';
+
+    xQueueSend(g_msg_dispatcher_queue, &g_binary_msg, 0);
+    return ESP_OK;
+}
 
 static void rms_task_entry(void *arg)
 {
@@ -35,7 +77,7 @@ static void rms_task_entry(void *arg)
             const float *z_ptr = job.raw_data + MAX_DAQ_SAMPLES * 2;
 
             // 2. 调用纯算法库计算 RMS (包含 HPF/LPF/积分)
-            vib_3axis_features_t features = algo_rms_calculate_3axis(x_ptr, y_ptr, z_ptr, job.length, job.sample_rate);
+            vib_3axis_features_t features = algo_rms_calculate(x_ptr, y_ptr, z_ptr, job.length, job.sample_rate);
             LOG_DEBUGF("rms(mm/s): X=%.2f, Y=%.2f, Z=%.2f, sample rate=%.2f",
                        features.x_axis.rms,
                        features.y_axis.rms,
@@ -93,51 +135,15 @@ static void rms_task_entry(void *arg)
             }
 
             // 6. 生成报告并发送到数据分发器
-            float temp = ds18b20_read_temperature(); // 读取温度传感器
-            report(job.task_id, &features, status, job.task_mode, job.sample_rate, (temp * 100));
+            float temp = 0.0f;
+            // 读取温度传感器
+            if (drv_ds18b20_read_temperature(&temp) != ESP_OK)
+            {
+                LOG_ERROR("Failed to read temperature");
+            }
+            rms_report(job.task_id, &features, status, job.task_mode, job.sample_rate, (temp * 100));
         }
     }
-}
-
-esp_err_t report(int32_t task_id,
-                 vib_3axis_features_t *features,
-                 iso_alarm_status_t status,
-                 task_mode_t mode,
-                 float sample_rate,
-                 float temperature)
-{
-
-    if (g_msg_dispatcher_queue == NULL)
-    {
-        LOG_ERROR("Message dispatcher queue not initialized");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    report.task_id = task_id; // 可根据实际情况设置
-    report.timestamp = time(NULL);
-    report.sample_rate = sample_rate; // 可根据实际情况设置
-    report.temperature = temperature; // 可根据实际情况设置
-    report.conclusion = (int8_t)status;
-    report.task_mode = mode;
-    report.x_axis.rms = features->x_axis.rms;
-    report.y_axis.rms = features->y_axis.rms;
-    report.z_axis.rms = features->z_axis.rms;
-    report.x_axis.peak = features->x_axis.peak;
-    report.y_axis.peak = features->y_axis.peak;
-    report.z_axis.peak = features->z_axis.peak;
-    report.x_axis.crest_factor = features->x_axis.crest_factor;
-    report.y_axis.crest_factor = features->y_axis.crest_factor;
-    report.z_axis.crest_factor = features->z_axis.crest_factor;
-    report.x_axis.impulse_factor = features->x_axis.impulse_factor;
-    report.y_axis.impulse_factor = features->y_axis.impulse_factor;
-    report.z_axis.impulse_factor = features->z_axis.impulse_factor;
-    g_binary_msg.data = (uint8_t *)&report;
-    g_binary_msg.len = sizeof(report);
-    strncpy(g_binary_msg.topic, "device/vibration/rms", sizeof(g_binary_msg.topic) - 1);
-    g_binary_msg.topic[sizeof(g_binary_msg.topic) - 1] = '\0';
-
-    xQueueSend(g_msg_dispatcher_queue, &g_binary_msg, 0);
-    return ESP_OK;
 }
 
 esp_err_t start_rms_task(void)

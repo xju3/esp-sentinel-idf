@@ -39,16 +39,18 @@ EXT_RAM_BSS_ATTR static float s_scratch_buf[MAX_RMS_PROCESS_POINTS] __attribute_
 // static SemaphoreHandle_t s_rms_mutex = NULL;
 
 /**
- * @brief 处理单轴数据的内部辅助函数
+ * @brief 处理单轴数据的内部辅助函数，计算完整的轴特征
  */
-static float process_axis(const float *input, uint32_t length, float sample_rate)
+static axis_features_t process_axis(const float *input, uint32_t length, float sample_rate)
 {
+    axis_features_t result = {0};
+    
     if (!input || length == 0)
-        return 0.0f;
+        return result;
     if (length > MAX_RMS_PROCESS_POINTS)
     {
         ESP_LOGE(TAG, "Input length %lu exceeds static buffer size %d", length, MAX_RMS_PROCESS_POINTS);
-        return 0.0f;
+        return result;
     }
 
     // 1. 使用静态暂存区 (无需申请)
@@ -94,63 +96,49 @@ static float process_axis(const float *input, uint32_t length, float sample_rate
     memset(w_hpf, 0, sizeof(w_hpf));
     dsps_biquad_f32(buf, buf, length, coeffs_hpf, w_hpf);
 
-    // 7. 计算 RMS
+    // 7. 计算特征参数
+    // 7.1 计算 RMS
     float rms = 0.0f;
     dsps_rms_f32(buf, length, &rms);
+    result.rms = rms;
 
-    return rms;
-}
+    // 7.2 计算峰值 (Peak, 最大绝对值)
+    float peak = 0.0f;
+    float mav = 0.0f; // Mean Absolute Value (平均绝对值)
+    for (int i = 0; i < length; i++)
+    {
+        float abs_val = fabsf(buf[i]);
+        if (abs_val > peak)
+            peak = abs_val;
+        mav += abs_val;
+    }
+    mav /= length;
+    result.peak = peak;
 
-vib_rms_t algo_rms_calculate(const float *x, const float *y, const float *z, uint32_t length, float sample_rate)
-{
-    vib_rms_t result = {0};
+    // 7.3 计算峰值因子 (Crest Factor = Peak / RMS)
+    result.crest_factor = (rms > 0.0f) ? (peak / rms) : 0.0f;
 
-    // 依次处理三个轴
-    // 这种串行处理方式可以最大程度节省堆内存（同一时间只占用一个轴的 scratch buffer）
-    if (x)
-        result.x = process_axis(x, length, sample_rate);
-    if (y)
-        result.y = process_axis(y, length, sample_rate);
-    if (z)
-        result.z = process_axis(z, length, sample_rate);
+    // 7.4 计算脉冲指标 (Impulse Factor = Peak / MAV)
+    result.impulse_factor = (mav > 0.0f) ? (peak / mav) : 0.0f;
 
     return result;
 }
 
-vib_3axis_features_t algo_rms_calculate_3axis(const float *x, const float *y, const float *z, uint32_t length, float sample_rate)
+
+
+vib_3axis_features_t algo_rms_calculate(const float *x, const float *y, const float *z, uint32_t length, float sample_rate)
 {
     vib_3axis_features_t features = {0};
 
+    // 依次处理三个轴，提取特征值
+    // 这种串行处理方式可以最大程度节省堆内存（同一时间只占用一个轴的 scratch buffer）
     if (x)
-        features.x_axis = calculate_features((int16_t *)x, length);
+        features.x_axis = process_axis(x, length, sample_rate);
     if (y)
-        features.y_axis = calculate_features((int16_t *)y, length);
+        features.y_axis = process_axis(y, length, sample_rate);
     if (z)
-        features.z_axis = calculate_features((int16_t *)z, length);
+        features.z_axis = process_axis(z, length, sample_rate);
 
     return features;
 }
 
-// 输入：原始采样数组，输出：四个时域特征值
-vib_features_t calculate_features(int16_t *samples, int count) {
-    vib_features_t f = {0};
-    float sum_sq = 0;
-    float sum_abs = 0;
-    float max_val = 0;
-
-    for (int i = 0; i < count; i++) {
-        float val = (float)samples[i]; // 转换为物理单位（g）
-        float abs_val = fabsf(val);
-        
-        sum_sq += val * val;
-        sum_abs += abs_val;
-        if (abs_val > max_val) max_val = abs_val;
-    }
-
-    f.rms = sqrtf(sum_sq / count);
-    f.peak = max_val;
-    f.crest_factor = (f.rms > 0.0001f) ? (f.peak / f.rms) : 0;
-    f.impulse_factor = (sum_abs > 0) ? (f.peak / (sum_abs / count)) : 0;
-
-    return f;
-}
