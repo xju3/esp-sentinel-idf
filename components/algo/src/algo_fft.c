@@ -15,10 +15,78 @@ static const char *TAG = "ALGO_FFT";
 static bool s_fft_initialized = false;
 static StaticSemaphore_t s_fft_lock_buf;
 static SemaphoreHandle_t s_fft_lock = NULL;
+static StaticSemaphore_t s_fft_peaks_lock_buf;
+static SemaphoreHandle_t s_fft_peaks_lock = NULL;
 
 // 最大支持 4096 点 FFT（与 CONFIG_DSP_MAX_FFT_SIZE=4096 一致）
 #define MAX_FFT_SIZE 4096
 EXT_RAM_BSS_ATTR static float s_fft_scratch[MAX_FFT_SIZE] __attribute__((aligned(16)));
+EXT_RAM_BSS_ATTR static float s_fft_mag_x[MAX_FFT_SIZE / 2];
+EXT_RAM_BSS_ATTR static float s_fft_mag_y[MAX_FFT_SIZE / 2];
+EXT_RAM_BSS_ATTR static float s_fft_mag_z[MAX_FFT_SIZE / 2];
+
+static float peak_score(const patrol_peak_t *peak)
+{
+    if (!peak)
+    {
+        return 0.0f;
+    }
+
+    float score = peak->amp_x;
+    if (peak->amp_y > score)
+    {
+        score = peak->amp_y;
+    }
+    if (peak->amp_z > score)
+    {
+        score = peak->amp_z;
+    }
+    return score;
+}
+
+static uint8_t dominant_axis_from_mag(float x, float y, float z)
+{
+    if (y >= x && y >= z)
+    {
+        return 1;
+    }
+    if (z >= x && z >= y)
+    {
+        return 2;
+    }
+    return 0;
+}
+
+static void try_insert_peak(
+    patrol_peak_t *peaks,
+    const patrol_peak_t *candidate)
+{
+    if (!peaks || !candidate)
+    {
+        return;
+    }
+
+    const float candidate_score = peak_score(candidate);
+    if (candidate_score <= 0.0f)
+    {
+        return;
+    }
+
+    for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
+    {
+        if (candidate_score <= peak_score(&peaks[i]))
+        {
+            continue;
+        }
+
+        for (int j = PATROL_MAX_PEAKS - 1; j > i; --j)
+        {
+            peaks[j] = peaks[j - 1];
+        }
+        peaks[i] = *candidate;
+        return;
+    }
+}
 
 esp_err_t algo_fft_init(void)
 {
@@ -43,6 +111,80 @@ esp_err_t algo_fft_init(void)
         ESP_LOGE(TAG, "Failed to init FFT tables: %d", ret);
     }
     return ret;
+}
+
+esp_err_t algo_fft_extract_peaks(
+    const float *mag_x,
+    const float *mag_y,
+    const float *mag_z,
+    uint32_t fft_len,
+    float sample_rate,
+    patrol_peak_t *peaks_out)
+{
+    if (!peaks_out)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(peaks_out, 0, sizeof(patrol_peak_t) * PATROL_MAX_PEAKS);
+
+    if (!mag_x || !mag_y || !mag_z)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (fft_len < 4 || (fft_len & (fft_len - 1U)) != 0U || sample_rate <= 0.0f)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint32_t half = fft_len >> 1;
+    const float bin_hz = sample_rate / (float)fft_len;
+    uint32_t max_bin = (uint32_t)(PATROL_MAX_FREQ_HZ / bin_hz);
+    if (max_bin >= (half - 1U))
+    {
+        max_bin = half - 2U;
+    }
+
+    for (uint32_t i = 1; i <= max_bin; ++i)
+    {
+        const float prev_x = mag_x[i - 1];
+        const float prev_y = mag_y[i - 1];
+        const float prev_z = mag_z[i - 1];
+        const float cur_x = mag_x[i];
+        const float cur_y = mag_y[i];
+        const float cur_z = mag_z[i];
+        const float next_x = mag_x[i + 1];
+        const float next_y = mag_y[i + 1];
+        const float next_z = mag_z[i + 1];
+
+        float prev_score = prev_x;
+        if (prev_y > prev_score) prev_score = prev_y;
+        if (prev_z > prev_score) prev_score = prev_z;
+
+        float cur_score = cur_x;
+        if (cur_y > cur_score) cur_score = cur_y;
+        if (cur_z > cur_score) cur_score = cur_z;
+
+        float next_score = next_x;
+        if (next_y > next_score) next_score = next_y;
+        if (next_z > next_score) next_score = next_z;
+
+        if (cur_score < prev_score || cur_score < next_score)
+        {
+            continue;
+        }
+
+        patrol_peak_t candidate = {
+            .freq_hz = i * bin_hz,
+            .amp_x = cur_x,
+            .amp_y = cur_y,
+            .amp_z = cur_z,
+            .dominant_axis = dominant_axis_from_mag(cur_x, cur_y, cur_z),
+        };
+        try_insert_peak(peaks_out, &candidate);
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
@@ -172,4 +314,72 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
 
     xSemaphoreGive(s_fft_lock);
     return ESP_OK;
+}
+
+esp_err_t algo_fft_calculate_peaks(
+    const float *x_data,
+    const float *y_data,
+    const float *z_data,
+    uint32_t n,
+    float sample_rate,
+    patrol_fft_report_t *report)
+{
+    if (!x_data || !y_data || !z_data || !report)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if ((n & (n - 1U)) != 0U || n == 0U)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_fft_peaks_lock == NULL) {
+        s_fft_peaks_lock = xSemaphoreCreateMutexStatic(&s_fft_peaks_lock_buf);
+        if (s_fft_peaks_lock == NULL) {
+            ESP_LOGE(TAG, "Failed to create FFT peaks mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (xSemaphoreTake(s_fft_peaks_lock, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take FFT peaks mutex");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t err = algo_fft_calculate(x_data, s_fft_mag_x, n);
+    if (err != ESP_OK)
+    {
+        xSemaphoreGive(s_fft_peaks_lock);
+        return err;
+    }
+
+    err = algo_fft_calculate(y_data, s_fft_mag_y, n);
+    if (err != ESP_OK)
+    {
+        xSemaphoreGive(s_fft_peaks_lock);
+        return err;
+    }
+
+    err = algo_fft_calculate(z_data, s_fft_mag_z, n);
+    if (err != ESP_OK)
+    {
+        xSemaphoreGive(s_fft_peaks_lock);
+        return err;
+    }
+
+    err = algo_fft_extract_peaks(
+        s_fft_mag_x,
+        s_fft_mag_y,
+        s_fft_mag_z,
+        n,
+        sample_rate,
+        report->peaks);
+    if (err == ESP_OK)
+    {
+        report->sample_rate = sample_rate;
+    }
+
+    xSemaphoreGive(s_fft_peaks_lock);
+    return err;
 }

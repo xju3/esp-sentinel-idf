@@ -3,7 +3,6 @@
 #include "logger.h"
 #include "data_dispatcher.h"
 #include "esp_timer.h"
-#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 
@@ -13,14 +12,9 @@
 
 #define MAX_DAQ_SAMPLES 8192
 #define FFT_QUEUE_LEN   5
-#define PATROL_MAX_PEAKS 5
-#define PATROL_MAX_FREQ_HZ 1000.0f
 #define TASK_MEM_CAPS   (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 QueueHandle_t g_fft_job_queue = NULL;
-EXT_RAM_BSS_ATTR static float s_fft_mag_x[MAX_DAQ_SAMPLES / 2];
-EXT_RAM_BSS_ATTR static float s_fft_mag_y[MAX_DAQ_SAMPLES / 2];
-EXT_RAM_BSS_ATTR static float s_fft_mag_z[MAX_DAQ_SAMPLES / 2];
 static patrol_fft_report_t s_patrol_fft_report;
 
 static float peak_score(const patrol_peak_t *peak)
@@ -40,19 +34,6 @@ static float peak_score(const patrol_peak_t *peak)
         score = peak->amp_z;
     }
     return score;
-}
-
-static uint8_t dominant_axis_from_mag(float x, float y, float z)
-{
-    if (y >= x && y >= z)
-    {
-        return 1;
-    }
-    if (z >= x && z >= y)
-    {
-        return 2;
-    }
-    return 0;
 }
 
 static char position_code_for_axis(const sensor_position_t *pos, uint8_t axis)
@@ -79,37 +60,6 @@ static const char *position_name(char pos_code)
         case 'v': return "vertical-radial";
         case 'a': return "axial";
         default: return "unknown";
-    }
-}
-
-static void try_insert_peak(
-    patrol_peak_t *peaks,
-    const patrol_peak_t *candidate)
-{
-    if (!peaks || !candidate)
-    {
-        return;
-    }
-
-    const float candidate_score = peak_score(candidate);
-    if (candidate_score <= 0.0f)
-    {
-        return;
-    }
-
-    for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
-    {
-        if (candidate_score <= peak_score(&peaks[i]))
-        {
-            continue;
-        }
-
-        for (int j = PATROL_MAX_PEAKS - 1; j > i; --j)
-        {
-            peaks[j] = peaks[j - 1];
-        }
-        peaks[i] = *candidate;
-        return;
     }
 }
 
@@ -278,66 +228,6 @@ static void classify_patrol_fault(patrol_fft_report_t *report)
     report->confidence = 0.15f;
 }
 
-static void extract_patrol_peaks(
-    patrol_fft_report_t *report,
-    float sample_rate,
-    uint32_t fft_len)
-{
-    if (!report || fft_len < 4 || sample_rate <= 0.0f)
-    {
-        return;
-    }
-
-    memset(report->peaks, 0, sizeof(report->peaks));
-
-    const uint32_t half = fft_len >> 1;
-    const float bin_hz = sample_rate / (float)fft_len;
-    uint32_t max_bin = (uint32_t)(PATROL_MAX_FREQ_HZ / bin_hz);
-    if (max_bin >= (half - 1U))
-    {
-        max_bin = half - 2U;
-    }
-
-    for (uint32_t i = 1; i <= max_bin; ++i)
-    {
-        const float prev_x = s_fft_mag_x[i - 1];
-        const float prev_y = s_fft_mag_y[i - 1];
-        const float prev_z = s_fft_mag_z[i - 1];
-        const float cur_x = s_fft_mag_x[i];
-        const float cur_y = s_fft_mag_y[i];
-        const float cur_z = s_fft_mag_z[i];
-        const float next_x = s_fft_mag_x[i + 1];
-        const float next_y = s_fft_mag_y[i + 1];
-        const float next_z = s_fft_mag_z[i + 1];
-
-        float prev_score = prev_x;
-        if (prev_y > prev_score) prev_score = prev_y;
-        if (prev_z > prev_score) prev_score = prev_z;
-
-        float cur_score = cur_x;
-        if (cur_y > cur_score) cur_score = cur_y;
-        if (cur_z > cur_score) cur_score = cur_z;
-
-        float next_score = next_x;
-        if (next_y > next_score) next_score = next_y;
-        if (next_z > next_score) next_score = next_z;
-
-        if (cur_score < prev_score || cur_score < next_score)
-        {
-            continue;
-        }
-
-        patrol_peak_t candidate = {
-            .freq_hz = i * bin_hz,
-            .amp_x = cur_x,
-            .amp_y = cur_y,
-            .amp_z = cur_z,
-            .dominant_axis = dominant_axis_from_mag(cur_x, cur_y, cur_z),
-        };
-        try_insert_peak(report->peaks, &candidate);
-    }
-}
-
 static void send_patrol_fft_report(const vib_job_t *job)
 {
     if (!job)
@@ -347,10 +237,6 @@ static void send_patrol_fft_report(const vib_job_t *job)
 
     s_patrol_fft_report.task_id = (int32_t)job->task_id;
     s_patrol_fft_report.timestamp = (int32_t)time(NULL);
-    s_patrol_fft_report.sample_rate = job->sample_rate;
-    s_patrol_fft_report.pos = g_user_config.pos;
-
-    extract_patrol_peaks(&s_patrol_fft_report, job->sample_rate, job->length);
 
     if (job->task_mode == TASK_MODE_PATROLING)
     {
@@ -373,7 +259,7 @@ static void send_patrol_fft_report(const vib_job_t *job)
             continue;
         }
 
-        const char pos_code = position_code_for_axis(&s_patrol_fft_report.pos, peak->dominant_axis);
+        const char pos_code = position_code_for_axis(&g_user_config.pos, peak->dominant_axis);
         LOG_INFOF("Patrol peak[%d]: %.2fHz, dom=%c(%s), amp[X=%.4f,Y=%.4f,Z=%.4f]",
                   i,
                   peak->freq_hz,
@@ -427,24 +313,16 @@ static void fft_task_entry(void *arg)
 
             LOG_INFO("Performing 3-axis FFT analysis...");
 
-            esp_err_t err = algo_fft_calculate(x_ptr, s_fft_mag_x, n);
+            esp_err_t err = algo_fft_calculate_peaks(
+                x_ptr,
+                y_ptr,
+                z_ptr,
+                n,
+                job.sample_rate,
+                &s_patrol_fft_report);
             if (err != ESP_OK)
             {
-                LOG_ERRORF("FFT failed on X axis: %d", err);
-                continue;
-            }
-            
-            err = algo_fft_calculate(y_ptr, s_fft_mag_y, n);
-            if (err != ESP_OK)
-            {
-                LOG_ERRORF("FFT failed on Y axis: %d", err);
-                continue;
-           }
-            
-            err = algo_fft_calculate(z_ptr, s_fft_mag_z, n);
-            if (err != ESP_OK)
-            {
-                LOG_ERRORF("FFT failed on Z axis: %d", err);
+                LOG_ERRORF("FFT peak analysis failed: %d", err);
                 continue;
             }
 

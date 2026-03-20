@@ -23,7 +23,6 @@ typedef struct __attribute__((packed)) {
     int32_t task_id;         // 关联 RMS 任务，方便服务器做 Data Fusion
     int32_t timestamp;       // 报告生成时间
     float sample_rate;       // 频谱对应采样率
-    sensor_position_t pos;   // 当前安装方向映射
     patrol_peak_t peaks[PATROL_MAX_PEAKS];  // 5 个代表性物理频点，保留三轴幅值分布
 
     int32_t fault_code;      // 0=无故障,1=不平衡,2=不对中,3=松动,4=轴承,5=电气
@@ -48,6 +47,25 @@ esp_err_t algo_fft_init(void);
 esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n);
 
 /**
+ * @brief 从三轴幅值谱中提取巡检峰值
+ *
+ * @param mag_x X轴幅值谱 (长度 n/2)
+ * @param mag_y Y轴幅值谱 (长度 n/2)
+ * @param mag_z Z轴幅值谱 (长度 n/2)
+ * @param fft_len FFT点数 (必须是2的幂次方)
+ * @param sample_rate 采样率 (Hz)
+ * @param peaks_out 输出峰值数组 (PATROL_MAX_PEAKS)
+ * @return esp_err_t ESP_OK 成功，其他为错误码
+ */
+esp_err_t algo_fft_extract_peaks(
+    const float *mag_x,
+    const float *mag_y,
+    const float *mag_z,
+    uint32_t fft_len,
+    float sample_rate,
+    patrol_peak_t *peaks_out);
+
+/**
  * @brief 对三轴振动数据执行 FFT 并提取巡检峰值
  * 
  * @param x_data X轴时域信号
@@ -55,7 +73,7 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n);
  * @param z_data Z轴时域信号
  * @param n FFT点数 (必须是2的幂次方)
  * @param sample_rate 采样率 (Hz)
- * @param report 输出报告结构体
+ * @param report 输出报告结构体（填充 sample_rate 与 peaks）
  * @return esp_err_t ESP_OK 成功，其他为错误码
  */
 esp_err_t algo_fft_calculate_peaks(
