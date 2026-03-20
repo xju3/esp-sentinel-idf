@@ -13,16 +13,39 @@
 static DSP_Config_t patrol_config = {0};
 static DSP_Config_t diagnosis_config = {0};
 
-static int32_t current_rpm = 0; // 当前设备转速 (RPM)，由外部配置更新
 // 初始化配置
 void init_config(daq_worker_param_t *param);
 esp_err_t start_patrolling_work();
 esp_err_t start_diagnosing_work();
 
 #define MAX_DAQ_SAMPLES 8192
-#define DMA_CHUNK_SIZE 128
+#define PATROL_DMA_CHUNK_SIZE 128
+#define DIAGNOSIS_DMA_CHUNK_SIZE 512
+#define DAQ_SKIP_MS 20U
+#define DAQ_CAPTURE_GUARD_MS 100U
+
+#define PATROL_FIXED_ODR_HZ 4000.0f
+#define PATROL_FIXED_FFT_POINTS 4096U
+#define PATROL_MAX_FREQ_HZ 1000.0f
+
+#define DIAGNOSIS_FIXED_ODR_HZ 8000.0f
+#define DIAGNOSIS_FIXED_FFT_POINTS 4096U
+#define DIAGNOSIS_MIN_FREQ_HZ 2000.0f
 EXT_RAM_BSS_ATTR static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
 static uint32_t s_buffer_write_idx = 0;
+
+static uint32_t get_capture_duration_ms(const DSP_Config_t *cfg)
+{
+    if (cfg == NULL || cfg->actual_odr <= 0.0f || cfg->fft_points == 0U)
+    {
+        return 0;
+    }
+
+    uint32_t duration_ms = (uint32_t)ceilf(cfg->actual_time * 1000.0f);
+    duration_ms += DAQ_SKIP_MS;
+    duration_ms += DAQ_CAPTURE_GUARD_MS;
+    return duration_ms;
+}
 
 /**
  * @brief 内联辅助函数：将物理量存入平面化 Buffer (Planar Buffer)
@@ -62,8 +85,8 @@ static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, voi
 /**
  * @brief 启动巡逻工作
  *
- * 巡逻工作只需要低频率数据
- * 参数配置：C=10, H=10, F_env=1000, delta_f_max=1
+ * 巡逻工作使用固定低频频谱模板
+ * 模板配置：ODR=4000Hz, FFT点数=4096, 关注频段<=1000Hz
  *
  * @param rpm 设备转速 (RPM)
  * @return true 成功启动
@@ -80,26 +103,32 @@ esp_err_t start_patrolling_work()
     s_buffer_write_idx = 0; // 重置写入索引
 
     // 计算采集时长 (ms)
-    uint32_t duration_ms = (uint32_t)(patrol_config.actual_time * 1000.0f);
+    uint32_t duration_ms = get_capture_duration_ms(&patrol_config);
     if (duration_ms == 0)
-        duration_ms = 1000;
+        duration_ms = 1200;
 
     icm_cfg_t capture_cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
     LOG_DEBUGF("Sampling duration: %lu ms (Patrol)", duration_ms);
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, DMA_CHUNK_SIZE, 20);
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, PATROL_DMA_CHUNK_SIZE, DAQ_SKIP_MS);
 
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Patrol capture failed: %d", ret);
         return ret;
     }
-    LOG_DEBUGF("Samples: %lu", s_buffer_write_idx * DMA_CHUNK_SIZE);
+    if (s_buffer_write_idx < patrol_config.fft_points)
+    {
+        LOG_ERRORF("Patrol samples insufficient: %lu/%lu", s_buffer_write_idx, patrol_config.fft_points);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    LOG_DEBUGF("Patrol samples captured: %lu, using fixed FFT window=%lu",
+               s_buffer_write_idx, patrol_config.fft_points);
 
     // 巡逻工作完成后，将数据发送给 RMS 任务进行分析
     vib_job_t job = {
         .raw_data = s_vib_buffer,
-        .length = s_buffer_write_idx,
+        .length = patrol_config.fft_points,
         .sample_rate = patrol_config.actual_odr,
         .task_mode = TASK_MODE_PATROLING};
     if (g_rms_job_queue)
@@ -113,8 +142,8 @@ esp_err_t start_patrolling_work()
 /**
  * @brief 启动诊断工作
  *
- * 诊断需要高频数据
- * 参数配置：C=10, H=40, F_env=2000, delta_f_max=1
+ * 诊断工作使用固定高频频谱模板
+ * 模板配置：ODR=8000Hz, FFT点数=4096, 关注频段>=2000Hz
  *
  * @param rpm 设备转速 (RPM)
  * @return true 成功启动
@@ -132,26 +161,32 @@ esp_err_t start_diagnosing_work()
 
 
     // 计算采集时长 (ms)
-    uint32_t duration_ms = (uint32_t)(diagnosis_config.actual_time * 1000.0f);
+    uint32_t duration_ms = get_capture_duration_ms(&diagnosis_config);
     if (duration_ms == 0)
-        duration_ms = 100;
+        duration_ms = 700;
 
     esp_err_t ret = daq_icm_42688_p_capture(
-        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, 512, 20);
+        &capture_cfg, duration_ms, daq_buffer_handler_icm, NULL, DIAGNOSIS_DMA_CHUNK_SIZE, DAQ_SKIP_MS);
 
     if (ret != ESP_OK)
     {
         LOG_ERRORF(" Diagnosis capture failed: %d", ret);
         return ret;
     }
-    LOG_INFOF("Samples: %lu", s_buffer_write_idx);
+    if (s_buffer_write_idx < diagnosis_config.fft_points)
+    {
+        LOG_ERRORF("Diagnosis samples insufficient: %lu/%lu", s_buffer_write_idx, diagnosis_config.fft_points);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    LOG_INFOF("Diagnosis samples captured: %lu, using fixed FFT window=%lu",
+              s_buffer_write_idx, diagnosis_config.fft_points);
 
     vib_job_t job = {
         .raw_data = s_vib_buffer,
-        .length = s_buffer_write_idx,
+        .length = diagnosis_config.fft_points,
         .sample_rate = diagnosis_config.actual_odr,
         .task_mode = TASK_MODE_DIAGNOSIS};
-    if (g_rms_job_queue)
+    if (g_kurtosis_job_queue)
     {
         xQueueSend(g_kurtosis_job_queue, &job, 0);
     }
@@ -163,25 +198,21 @@ void init_config(daq_worker_param_t *param)
 {
     if (param->task_mode == TASK_MODE_PATROLING)
     {
-        if (current_rpm ==  param -> rpm)
+        if (patrol_config.actual_odr > 0.0f)
         {
             LOG_INFO("Patrol config already initialized");
             return;
-        } else {
-            LOG_WARNF("RPM changed from %d to %d." , current_rpm, param->rpm);
         }
 
-        current_rpm = param->rpm;
-        patrol_config = IMU_Calculate_DSP_Config(
+        patrol_config = IMU_Get_Fixed_DSP_Config(
             &icm42688_driver,
-            (float)param->rpm,
-            10.0f,   // C
-            10.0f,   // H
-            1000.0f, // F_env
-            1.0f     // delta_f_max
+            PATROL_FIXED_ODR_HZ,
+            PATROL_FIXED_FFT_POINTS,
+            PATROL_MAX_FREQ_HZ
         );
-        LOG_DEBUGF("config: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
-                  patrol_config.actual_odr, patrol_config.actual_time, patrol_config.fft_points);
+        LOG_INFOF("Patrol fixed config initialized: ODR=%.2f Hz, Time=%.3f s, FFT Points=%u, Fmax=%.1f Hz",
+                  patrol_config.actual_odr, patrol_config.actual_time,
+                  patrol_config.fft_points, patrol_config.f_max_interest);
         return;
     }
     else if (param->task_mode == TASK_MODE_DIAGNOSIS)
@@ -192,16 +223,15 @@ void init_config(daq_worker_param_t *param)
             return;
         }
 
-        diagnosis_config = IMU_Calculate_DSP_Config(
+        diagnosis_config = IMU_Get_Fixed_DSP_Config(
             &icm42688_driver,
-            (float)param->rpm,
-            10.0f,   // C
-            40.0f,   // H
-            2000.0f, // F_env
-            1.0f     // delta_f_max
+            DIAGNOSIS_FIXED_ODR_HZ,
+            DIAGNOSIS_FIXED_FFT_POINTS,
+            DIAGNOSIS_MIN_FREQ_HZ
         );
-        LOG_INFOF(" Diagnosis config initialized: ODR=%.2f Hz, Time=%.2f s, FFT Points=%u",
-                  diagnosis_config.actual_odr, diagnosis_config.actual_time, diagnosis_config.fft_points);
+        LOG_INFOF("Diagnosis fixed config initialized: ODR=%.2f Hz, Time=%.3f s, FFT Points=%u, Fmax=%.1f Hz",
+                  diagnosis_config.actual_odr, diagnosis_config.actual_time,
+                  diagnosis_config.fft_points, diagnosis_config.f_max_interest);
     }
 }
 

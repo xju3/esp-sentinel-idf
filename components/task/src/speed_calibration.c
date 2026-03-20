@@ -90,7 +90,7 @@ esp_err_t speed_calibration_start(int32_t expected_rpm, int32_t *out_rpm)
     rpm_calib_config_t algo_cfg = algo_rpm_calib_get_default_config();
 
     // 调用算法计算转速
-    ret = algo_rpm_calibration_calculate(x_data, y_data, z_data, expected_rpm, &algo_cfg, out_rpm);
+    ret = algo_rpm_calibration_auto_axis(x_data, y_data, z_data, expected_rpm, &algo_cfg, out_rpm);
 
 cleanup:
     if (s_calib_raw_buf) heap_caps_free(s_calib_raw_buf);

@@ -7,6 +7,10 @@
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
 #define MAX_DAQ_SAMPLES 8192
 #define FFT_QUEUE_LEN   5
 #define PATROL_MAX_PEAKS 5
@@ -109,6 +113,171 @@ static void try_insert_peak(
     }
 }
 
+static inline bool near_float(float value, float target, float tolerance)
+{
+    return fabsf(value - target) <= tolerance;
+}
+
+static void classify_patrol_fault(patrol_fft_report_t *report)
+{
+    if (!report)
+    {
+        return;
+    }
+
+    report->fault_code = 0;
+    report->fault_desc[0] = '\0';
+    report->confidence = 0.0f;
+
+    if (g_user_config.rpm <= 0)
+    {
+        return;
+    }
+
+    const float rpm_hz = (float)g_user_config.rpm / 60.0f;
+    if (rpm_hz <= 0.0f)
+    {
+        return;
+    }
+
+    bool has_1x = false;
+    bool has_2x = false;
+    bool has_3x = false;
+    bool has_grid_100hz = false;
+    bool axial_1x = false;
+    bool axial_2x = false;
+
+    bool found_integer[16] = {0};
+    bool found_fractional = false;
+    float one_x_radial_amp = 0.0f;
+    float one_x_axial_amp = 0.0f;
+
+    for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
+    {
+        const patrol_peak_t *p = &report->peaks[i];
+        float score = peak_score(p);
+        if (score <= 0.0f)
+        {
+            continue;
+        }
+
+        if (near_float(p->freq_hz, 100.0f, 2.0f))
+        {
+            has_grid_100hz = true;
+        }
+
+        float ratio = p->freq_hz / rpm_hz;
+        if (ratio < 0.5f || ratio > 15.0f)
+        {
+            continue;
+        }
+
+        float integer_ratio = roundf(ratio);
+        float ratio_err = fabsf(ratio - integer_ratio);
+        bool is_int = (ratio_err <= 0.12f);
+
+        if (is_int && integer_ratio >= 1.0f && integer_ratio <= 15.0f)
+        {
+            found_integer[(int)integer_ratio] = true;
+            if (integer_ratio == 1.0f)
+            {
+                has_1x = true;
+                float radial = fmaxf(p->amp_x, p->amp_y);
+                one_x_radial_amp = fmaxf(one_x_radial_amp, radial);
+                one_x_axial_amp = fmaxf(one_x_axial_amp, p->amp_z);
+                if (p->dominant_axis == 2)
+                {
+                    axial_1x = true;
+                }
+            }
+            else if (integer_ratio == 2.0f)
+            {
+                has_2x = true;
+                if (p->dominant_axis == 2)
+                {
+                    axial_2x = true;
+                }
+            }
+            else if (integer_ratio == 3.0f)
+            {
+                has_3x = true;
+            }
+        }
+        else
+        {
+            if (ratio >= 1.0f)
+            {
+                found_fractional = true;
+            }
+        }
+    }
+
+    int integer_count = 0;
+    for (int i = 1; i <= 15; ++i)
+    {
+        if (found_integer[i])
+        {
+            integer_count++;
+        }
+    }
+
+    // 1. 不平衡 (Unbalance)
+    if (has_1x && !has_2x && one_x_radial_amp > one_x_axial_amp * 2.0f)
+    {
+        report->fault_code = 1;
+        strncpy(report->fault_desc, "Unbalance: clean 1x with radial dominating axial", sizeof(report->fault_desc) - 1);
+        report->fault_desc[sizeof(report->fault_desc) - 1] = '\0';
+        report->confidence = 0.88f;
+        return;
+    }
+
+    // 2. 不对中 (Misalignment)
+    if (has_2x && (axial_1x || axial_2x))
+    {
+        report->fault_code = 2;
+        strncpy(report->fault_desc, "Misalignment: strong 2x and axial component present", sizeof(report->fault_desc) - 1);
+        report->fault_desc[sizeof(report->fault_desc) - 1] = '\0';
+        report->confidence = 0.83f;
+        return;
+    }
+
+    // 3. 机械松动 (Mechanical Looseness)
+    if (integer_count >= 4)
+    {
+        report->fault_code = 3;
+        strncpy(report->fault_desc, "Looseness: multi-harmonic integer spacing in peaks", sizeof(report->fault_desc) - 1);
+        report->fault_desc[sizeof(report->fault_desc) - 1] = '\0';
+        report->confidence = 0.79f;
+        return;
+    }
+
+    // 4. 轴承中后期故障 (Bearing Defects - Late Stage)
+    if (found_fractional)
+    {
+        report->fault_code = 4;
+        strncpy(report->fault_desc, "Bearing defect: non-integer harmonic components detected", sizeof(report->fault_desc) - 1);
+        report->fault_desc[sizeof(report->fault_desc) - 1] = '\0';
+        report->confidence = 0.72f;
+        return;
+    }
+
+    // 5. 电气故障 (Electrical Faults)
+    if (has_grid_100hz)
+    {
+        report->fault_code = 5;
+        strncpy(report->fault_desc, "Electrical fault: 100Hz grid-synchronous excitation present", sizeof(report->fault_desc) - 1);
+        report->fault_desc[sizeof(report->fault_desc) - 1] = '\0';
+        report->confidence = 0.66f;
+        return;
+    }
+
+    // 未识别
+    report->fault_code = 0;
+    strncpy(report->fault_desc, "No patrol fault signature detected", sizeof(report->fault_desc) - 1);
+    report->fault_desc[sizeof(report->fault_desc) - 1] = '\0';
+    report->confidence = 0.15f;
+}
+
 static void extract_patrol_peaks(
     patrol_fft_report_t *report,
     float sample_rate,
@@ -182,6 +351,19 @@ static void send_patrol_fft_report(const vib_job_t *job)
     s_patrol_fft_report.pos = g_user_config.pos;
 
     extract_patrol_peaks(&s_patrol_fft_report, job->sample_rate, job->length);
+
+    if (job->task_mode == TASK_MODE_PATROLING)
+    {
+        classify_patrol_fault(&s_patrol_fft_report);
+        LOG_INFOF("Patrol fault: code=%d, conf=%.2f, desc=%s", s_patrol_fft_report.fault_code, s_patrol_fft_report.confidence, s_patrol_fft_report.fault_desc);
+    }
+    else
+    {
+        s_patrol_fft_report.fault_code = 0;
+        strncpy(s_patrol_fft_report.fault_desc, "Not a patrol task - fault analysis skipped", sizeof(s_patrol_fft_report.fault_desc) - 1);
+        s_patrol_fft_report.fault_desc[sizeof(s_patrol_fft_report.fault_desc) - 1] = '\0';
+        s_patrol_fft_report.confidence = 0.0f;
+    }
 
     for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
     {

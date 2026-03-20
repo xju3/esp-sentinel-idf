@@ -61,6 +61,22 @@ extern "C"
         float H,
         float F_env,
         float delta_f_max);
+
+    /**
+     * @brief 使用固定 ODR 与固定 FFT 点数生成统一频谱配置
+     * 适用于前端需要按业务模板稳定展示频谱的场景。
+     *
+     * @param sensor          底层传感器驱动实例指针
+     * @param target_odr      目标采样率 (Hz)
+     * @param fft_points      固定 FFT 点数 (必须为 2 的幂)
+     * @param f_max_interest  当前任务关注的最高物理频率 (Hz)
+     * @return DSP_Config_t   返回给上层算法的固定物理参数
+     */
+    DSP_Config_t IMU_Get_Fixed_DSP_Config(
+        SensorDriver_t *sensor,
+        float target_odr,
+        uint32_t fft_points,
+        float f_max_interest);
 #ifdef __cplusplus
 }
 #endif

@@ -62,3 +62,30 @@ DSP_Config_t IMU_Calculate_DSP_Config(
 
     return result;
 }
+
+DSP_Config_t IMU_Get_Fixed_DSP_Config(
+    SensorDriver_t *sensor,
+    float target_odr,
+    uint32_t fft_points,
+    float f_max_interest)
+{
+    DSP_Config_t result = {0};
+
+    if (sensor == NULL || sensor->config_hardware_odr == NULL || target_odr <= 0.0f || fft_points == 0U) {
+        return result;
+    }
+
+    if ((fft_points & (fft_points - 1U)) != 0U) {
+        return result;
+    }
+
+    result.actual_odr = sensor->config_hardware_odr(target_odr);
+    if (result.actual_odr <= 0.0f) {
+        return result;
+    }
+
+    result.fft_points = fft_points;
+    result.actual_time = (float)fft_points / result.actual_odr;
+    result.f_max_interest = f_max_interest;
+    return result;
+}
