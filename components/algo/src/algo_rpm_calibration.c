@@ -1,6 +1,5 @@
 #include "algo_rpm_calibration.h"
 #include "algo_fft.h"
-#include "logger.h"
 #include "esp_heap_caps.h"
 #include <math.h>
 #include <string.h>
@@ -40,7 +39,7 @@ static int _find_dominant_axis(const float *x_data, const float *y_data, const f
         }
     }
 
-    LOG_DEBUGF("Dominant axis: %d, P-P: %.3fg", best_axis, max_pp);
+    // LOG_DEBUGF("Dominant axis: %d, P-P: %.3fg", best_axis, max_pp);
     return best_axis;
 }
 
@@ -124,7 +123,7 @@ esp_err_t algo_rpm_calibration_calculate(
     // 1. 内存分配：临时工作 buffer 用于 FFT
     float *fft_mag = (float *)heap_caps_malloc((cfg.fft_size / 2) * sizeof(float), MALLOC_CAP_SPIRAM);
     if (!fft_mag) {
-        LOG_ERROR("Failed to allocate memory for FFT magnitude");
+        // LOG_ERROR("Failed to allocate memory for FFT magnitude");
         return ESP_ERR_NO_MEM;
     }
 
@@ -136,7 +135,7 @@ esp_err_t algo_rpm_calibration_calculate(
     // 3. 准备信号：去直流（需要可修改副本）
     float *sig_copy = (float *)heap_caps_malloc(cfg.fft_size * sizeof(float), MALLOC_CAP_SPIRAM);
     if (!sig_copy) {
-        LOG_ERROR("Failed to allocate memory for signal copy");
+        // LOG_ERROR("Failed to allocate memory for signal copy");
         heap_caps_free(fft_mag);
         return ESP_ERR_NO_MEM;
     }
@@ -146,7 +145,7 @@ esp_err_t algo_rpm_calibration_calculate(
     // 4. 执行 FFT
     ret = algo_fft_calculate(sig_copy, fft_mag, cfg.fft_size);
     if (ret != ESP_OK) {
-        LOG_ERRORF("FFT calculation failed: %d", ret);
+        // LOG_ERRORF("FFT calculation failed: %d", ret);
         goto cleanup;
     }
 
@@ -184,12 +183,12 @@ esp_err_t algo_rpm_calibration_from_spectrum(
 
         min_bin = (int)(low_freq / bin_res);
         max_bin = (int)(high_freq / bin_res);
-        LOG_INFOF("Calibration hint: %ld RPM. Searching window: %.1f - %.1f Hz", expected_rpm, low_freq, high_freq);
+        // LOG_INFOF("Calibration hint: %ld RPM. Searching window: %.1f - %.1f Hz", expected_rpm, low_freq, high_freq);
     } else {
         // 无参考转速：全范围盲搜
         min_bin = (int)(cfg.min_rpm / 60.0f / bin_res);
         max_bin = (int)(cfg.max_rpm / 60.0f / bin_res);
-        LOG_INFO("Calibration blind mode (Full range search)");
+        // LOG_INFO("Calibration blind mode (Full range search)");
     }
 
     // 边界安全检查
@@ -203,14 +202,14 @@ esp_err_t algo_rpm_calibration_from_spectrum(
 
     // 结果验证：检查幅值是否足够大
     if (peak_mag < cfg.min_mag_threshold_g) {
-        LOG_WARNF("Vibration too low for calibration (Max: %.4fg)", peak_mag);
+        // LOG_WARNF("Vibration too low for calibration (Max: %.4fg)", peak_mag);
         return ESP_FAIL;
     }
 
     // 转换频率到转速
     float freq = peak_idx * bin_res;
     *out_rpm = (int32_t)(freq * 60.0f);
-    LOG_INFOF("Calibration Success: Peak=%.2f Hz, RPM=%ld, Mag=%.4fg", freq, *out_rpm, peak_mag);
+    // LOG_INFOF("Calibration Success: Peak=%.2f Hz, RPM=%ld, Mag=%.4fg", freq, *out_rpm, peak_mag);
 
     return ESP_OK;
 }
