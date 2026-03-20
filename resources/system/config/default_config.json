@@ -4,6 +4,11 @@
         "category": 3,
         "foundation": 1
     },
+    "pos": {
+        "x": "h",
+        "y": "v",
+        "z": "a"
+    },
     "deviceId": "TX01922-9",
     "deviceName": "TX01922-9",
     "deviceType": "",

@@ -22,6 +22,14 @@ extern "C"
 #define LEN_MAX_ISO_CAT 32
 #define LEN_MAX_ISO_FOUND 16
 
+    // 传感器安装方向定义：v=垂直径向, h=水平径向, a=轴向
+    typedef struct
+    {
+        char x; // 'v', 'h', 或 'a'
+        char y; // 'v', 'h', 或 'a'
+        char z; // 'v', 'h', 或 'a'
+    } sensor_position_t;
+
 #define FILE_PATH_CONFIG_DEFAULT "/system/c/default_config.json"
 #define FILE_PATH_HW_CONSUMPTION "/system/c/consumption.json"
 #define FILE_PATH_CONFIG_USER "/user/user_config.json"
@@ -61,6 +69,7 @@ extern "C"
         int16_t battery;
         bool ble;
         iso_config_t iso;
+        sensor_position_t pos; // 传感器安装方向配置
         int16_t patrol; // minutes between patrols (0 to disable), max value 1440 (24h)
         int16_t diagnosis; // seconds between detections (must be > 0)
         int16_t report; // seconds between reports (must be >= detect)

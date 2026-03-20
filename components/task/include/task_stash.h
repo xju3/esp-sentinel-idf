@@ -60,7 +60,7 @@ extern "C"
         task_mode_t task_mode; // 任务模式 (Patrol/Diagnosis)
     } vib_job_t;
 
-    binary_msg_t g_binary_msg = {0}; // 全局二进制消息结构体实例，避免频繁分配内存
+    extern binary_msg_t g_binary_msg; // 全局二进制消息结构体实例，避免频繁分配内存
 
 #ifdef __cplusplus
 }

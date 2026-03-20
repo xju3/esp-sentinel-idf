@@ -8,6 +8,7 @@ idf_component_register(
         "src/algo_fft.c"
         "src/algo_kurtosis.c"
         "src/algo_envelope.c"
+        "src/algo_rpm_calibration.c"
     INCLUDE_DIRS
         "include"
 

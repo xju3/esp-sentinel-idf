@@ -50,12 +50,14 @@ static void fft_task_entry(void *arg)
                 LOG_ERRORF("FFT failed on X axis: %d", err);
                 continue;
             }
+            
             err = algo_fft_calculate(y_ptr, s_fft_mag_y, n);
             if (err != ESP_OK)
             {
                 LOG_ERRORF("FFT failed on Y axis: %d", err);
                 continue;
-            }
+           }
+            
             err = algo_fft_calculate(z_ptr, s_fft_mag_z, n);
             if (err != ESP_OK)
             {

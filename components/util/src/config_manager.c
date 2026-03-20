@@ -193,6 +193,26 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
             cfg->iso.foundation = (int8_t)item->valueint;
         }
     }
+
+    const cJSON *pos = cJSON_GetObjectItemCaseSensitive(root, "pos");
+    if (cJSON_IsObject(pos))
+    {
+        const cJSON *x = cJSON_GetObjectItemCaseSensitive(pos, "x");
+        if (cJSON_IsString(x) && x->valuestring[0] != '\0')
+        {
+            cfg->pos.x = x->valuestring[0]; // 取第一个字符
+        }
+        const cJSON *y = cJSON_GetObjectItemCaseSensitive(pos, "y");
+        if (cJSON_IsString(y) && y->valuestring[0] != '\0')
+        {
+            cfg->pos.y = y->valuestring[0]; // 取第一个字符
+        }
+        const cJSON *z = cJSON_GetObjectItemCaseSensitive(pos, "z");
+        if (cJSON_IsString(z) && z->valuestring[0] != '\0')
+        {
+            cfg->pos.z = z->valuestring[0]; // 取第一个字符
+        }
+    }
 }
 
 static void parser_apply_wrapper(cJSON *root, void *ctx)
@@ -351,6 +371,15 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddNumberToObject(iso, "category", cfg->iso.category);
     cJSON_AddNumberToObject(iso, "foundation", cfg->iso.foundation);
     cJSON_AddItemToObject(root, "iso", iso);
+
+    cJSON *pos = cJSON_CreateObject();
+    char x_str[2] = {cfg->pos.x, '\0'};
+    char y_str[2] = {cfg->pos.y, '\0'};
+    char z_str[2] = {cfg->pos.z, '\0'};
+    cJSON_AddStringToObject(pos, "x", x_str);
+    cJSON_AddStringToObject(pos, "y", y_str);
+    cJSON_AddStringToObject(pos, "z", z_str);
+    cJSON_AddItemToObject(root, "pos", pos);
 
     cJSON *wifi = cJSON_CreateObject();
     cJSON_AddStringToObject(wifi, "ssid", cfg->wifi.ssid);
