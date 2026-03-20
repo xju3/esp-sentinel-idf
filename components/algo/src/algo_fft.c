@@ -1,6 +1,8 @@
 #include "algo_fft.h"
 #include "esp_log.h"
-#include "esp_heap_caps.h"
+#include "esp_attr.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <math.h>
 #include <string.h>
 
@@ -11,12 +13,23 @@
 
 static const char *TAG = "ALGO_FFT";
 static bool s_fft_initialized = false;
+static StaticSemaphore_t s_fft_lock_buf;
+static SemaphoreHandle_t s_fft_lock = NULL;
 
 // 最大支持 4096 点 FFT（与 CONFIG_DSP_MAX_FFT_SIZE=4096 一致）
 #define MAX_FFT_SIZE 4096
+EXT_RAM_BSS_ATTR static float s_fft_scratch[MAX_FFT_SIZE] __attribute__((aligned(16)));
 
 esp_err_t algo_fft_init(void)
 {
+    if (s_fft_lock == NULL) {
+        s_fft_lock = xSemaphoreCreateMutexStatic(&s_fft_lock_buf);
+        if (s_fft_lock == NULL) {
+            ESP_LOGE(TAG, "Failed to create FFT mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     if (s_fft_initialized) {
         return ESP_OK;
     }
@@ -44,19 +57,25 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (n > MAX_FFT_SIZE) {
+        ESP_LOGE(TAG, "FFT size exceeds static scratch buffer, got %lu > %d", n, MAX_FFT_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     if (!s_fft_initialized) {
         esp_err_t err = algo_fft_init();
         if (err != ESP_OK) return err;
     }
 
+    if (xSemaphoreTake(s_fft_lock, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to take FFT mutex");
+        return ESP_ERR_TIMEOUT;
+    }
+
     // === 实数 FFT 优化 (N/2 Trick) ===
     // 将 N 个实数看作 N/2 个复数进行处理，内存需求减半，速度翻倍。
-    // 申请暂存区: N * float (即 N/2 * Complex)
-    float *y_cf = (float *)heap_caps_aligned_alloc(16, n * sizeof(float), MALLOC_CAP_SPIRAM);
-    if (!y_cf) {
-        ESP_LOGE(TAG, "Failed to allocate FFT scratch buffer (%lu bytes)", n * sizeof(float));
-        return ESP_ERR_NO_MEM;
-    }
+    // 使用静态预分配暂存区，避免长期运行下反复 alloc/free 造成碎片。
+    float *y_cf = s_fft_scratch;
 
     // 2. 加窗 (Hanning Window)
     // 优化：使用 DSP 库生成窗函数和向量乘法，替代原本的慢速 cosf 循环
@@ -151,7 +170,6 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
         // 上面的 if (k < n/4) 已经排除了重复赋值
     }
 
-    // 释放暂存区
-    heap_caps_free(y_cf);
+    xSemaphoreGive(s_fft_lock);
     return ESP_OK;
 }

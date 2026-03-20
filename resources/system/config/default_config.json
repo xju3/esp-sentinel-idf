@@ -12,7 +12,7 @@
     "deviceId": "TX01922-9",
     "deviceName": "TX01922-9",
     "deviceType": "",
-    "montorType": 1,
+    "motorType": 1,
     "rpm": 1480,
     "months": 6,
     "battery": 19000,

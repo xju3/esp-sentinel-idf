@@ -11,14 +11,20 @@ extern "C"
 
 extern QueueHandle_t g_fft_job_queue;
 
-typedef struct {
-    float freq;  // 频率点 (Hz)
-    float amp;   // 该点的幅值 (Magnitude)
-} peak_point_t;
+typedef struct __attribute__((packed)) {
+    float freq_hz;        // 峰值频率点 (Hz)
+    float amp_x;          // X 轴该频点幅值
+    float amp_y;          // Y 轴该频点幅值
+    float amp_z;          // Z 轴该频点幅值
+    uint8_t dominant_axis; // 主导方向: 0=X, 1=Y, 2=Z
+} patrol_peak_t;
 
 typedef struct __attribute__((packed)) {
-    int32_t task_id;        // 关联 RMS 任务，方便服务器做 Data Fusion
-    peak_point_t peaks[5];  // 只抓最强的 5 个“显眼包”
+    int32_t task_id;         // 关联 RMS 任务，方便服务器做 Data Fusion
+    int32_t timestamp;       // 报告生成时间
+    float sample_rate;       // 频谱对应采样率
+    sensor_position_t pos;   // 当前安装方向映射
+    patrol_peak_t peaks[5];  // 5 个代表性物理频点，保留三轴幅值分布
 } patrol_fft_report_t;
 
 esp_err_t start_fft_task(void);

@@ -19,7 +19,7 @@ esp_err_t algo_fft_init(void);
  * 
  * @param input 输入时域信号 (实数)，长度必须为 n
  * @param output 输出频域幅值 (实数)，长度必须为 n/2
- * @param n FFT 点数 (必须是 2 的幂次方，如 1024, 2048, 4096, 8192)
+ * @param n FFT 点数 (必须是 2 的幂次方，当前最大支持 4096)
  * @return esp_err_t ESP_OK 成功，其他为错误码
  */
 esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n);
