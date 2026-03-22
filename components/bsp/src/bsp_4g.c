@@ -5,9 +5,15 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "esp_err.h"
 #include "esp_log.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_netif_defaults.h"
+#include "esp_netif_ppp.h"
 #include <sys/param.h>
 #include <stdbool.h>
+#include "freertos/event_groups.h"
 
 #define PPP_VERBOSE 0 // 设为 1 可开启调试日志
 
@@ -21,6 +27,17 @@
 #define BUF_SIZE (1024)
 
 static const char *TAG = "ppp_4g";
+
+// PPP/LwIP state
+static bool s_event_loop_initialized = false;
+static bool s_ppp_handlers_registered = false;
+static esp_netif_t *s_ppp_netif = NULL;
+static EventGroupHandle_t s_ppp_event_group = NULL;
+static TaskHandle_t s_ppp_rx_task = NULL;
+static volatile bool s_ppp_rx_task_running = false;
+
+#define PPP_GOT_IP_BIT     BIT0
+#define PPP_FAILED_BIT     BIT1
 
 // 初始化状态
 typedef enum
@@ -225,6 +242,192 @@ static const char *cnmp_mode_to_str(int mode)
     }
 }
 
+static esp_err_t ppp_uart_transmit(void *h, void *buffer, size_t len)
+{
+    (void)h;
+    if (len == 0 || buffer == NULL)
+    {
+        return ESP_OK;
+    }
+    uart_write_bytes(UART_PORT_NUM, buffer, len);
+    return ESP_OK;
+}
+
+static esp_netif_driver_ifconfig_t s_ppp_driver_cfg = {
+    .handle = (void *)1, // non-NULL handle
+    .transmit = ppp_uart_transmit,
+};
+
+static void ppp_status_event_handler(void *arg, esp_event_base_t event_base,
+                                     int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_data;
+    if (event_base != NETIF_PPP_STATUS)
+    {
+        return;
+    }
+    if (event_id >= NETIF_PPP_INTERNAL_ERR_OFFSET)
+    {
+        ESP_LOGW(TAG, "PPP status error: %ld", event_id - NETIF_PPP_INTERNAL_ERR_OFFSET);
+    }
+}
+
+static void ppp_ip_event_handler(void *arg, esp_event_base_t event_base,
+                                 int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_base;
+    if (event_id == IP_EVENT_PPP_GOT_IP)
+    {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        if (event->esp_netif != s_ppp_netif)
+        {
+            return;
+        }
+        ESP_LOGI(TAG, "PPP Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(s_ppp_event_group, PPP_GOT_IP_BIT);
+    }
+    else if (event_id == IP_EVENT_PPP_LOST_IP)
+    {
+        (void)event_data;
+        ESP_LOGW(TAG, "PPP Lost IP");
+        xEventGroupSetBits(s_ppp_event_group, PPP_FAILED_BIT);
+    }
+}
+
+static void ppp_uart_rx_task(void *args)
+{
+    (void)args;
+    uint8_t *buffer = (uint8_t *)malloc(BUF_SIZE);
+    if (!buffer)
+    {
+        ESP_LOGE(TAG, "PPP RX buffer alloc failed");
+        s_ppp_rx_task_running = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    while (s_ppp_rx_task_running)
+    {
+        int len = uart_read_bytes(UART_PORT_NUM, buffer, BUF_SIZE, pdMS_TO_TICKS(1000));
+        if (len > 0 && s_ppp_netif)
+        {
+            esp_netif_receive(s_ppp_netif, buffer, len, NULL);
+        }
+    }
+
+    free(buffer);
+    s_ppp_rx_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static esp_err_t ppp_stack_init(void)
+{
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (!s_event_loop_initialized)
+    {
+        err = esp_event_loop_create_default();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+        {
+            ESP_LOGE(TAG, "esp_event_loop_create_default failed: %s", esp_err_to_name(err));
+            return err;
+        }
+        s_event_loop_initialized = true;
+    }
+
+    if (!s_ppp_event_group)
+    {
+        s_ppp_event_group = xEventGroupCreate();
+        if (!s_ppp_event_group)
+        {
+            ESP_LOGE(TAG, "PPP event group create failed");
+            return ESP_FAIL;
+        }
+    }
+
+    if (!s_ppp_handlers_registered)
+    {
+        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, ppp_ip_event_handler, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_register(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, ppp_status_event_handler, NULL));
+        s_ppp_handlers_registered = true;
+    }
+
+    if (!s_ppp_netif)
+    {
+        esp_netif_inherent_config_t base_cfg = ESP_NETIF_INHERENT_DEFAULT_PPP();
+        base_cfg.if_desc = "pppos_client";
+        esp_netif_config_t cfg = {
+            .base = &base_cfg,
+            .driver = &s_ppp_driver_cfg,
+            .stack = ESP_NETIF_NETSTACK_DEFAULT_PPP,
+        };
+        s_ppp_netif = esp_netif_new(&cfg);
+        if (!s_ppp_netif)
+        {
+            ESP_LOGE(TAG, "Failed to create PPP netif");
+            return ESP_FAIL;
+        }
+        esp_netif_set_default_netif(s_ppp_netif);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t ppp_start_and_wait_ip(void)
+{
+    char response_buffer[256];
+
+    ESP_LOGI(TAG, "→ Attaching to packet service...");
+    send_at_command("AT+CGATT=1", "OK", response_buffer, sizeof(response_buffer), 5000);
+
+    ESP_LOGI(TAG, "→ Starting PPP data call...");
+    if (send_at_command("ATD*99***1#", "CONNECT", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
+    {
+        ESP_LOGW(TAG, "ATD*99***1# failed, trying AT+CGDATA...");
+        if (send_at_command("AT+CGDATA=\"PPP\",1", "CONNECT", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to enter PPP data mode");
+            return ESP_FAIL;
+        }
+    }
+
+    if (!s_ppp_rx_task_running)
+    {
+        s_ppp_rx_task_running = true;
+        if (xTaskCreate(ppp_uart_rx_task, "ppp_rx", 4096, NULL, 5, &s_ppp_rx_task) != pdTRUE)
+        {
+            s_ppp_rx_task_running = false;
+            ESP_LOGE(TAG, "Failed to create PPP RX task");
+            return ESP_FAIL;
+        }
+    }
+
+    xEventGroupClearBits(s_ppp_event_group, PPP_GOT_IP_BIT | PPP_FAILED_BIT);
+    esp_netif_action_start(s_ppp_netif, 0, 0, 0);
+    esp_netif_action_connected(s_ppp_netif, 0, 0, 0);
+
+    ESP_LOGI(TAG, "→ Waiting for PPP IP...");
+    EventBits_t bits = xEventGroupWaitBits(s_ppp_event_group,
+                                           PPP_GOT_IP_BIT | PPP_FAILED_BIT,
+                                           pdTRUE, pdFALSE,
+                                           pdMS_TO_TICKS(60000));
+    if (bits & PPP_GOT_IP_BIT)
+    {
+        ESP_LOGI(TAG, "✓ PPP connected");
+        return ESP_OK;
+    }
+
+    ESP_LOGE(TAG, "PPP connect timeout/failed");
+    return ESP_FAIL;
+}
+
 // 在成功注册网络后打印一次 4G 运行信息
 static void log_4g_runtime_info(void)
 {
@@ -339,6 +542,13 @@ esp_err_t ppp_4g_init()
 {
     init_stage_t stage = INIT_STAGE_START;
     log_stage(stage);
+    esp_err_t err = ppp_stack_init();
+    if (err != ESP_OK)
+    {
+        stage = INIT_STAGE_FAILED;
+        log_stage(stage);
+        return err;
+    }
 
     // ============== GPIO 配置 ==============
     ESP_LOGI(TAG, "→ Configuring GPIO pins");
@@ -705,6 +915,19 @@ esp_err_t ppp_4g_init()
         {
             ESP_LOGW(TAG, "  RSSI had valid reading earlier; timeout may be coverage/PLMN issue.");
         }
+        stage = INIT_STAGE_FAILED;
+        log_stage(stage);
+        return ESP_FAIL;
+    }
+
+    // ============== Stage 8: 启动 PPP 拨号 ==============
+    ESP_LOGI(TAG, "→ Starting PPP session...");
+    err = ppp_start_and_wait_ip();
+    if (err != ESP_OK)
+    {
+        stage = INIT_STAGE_FAILED;
+        log_stage(stage);
+        return err;
     }
 
     // ============== 初始化完成 ==============
@@ -724,6 +947,11 @@ esp_err_t ppp_4g_init()
 esp_err_t ppp_4g_deinit(void)
 {
     ESP_LOGI(TAG, "→ Shutting down 4G module...");
+    if (s_ppp_rx_task_running)
+    {
+        s_ppp_rx_task_running = false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 
     // 可选：发送关机命令
     char response_buffer[128];
