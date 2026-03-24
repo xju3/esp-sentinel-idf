@@ -15,6 +15,7 @@
 #include "daq_icm_42688_p.h"
 #include "algo_welford.h"
 #include "algo_fft.h"
+#include "algo_window.h"
 #include "task_stash.h"
 #include "logger.h"
 #include "esp_attr.h"
@@ -36,8 +37,6 @@ SemaphoreHandle_t g_state_check_semaphore;
 #define MAX_TRANSITION_DURATION_S    15       // Max time to spend trying to find a stable state
 #define MIN_RMS_FOR_STABLE           0.01f    // Minimum RMS acceleration (g) required for STABLE state
 #define MIN_RMS_FOR_OFF              0.005f   // Maximum RMS acceleration (g) for OFF state
-#define US_PER_S                     1000000.0f
-
 // Static buffers to avoid repeated heap allocations (reduce PSRAM fragmentation risk)
 EXT_RAM_BSS_ATTR static float s_state_fft_input[STATE_MACHINE_MAX_SAMPLES * 3];
 EXT_RAM_BSS_ATTR static float s_state_fft_output[STATE_MACHINE_MAX_SAMPLES / 2];
@@ -60,9 +59,7 @@ typedef struct {
     uint32_t window_samples;
     int64_t window_start_time_us;
     float window_odr_hz;
-    float odr_history[ODR_SMOOTH_HISTORY_SIZE];
-    uint32_t odr_history_idx;
-    bool odr_history_filled;
+    algo_odr_smoother_t odr_smoother;
     float* fft_input_buffer;
     float* fft_input_x;
     float* fft_input_y;
@@ -84,7 +81,6 @@ static bool check_stability(StateAnalysisContext_t *ctx);
 static void init_state_context(StateAnalysisContext_t *ctx);
 static void reset_window_stats(StateAnalysisContext_t *ctx);
 static void start_window(StateAnalysisContext_t *ctx);
-static void update_odr_estimate(StateAnalysisContext_t *ctx, uint32_t window_samples, int64_t dt_us);
 static float calc_avg_rms_history(const StateAnalysisContext_t *ctx);
 
 typedef enum {
@@ -104,35 +100,13 @@ static AxisId_t select_fft_axis(float std_x, float std_y, float std_z)
     return AXIS_Z;
 }
 
-static uint32_t next_pow2_u32(uint32_t n)
-{
-    if (n == 0U) {
-        return 1U;
-    }
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    n++;
-    return n;
-}
-
 static uint32_t calc_window_samples(float odr_hz)
 {
     if (odr_hz <= 0.0f) {
         odr_hz = STATE_MACHINE_ODR_HZ;
     }
-    uint32_t desired = (uint32_t)ceilf(odr_hz * STATE_MACHINE_WINDOW_SEC);
-    uint32_t n = next_pow2_u32(desired);
-    if (n < 4U) {
-        n = 4U;
-    }
-    if (n > STATE_MACHINE_MAX_SAMPLES) {
-        n = STATE_MACHINE_MAX_SAMPLES;
-    }
-    return n;
+    uint32_t n = algo_window_calc_samples(odr_hz, STATE_MACHINE_WINDOW_SEC, STATE_MACHINE_MAX_SAMPLES);
+    return (n > 0U) ? n : 4U;
 }
 
 static void init_state_context(StateAnalysisContext_t *ctx)
@@ -143,6 +117,7 @@ static void init_state_context(StateAnalysisContext_t *ctx)
     ctx->fft_input_x = ctx->fft_input_buffer;
     ctx->fft_input_y = ctx->fft_input_buffer + STATE_MACHINE_MAX_SAMPLES;
     ctx->fft_input_z = ctx->fft_input_buffer + (STATE_MACHINE_MAX_SAMPLES * 2);
+    algo_odr_smoother_init(&ctx->odr_smoother, ODR_SMOOTH_HISTORY_SIZE);
     reset_window_stats(ctx);
     ctx->window_samples = calc_window_samples(STATE_MACHINE_ODR_HZ);
     ctx->start_time_us = esp_timer_get_time();
@@ -160,29 +135,6 @@ static void start_window(StateAnalysisContext_t *ctx)
 {
     ctx->window_start_time_us = esp_timer_get_time();
     ctx->window_samples = calc_window_samples(ctx->window_odr_hz);
-}
-
-static void update_odr_estimate(StateAnalysisContext_t *ctx, uint32_t window_samples, int64_t dt_us)
-{
-    if (dt_us <= 0) {
-        ctx->window_odr_hz = 0.0f;
-        return;
-    }
-
-    float odr_hz = (float)window_samples / ((float)dt_us / US_PER_S);
-    uint32_t odr_idx = ctx->odr_history_idx % ODR_SMOOTH_HISTORY_SIZE;
-    ctx->odr_history[odr_idx] = odr_hz;
-    ctx->odr_history_idx++;
-    if (ctx->odr_history_idx >= ODR_SMOOTH_HISTORY_SIZE) {
-        ctx->odr_history_filled = true;
-    }
-
-    uint32_t count = ctx->odr_history_filled ? ODR_SMOOTH_HISTORY_SIZE : ctx->odr_history_idx;
-    float sum = 0.0f;
-    for (uint32_t j = 0; j < count; j++) {
-        sum += ctx->odr_history[j];
-    }
-    ctx->window_odr_hz = (count > 0) ? (sum / (float)count) : 0.0f;
 }
 
 static float calc_avg_rms_history(const StateAnalysisContext_t *ctx)
@@ -339,7 +291,7 @@ static void state_analysis_handler(const imu_raw_data_t *data, size_t count, voi
         if (ctx->sample_idx >= ctx->window_samples) {
             int64_t end_us = esp_timer_get_time();
             int64_t dt_us = end_us - ctx->window_start_time_us;
-            update_odr_estimate(ctx, ctx->window_samples, dt_us);
+            ctx->window_odr_hz = algo_odr_smoother_update(&ctx->odr_smoother, ctx->window_samples, dt_us);
             process_analysis_window(ctx);
             ctx->window_start_time_us = 0;
         }
