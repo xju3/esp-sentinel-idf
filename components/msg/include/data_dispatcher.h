@@ -6,6 +6,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+#ifndef SN
+#define SN 0 // Default SN value if not defined in config
+#endif
 #ifdef __cplusplus
 extern "C"
 {

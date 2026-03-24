@@ -13,9 +13,14 @@ idf_component_register(
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
-        esp-dsp driver peri net util algo)
+        esp-dsp driver peri net util algo, msg)
 
 if(DEFINED DEVICE_ID)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_ID="${DEVICE_ID}")
 endif()
+
+if(DEFINED SN)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE SN=${SN})
+endif()
+
 # target_sources(${COMPONENT_LIB} PRIVATE)

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+message MsgPayload {
+  uint32  sn   = 1;  // 设备序列号 1000-9999，varint 2B
+  uint32  et   = 2;  // event_type 0/1/2，varint 1B
+  uint64  ts   = 3;  // Unix时间戳 ms，varint ~6B
+  bytes   data = 4;  // 对应 message 的序列化字节
+}
+
+message MsgMachineStatus{
+  float   rx   = 1;  // RMS X m/s²
+  float   ry   = 2;
+  float   rz   = 3;
+  float   rm   = 4;  // RMS均值
+  uint32  st   = 5;  // 设备状态, 0 -> 关机,  1 -> 过度态, 2-> 稳定态
+}

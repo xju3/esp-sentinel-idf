@@ -26,6 +26,7 @@
 extern "C"
 {
 #endif
+
 #define LSB_TO_G_2G (2.0f / 32768.0f)
 #define LSB_TO_G_4G (4.0f / 32768.0f)
 #define LSB_TO_G_8G (8.0f / 32768.0f)
@@ -52,7 +53,7 @@ extern "C"
 
     typedef struct
     {
-        float task_id;        // 任务 ID (可用于追踪和日志)
+        float task_id;         // 任务 ID (可用于追踪和日志)
         int32_t timestamp;     // 任务创建时间 (Unix 时间戳)
         uint32_t length;       // 单轴有效数据点数
         float *raw_data;       // 指向静态 Buffer 的指针 (平面化布局: X, Y, Z)

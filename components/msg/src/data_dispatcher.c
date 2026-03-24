@@ -2,12 +2,13 @@
 #include "config_manager.h"
 #include "logger.h"
 #include "mqtt_client.h"
+#include "msg_sentinel.pb-c.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
 
 QueueHandle_t g_msg_dispatcher_queue = NULL;
-binary_msg_t g_binary_msg = {0};
 
 // 全局 MQTT 句柄 (在 network_manager 中定义和初始化)
 extern esp_mqtt_client_handle_t g_mqtt_client;
@@ -57,9 +58,9 @@ static bool send_binary_to_mqtt(const char *topic, const void *payload, size_t l
 
 static void dispatcher_task(void *arg)
 {
-    binary_msg_t msg;
+    MsgPayload msg;
 
-    LOG_INFO("Data dispatcher started. Ready to forward binary data to MQTT");
+    LOG_INFO("Data dispatcher started. Ready to forward MsgPayload to MQTT");
     while (1)
     {
         if (g_msg_dispatcher_queue == NULL)
@@ -67,26 +68,38 @@ static void dispatcher_task(void *arg)
             return;
         }
 
-        // 阻塞等待队列消息 (真正的消费者)
+        // 阻塞等待队列消息
         if (xQueueReceive(g_msg_dispatcher_queue, &msg, portMAX_DELAY) == pdTRUE)
         {
-
-            if (!msg.data || msg.len == 0)
+            // 在 dispatcher 统一补填 sn 和 ts，减少各处重复赋值
+            if (msg.sn == 0)
             {
-                LOG_WARN("Invalid message: data is NULL or length is 0");
+                msg.sn = SN;
+            }
+            if (msg.ts == 0)
+            {
+                msg.ts = esp_timer_get_time() / 1000; // us -> ms
+            }
+
+            // 序列化 MsgPayload
+            size_t packed_size = msg_payload__get_packed_size(&msg);
+            uint8_t *buffer = malloc(packed_size);
+            if (buffer == NULL)
+            {
+                LOG_ERROR("Failed to allocate buffer for MsgPayload serialization");
                 continue;
             }
 
-            // 直接发送二进制数据到 MQTT
-            bool success = send_binary_to_mqtt(msg.topic, msg.data, msg.len);
+            msg_payload__pack(&msg, buffer);
+
+            // 发送到 MQTT，topic 固定为 "sentinel/machine_status"
+            bool success = send_binary_to_mqtt("sentinel", buffer, packed_size);
+
+            free(buffer);
 
             if (!success)
             {
-                // 注意：这里选择丢弃消息而不是重新入队，因为：
-                // 1. 保持实时性：旧数据可能已过时
-                // 2. 避免队列积压：网络恢复后会有新数据
-                // 3. 简化设计：dispatcher 无需关心数据内容
-                LOG_WARNF("Failed to send binary data to %s, dropping message", msg.topic);
+                LOG_WARN("Failed to send MsgPayload to MQTT, dropping message");
             }
         }
     }
@@ -97,7 +110,7 @@ esp_err_t data_dispatcher_start(void)
     if (!g_msg_dispatcher_queue)
     {
         // 如果队列未初始化，则创建一个
-        g_msg_dispatcher_queue = xQueueCreate(20, sizeof(binary_msg_t));
+        g_msg_dispatcher_queue = xQueueCreate(20, sizeof(MsgPayload));
         if (!g_msg_dispatcher_queue)
         {
             LOG_ERROR("Failed to create message dispatcher queue!");
