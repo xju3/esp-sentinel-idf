@@ -26,10 +26,10 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(init_comm_channel());
     ESP_ERROR_CHECK(enable_mqtt_proxy());
-    // ESP_ERROR_CHECK(data_dispatcher_start());
-    // ESP_ERROR_CHECK(init_imu_sensors());
-    // ESP_ERROR_CHECK(set_device_baseline(g_user_config.device_id));
-    // ESP_ERROR_CHECK(enable_tasks());
+    ESP_ERROR_CHECK(data_dispatcher_start());
+    ESP_ERROR_CHECK(init_imu_sensors());
+    ESP_ERROR_CHECK(set_device_baseline(g_user_config.device_id));
+    ESP_ERROR_CHECK(enable_tasks());
     // ESP_ERROR_CHECK(web_server_start());
 
 }

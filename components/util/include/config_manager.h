@@ -20,16 +20,7 @@ extern "C"
 #define LEN_MAX_HOST_HTTP 128
 #define LEN_MAX_ISO_STD 16
 #define LEN_MAX_ISO_CAT 32
-#define LEN_MAX_ISO_FOUND 16
-
-    // 传感器安装方向定义：v=垂直径向, h=水平径向, a=轴向
-    typedef struct
-    {
-        char x; // 'v', 'h', 或 'a'
-        char y; // 'v', 'h', 或 'a'
-        char z; // 'v', 'h', 或 'a'
-    } sensor_position_t;
-
+#define LEN_MAX_ISO_FOUND 1
 #define FILE_PATH_CONFIG_DEFAULT "/system/c/default_config.json"
 #define FILE_PATH_HW_CONSUMPTION "/system/c/consumption.json"
 #define FILE_PATH_CONFIG_USER "/user/user_config.json"
@@ -41,6 +32,13 @@ extern "C"
         int32_t value;
         int32_t cycle; // 上报周期倍数（仅 report 使用；detect 置 1）
     } freq_config_t;
+    // 传感器安装方向定义：v=垂直径向, h=水平径向, a=轴向
+    typedef struct
+    {
+        char x; // 'v', 'h', 或 'a'
+        char y; // 'v', 'h', 或 'a'
+        char z; // 'v', 'h', 或 'a'
+    } sensor_position_t;
 
     typedef struct
     {
@@ -60,19 +58,19 @@ extern "C"
         char device_id[LEN_MAX_DEVICE_ID];
         char device_name[LEN_MAX_DEVICE_NAME];
         char device_type[LEN_MAX_DEVICE_TYPE]; // defined in iso standards.
-        int8_t motor_type; // 1. fixed speed motor, 2. variable frequency device, 3. servo
-        int16_t months; // ages of the device in months, used for consumption estimation
-        int32_t rpm; // geater than 600 and less than 10000
+        int8_t motor_type;                     // 1. fixed speed motor, 2. variable frequency device, 3. servo
+        int16_t months;                        // ages of the device in months, used for consumption estimation
+        int32_t rpm;                           // geater than 600 and less than 10000
         user_wifi_config_t wifi;
         int8_t network;
-        char host[LEN_MAX_HOST];  // server name or IP for data reporting
+        char host[LEN_MAX_HOST]; // server name or IP for data reporting
         int16_t battery;
         bool ble;
         iso_config_t iso;
         sensor_position_t pos; // 传感器安装方向配置
-        int16_t patrol; // minutes between patrols (0 to disable), max value 1440 (24h)
-        int16_t diagnosis; // seconds between detections (must be > 0)
-        int16_t report; // seconds between reports (must be >= detect)
+        int16_t patrol;        // minutes between patrols (0 to disable), max value 1440 (24h)
+        int16_t diagnosis;     // seconds between detections (must be > 0)
+        int16_t report;        // seconds between reports (must be >= detect)
         bool is_configured;
     } user_config_t;
 

@@ -1,3 +1,15 @@
+/*
+ * 三态判断计算过程说明（OFF / TRANSIENT / STABLE）：
+ * 1) 触发检测后先置为 TRANSIENT，采集数据并按 ANALYSIS_WINDOW_SAMPLES 分窗；
+ *    每窗用 Welford 统计三轴 std，再取矢量模得到 RMS，且对 Z 轴做 FFT 提取主频。
+ * 2) 当历史窗填满且已超过 MIN_STABLE_DURATION_MS，计算相邻窗口变化率：
+ *    R_E = |RMS_k - RMS_{k-1}| / max(RMS_{k-1}, eps)
+ *    R_F = |F_k   - F_{k-1}| / max(F_{k-1}, eps)
+ *    若 max(R_E) <= STABILITY_RMS_VAR_RATIO、max(R_F) <= STABILITY_FREQ_VAR_HZ/MIN_VALID_FREQ_HZ
+ *    且平均 RMS >= MIN_RMS_FOR_STABLE，则判定稳定（stable_detected）。
+ * 3) 采集结束后，计算历史平均 RMS：若 avg_rms < MIN_RMS_FOR_OFF 判为 OFF；
+ *    否则若 stable_detected 为真判为 STABLE；否则保持 TRANSIENT。
+ */
 #include "task_state_machine.h"
 #include "freertos/task.h"
 #include "machine_state.h"
@@ -225,9 +237,7 @@ static void task_state_check_handler(void *pvParameters)
     while (1) {
         if (xSemaphoreTake(g_state_check_semaphore, portMAX_DELAY) == pdTRUE) {
             LOG_INFO("State check handler triggered. Starting state determination...");
-
             lock_system_task();
-
             set_machine_state(STATE_TRANSIENT);
 
             StateAnalysisContext_t context;
@@ -254,7 +264,7 @@ static void task_state_check_handler(void *pvParameters)
             // Configure and start DAQ capture
             icm_cfg_t capture_cfg = {
                 .fs = ICM_FS_16G, 
-                // .odr = STATE_MACHINE_ODR_HZ, // Set ODR for state analysis
+                .odr = STATE_MACHINE_ODR_HZ, // Set ODR for state analysis
                 .enable_wom = false
             };
 
