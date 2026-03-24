@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+message MsgMachineStatus{
+  uint32  id   = 1;  // 设备序列号 1000-9999，varint 2B
+  uint32  et   = 2;  // event_type 0/1/2，varint 1B
+  uint64  ts   = 3;  // Unix时间戳 ms，varint ~6B
+  float   rx   = 5;  // RMS X m/s²
+  float   ry   = 6;
+  float   rz   = 7;
+  float   rm   = 8;  // RMS均值
+}
