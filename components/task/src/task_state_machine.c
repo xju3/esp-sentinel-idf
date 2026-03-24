@@ -40,6 +40,8 @@ SemaphoreHandle_t g_state_check_semaphore;
 #define MAX_TRANSITION_DURATION_S 15    // Max time to spend trying to find a stable state
 #define MIN_RMS_FOR_STABLE 0.01f        // Minimum RMS acceleration (g) required for STABLE state
 #define MIN_RMS_FOR_OFF 0.005f          // Maximum RMS acceleration (g) for OFF state
+// Max packed size for MsgMachineStatus (4x float + 1x uint32 varint + tags)
+#define MSG_MACHINE_STATUS_MAX_PACKED_SIZE 32U
 // Static buffers to avoid repeated heap allocations (reduce PSRAM fragmentation risk)
 EXT_RAM_BSS_ATTR static float s_state_fft_input[STATE_MACHINE_MAX_SAMPLES * 3];
 EXT_RAM_BSS_ATTR static float s_state_fft_output[STATE_MACHINE_MAX_SAMPLES / 2];
@@ -90,6 +92,7 @@ static void init_state_context(StateAnalysisContext_t *ctx);
 static void reset_window_stats(StateAnalysisContext_t *ctx);
 static void start_window(StateAnalysisContext_t *ctx);
 static float calc_avg_rms_history(const StateAnalysisContext_t *ctx);
+static uint32_t map_machine_state(machine_state_t state);
 
 typedef enum
 {
@@ -162,6 +165,21 @@ static float calc_avg_rms_history(const StateAnalysisContext_t *ctx)
         }
     }
     return (count > 0) ? (avg_rms / (float)count) : 0.0f;
+}
+
+static uint32_t map_machine_state(machine_state_t state)
+{
+    switch (state)
+    {
+        case STATE_OFF:
+            return 0U;
+        case STATE_TRANSIENT:
+            return 1U;
+        case STATE_STABLE:
+            return 2U;
+        default:
+            return 0U;
+    }
 }
 
 /**
@@ -409,7 +427,7 @@ static void task_state_check_handler(void *pvParameters)
     }
 }
 
-static void send_machine_status_message(const StateAnalysisContext_t *ctx, )
+static void send_machine_status_message(const StateAnalysisContext_t *ctx)
 {
     // leave sn/ts empty, data_dispatcher in统一填充，以避免每个消息都重复赋值
     uint32_t et = 1;
@@ -419,27 +437,27 @@ static void send_machine_status_message(const StateAnalysisContext_t *ctx, )
     msg_status.ry = ctx->rms_y;
     msg_status.rz = ctx->rms_z;
     msg_status.rm = ctx->rms_mean;
-    msg_status.st = (uint32_t) g_current_machine_state; 
+    msg_status.st = map_machine_state(get_machine_state());
 
 
-    // Serialize MsgMachineStatus
+    // Serialize MsgMachineStatus using static buffer to avoid heap fragmentation
+    static uint8_t s_status_buffer[MSG_MACHINE_STATUS_MAX_PACKED_SIZE];
     size_t status_size = msg_machine_status__get_packed_size(&msg_status);
-    uint8_t *status_buffer = malloc(status_size);
-    if (status_buffer == NULL)
+    if (status_size > sizeof(s_status_buffer))
     {
-        LOG_ERROR("Failed to allocate buffer for MsgMachineStatus serialization");
+        LOG_ERRORF("MsgMachineStatus packed size too large: %u", (unsigned)status_size);
         return;
     }
-    msg_machine_status__pack(&msg_status, status_buffer);
+    msg_machine_status__pack(&msg_status, s_status_buffer);
 
-    // Create MsgPayload
-    MsgPayload payload = MSG_PAYLOAD__INIT;
-    payload.et = et;
-    payload.data.len = status_size;
-    payload.data.data = status_buffer;
+    // Create MsgPayload (shared header)
+    msg_payload__init(&g_msg_payload);
+    g_msg_payload.et = et;
+    g_msg_payload.data.len = status_size;
+    g_msg_payload.data.data = s_status_buffer;
 
     // Send to dispatcher queue
-    if (xQueueSend(g_msg_dispatcher_queue, &payload, 0) != pdTRUE)
+    if (xQueueSend(g_msg_dispatcher_queue, &g_msg_payload, 0) != pdTRUE)
     {
         LOG_WARN("Failed to send MsgPayload to dispatcher queue");
     }
@@ -447,7 +465,6 @@ static void send_machine_status_message(const StateAnalysisContext_t *ctx, )
     {
         LOG_INFO("MsgPayload sent to dispatcher");
     }
-    free(status_buffer);
 }
 
 void create_state_check_handler_task(void)

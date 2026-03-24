@@ -9,7 +9,8 @@ idf_component_register(
         "src/task_baseline.c" 
         "src/speed_calibration.c" 
         "src/wom_lis2dh12.c"
-         "src/task_state_machine.c" 
+        "src/task_state_machine.c"
+        "src/task_stash.c"
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
