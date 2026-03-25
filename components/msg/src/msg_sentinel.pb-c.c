@@ -52,6 +52,96 @@ void   msg_payload__free_unpacked
   assert(message->base.descriptor == &msg_payload__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
+void   msg_triaxial_value__init
+                     (MsgTriaxialValue         *message)
+{
+  static const MsgTriaxialValue init_value = MSG_TRIAXIAL_VALUE__INIT;
+  *message = init_value;
+}
+size_t msg_triaxial_value__get_packed_size
+                     (const MsgTriaxialValue *message)
+{
+  assert(message->base.descriptor == &msg_triaxial_value__descriptor);
+  return protobuf_c_message_get_packed_size ((const ProtobufCMessage*)(message));
+}
+size_t msg_triaxial_value__pack
+                     (const MsgTriaxialValue *message,
+                      uint8_t       *out)
+{
+  assert(message->base.descriptor == &msg_triaxial_value__descriptor);
+  return protobuf_c_message_pack ((const ProtobufCMessage*)message, out);
+}
+size_t msg_triaxial_value__pack_to_buffer
+                     (const MsgTriaxialValue *message,
+                      ProtobufCBuffer *buffer)
+{
+  assert(message->base.descriptor == &msg_triaxial_value__descriptor);
+  return protobuf_c_message_pack_to_buffer ((const ProtobufCMessage*)message, buffer);
+}
+MsgTriaxialValue *
+       msg_triaxial_value__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data)
+{
+  return (MsgTriaxialValue *)
+     protobuf_c_message_unpack (&msg_triaxial_value__descriptor,
+                                allocator, len, data);
+}
+void   msg_triaxial_value__free_unpacked
+                     (MsgTriaxialValue *message,
+                      ProtobufCAllocator *allocator)
+{
+  if(!message)
+    return;
+  assert(message->base.descriptor == &msg_triaxial_value__descriptor);
+  protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
+}
+void   msg_rms_triaxial__init
+                     (MsgRmsTriaxial         *message)
+{
+  static const MsgRmsTriaxial init_value = MSG_RMS_TRIAXIAL__INIT;
+  *message = init_value;
+}
+size_t msg_rms_triaxial__get_packed_size
+                     (const MsgRmsTriaxial *message)
+{
+  assert(message->base.descriptor == &msg_rms_triaxial__descriptor);
+  return protobuf_c_message_get_packed_size ((const ProtobufCMessage*)(message));
+}
+size_t msg_rms_triaxial__pack
+                     (const MsgRmsTriaxial *message,
+                      uint8_t       *out)
+{
+  assert(message->base.descriptor == &msg_rms_triaxial__descriptor);
+  return protobuf_c_message_pack ((const ProtobufCMessage*)message, out);
+}
+size_t msg_rms_triaxial__pack_to_buffer
+                     (const MsgRmsTriaxial *message,
+                      ProtobufCBuffer *buffer)
+{
+  assert(message->base.descriptor == &msg_rms_triaxial__descriptor);
+  return protobuf_c_message_pack_to_buffer ((const ProtobufCMessage*)message, buffer);
+}
+MsgRmsTriaxial *
+       msg_rms_triaxial__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data)
+{
+  return (MsgRmsTriaxial *)
+     protobuf_c_message_unpack (&msg_rms_triaxial__descriptor,
+                                allocator, len, data);
+}
+void   msg_rms_triaxial__free_unpacked
+                     (MsgRmsTriaxial *message,
+                      ProtobufCAllocator *allocator)
+{
+  if(!message)
+    return;
+  assert(message->base.descriptor == &msg_rms_triaxial__descriptor);
+  protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
+}
 void   msg_machine_status__init
                      (MsgMachineStatus         *message)
 {
@@ -174,59 +264,190 @@ const ProtobufCMessageDescriptor msg_payload__descriptor =
   (ProtobufCMessageInit) msg_payload__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor msg_machine_status__field_descriptors[5] =
+static const ProtobufCFieldDescriptor msg_triaxial_value__field_descriptors[4] =
 {
   {
-    "rx",
+    "x",
     1,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_FLOAT,
     0,   /* quantifier_offset */
-    offsetof(MsgMachineStatus, rx),
+    offsetof(MsgTriaxialValue, x),
     NULL,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
-    "ry",
+    "y",
     2,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_FLOAT,
     0,   /* quantifier_offset */
-    offsetof(MsgMachineStatus, ry),
+    offsetof(MsgTriaxialValue, y),
     NULL,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
-    "rz",
+    "z",
     3,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_FLOAT,
     0,   /* quantifier_offset */
-    offsetof(MsgMachineStatus, rz),
+    offsetof(MsgTriaxialValue, z),
     NULL,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
-    "rm",
+    "m",
     4,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_FLOAT,
     0,   /* quantifier_offset */
-    offsetof(MsgMachineStatus, rm),
+    offsetof(MsgTriaxialValue, m),
     NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+};
+static const unsigned msg_triaxial_value__field_indices_by_name[] = {
+  3,   /* field[3] = m */
+  0,   /* field[0] = x */
+  1,   /* field[1] = y */
+  2,   /* field[2] = z */
+};
+static const ProtobufCIntRange msg_triaxial_value__number_ranges[1 + 1] =
+{
+  { 1, 0 },
+  { 0, 4 }
+};
+const ProtobufCMessageDescriptor msg_triaxial_value__descriptor =
+{
+  PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+  "MsgTriaxialValue",
+  "MsgTriaxialValue",
+  "MsgTriaxialValue",
+  "",
+  sizeof(MsgTriaxialValue),
+  4,
+  msg_triaxial_value__field_descriptors,
+  msg_triaxial_value__field_indices_by_name,
+  1,  msg_triaxial_value__number_ranges,
+  (ProtobufCMessageInit) msg_triaxial_value__init,
+  NULL,NULL,NULL    /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor msg_rms_triaxial__field_descriptors[5] =
+{
+  {
+    "rms",
+    1,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsTriaxial, rms),
+    &msg_triaxial_value__descriptor,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "peak",
+    2,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsTriaxial, peak),
+    &msg_triaxial_value__descriptor,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "crest",
+    3,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsTriaxial, crest),
+    &msg_triaxial_value__descriptor,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "impulse",
+    4,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsTriaxial, impulse),
+    &msg_triaxial_value__descriptor,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "iso",
+    5,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_UINT32,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsTriaxial, iso),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+};
+static const unsigned msg_rms_triaxial__field_indices_by_name[] = {
+  2,   /* field[2] = crest */
+  3,   /* field[3] = impulse */
+  4,   /* field[4] = iso */
+  1,   /* field[1] = peak */
+  0,   /* field[0] = rms */
+};
+static const ProtobufCIntRange msg_rms_triaxial__number_ranges[1 + 1] =
+{
+  { 1, 0 },
+  { 0, 5 }
+};
+const ProtobufCMessageDescriptor msg_rms_triaxial__descriptor =
+{
+  PROTOBUF_C__MESSAGE_DESCRIPTOR_MAGIC,
+  "MsgRmsTriaxial",
+  "MsgRmsTriaxial",
+  "MsgRmsTriaxial",
+  "",
+  sizeof(MsgRmsTriaxial),
+  5,
+  msg_rms_triaxial__field_descriptors,
+  msg_rms_triaxial__field_indices_by_name,
+  1,  msg_rms_triaxial__number_ranges,
+  (ProtobufCMessageInit) msg_rms_triaxial__init,
+  NULL,NULL,NULL    /* reserved[123] */
+};
+static const ProtobufCFieldDescriptor msg_machine_status__field_descriptors[2] =
+{
+  {
+    "rms",
+    1,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_MESSAGE,
+    0,   /* quantifier_offset */
+    offsetof(MsgMachineStatus, rms),
+    &msg_triaxial_value__descriptor,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
     "st",
-    5,
+    2,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_UINT32,
     0,   /* quantifier_offset */
@@ -238,16 +459,13 @@ static const ProtobufCFieldDescriptor msg_machine_status__field_descriptors[5] =
   },
 };
 static const unsigned msg_machine_status__field_indices_by_name[] = {
-  3,   /* field[3] = rm */
-  0,   /* field[0] = rx */
-  1,   /* field[1] = ry */
-  2,   /* field[2] = rz */
-  4,   /* field[4] = st */
+  0,   /* field[0] = rms */
+  1,   /* field[1] = st */
 };
 static const ProtobufCIntRange msg_machine_status__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 5 }
+  { 0, 2 }
 };
 const ProtobufCMessageDescriptor msg_machine_status__descriptor =
 {
@@ -257,7 +475,7 @@ const ProtobufCMessageDescriptor msg_machine_status__descriptor =
   "MsgMachineStatus",
   "",
   sizeof(MsgMachineStatus),
-  5,
+  2,
   msg_machine_status__field_descriptors,
   msg_machine_status__field_indices_by_name,
   1,  msg_machine_status__number_ranges,

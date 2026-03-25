@@ -16,6 +16,8 @@ PROTOBUF_C__BEGIN_DECLS
 
 
 typedef struct MsgPayload MsgPayload;
+typedef struct MsgTriaxialValue MsgTriaxialValue;
+typedef struct MsgRmsTriaxial MsgRmsTriaxial;
 typedef struct MsgMachineStatus MsgMachineStatus;
 
 
@@ -49,19 +51,43 @@ struct  MsgPayload
 , 0, 0, 0, {0,NULL} }
 
 
+struct  MsgTriaxialValue
+{
+  ProtobufCMessage base;
+  float x;
+  float y;
+  float z;
+  /*
+   * 均值
+   */
+  float m;
+};
+#define MSG_TRIAXIAL_VALUE__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&msg_triaxial_value__descriptor) \
+, 0, 0, 0, 0 }
+
+
+struct  MsgRmsTriaxial
+{
+  ProtobufCMessage base;
+  MsgTriaxialValue *rms;
+  MsgTriaxialValue *peak;
+  MsgTriaxialValue *crest;
+  MsgTriaxialValue *impulse;
+  /*
+   * iso标准
+   */
+  uint32_t iso;
+};
+#define MSG_RMS_TRIAXIAL__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&msg_rms_triaxial__descriptor) \
+, NULL, NULL, NULL, NULL, 0 }
+
+
 struct  MsgMachineStatus
 {
   ProtobufCMessage base;
-  /*
-   * RMS X m/s²
-   */
-  float rx;
-  float ry;
-  float rz;
-  /*
-   * RMS均值
-   */
-  float rm;
+  MsgTriaxialValue *rms;
   /*
    * 设备状态, 0 -> 关机,  1 -> 过度态, 2-> 稳定态
    */
@@ -69,7 +95,7 @@ struct  MsgMachineStatus
 };
 #define MSG_MACHINE_STATUS__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&msg_machine_status__descriptor) \
-, 0, 0, 0, 0, 0 }
+, NULL, 0 }
 
 
 /* MsgPayload methods */
@@ -90,6 +116,44 @@ MsgPayload *
                       const uint8_t       *data);
 void   msg_payload__free_unpacked
                      (MsgPayload *message,
+                      ProtobufCAllocator *allocator);
+/* MsgTriaxialValue methods */
+void   msg_triaxial_value__init
+                     (MsgTriaxialValue         *message);
+size_t msg_triaxial_value__get_packed_size
+                     (const MsgTriaxialValue   *message);
+size_t msg_triaxial_value__pack
+                     (const MsgTriaxialValue   *message,
+                      uint8_t             *out);
+size_t msg_triaxial_value__pack_to_buffer
+                     (const MsgTriaxialValue   *message,
+                      ProtobufCBuffer     *buffer);
+MsgTriaxialValue *
+       msg_triaxial_value__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   msg_triaxial_value__free_unpacked
+                     (MsgTriaxialValue *message,
+                      ProtobufCAllocator *allocator);
+/* MsgRmsTriaxial methods */
+void   msg_rms_triaxial__init
+                     (MsgRmsTriaxial         *message);
+size_t msg_rms_triaxial__get_packed_size
+                     (const MsgRmsTriaxial   *message);
+size_t msg_rms_triaxial__pack
+                     (const MsgRmsTriaxial   *message,
+                      uint8_t             *out);
+size_t msg_rms_triaxial__pack_to_buffer
+                     (const MsgRmsTriaxial   *message,
+                      ProtobufCBuffer     *buffer);
+MsgRmsTriaxial *
+       msg_rms_triaxial__unpack
+                     (ProtobufCAllocator  *allocator,
+                      size_t               len,
+                      const uint8_t       *data);
+void   msg_rms_triaxial__free_unpacked
+                     (MsgRmsTriaxial *message,
                       ProtobufCAllocator *allocator);
 /* MsgMachineStatus methods */
 void   msg_machine_status__init
@@ -115,6 +179,12 @@ void   msg_machine_status__free_unpacked
 typedef void (*MsgPayload_Closure)
                  (const MsgPayload *message,
                   void *closure_data);
+typedef void (*MsgTriaxialValue_Closure)
+                 (const MsgTriaxialValue *message,
+                  void *closure_data);
+typedef void (*MsgRmsTriaxial_Closure)
+                 (const MsgRmsTriaxial *message,
+                  void *closure_data);
 typedef void (*MsgMachineStatus_Closure)
                  (const MsgMachineStatus *message,
                   void *closure_data);
@@ -125,6 +195,8 @@ typedef void (*MsgMachineStatus_Closure)
 /* --- descriptors --- */
 
 extern const ProtobufCMessageDescriptor msg_payload__descriptor;
+extern const ProtobufCMessageDescriptor msg_triaxial_value__descriptor;
+extern const ProtobufCMessageDescriptor msg_rms_triaxial__descriptor;
 extern const ProtobufCMessageDescriptor msg_machine_status__descriptor;
 
 PROTOBUF_C__END_DECLS

@@ -7,10 +7,24 @@ message MsgPayload {
   bytes   data = 4;  // 对应 message 的序列化字节
 }
 
-message MsgMachineStatus{
-  float   rx   = 1;  // RMS X m/s²
-  float   ry   = 2;
-  float   rz   = 3;
-  float   rm   = 4;  // RMS均值
-  uint32  st   = 5;  // 设备状态, 0 -> 关机,  1 -> 过度态, 2-> 稳定态
+message MsgTriaxialValue {
+  float   x   = 1; 
+  float   y   = 2;
+  float   z   = 3;
+  float   m   = 4;  // 均值
 }
+
+message MsgRmsTriaxial {
+  MsgTriaxialValue rms      = 1;
+  MsgTriaxialValue peak     = 2;
+  MsgTriaxialValue crest    = 3;
+  MsgTriaxialValue impulse  = 4;
+  uint32 iso                = 5;  // iso标准
+}
+
+message MsgMachineStatus{
+  MsgTriaxialValue rms = 1;
+  uint32  st   = 2;  // 设备状态, 0 -> 关机,  1 -> 过度态, 2-> 稳定态
+}
+
+

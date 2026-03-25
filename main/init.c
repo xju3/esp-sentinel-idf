@@ -6,15 +6,16 @@
 #include "drv_lis2dh12.h"
 #include "logger.h"
 #include "mqtt_proxy.h"
+#include "data_dispatcher.h"
 #include "task_daq.h"
 #include "task_baseline.h"
 #include "task_fft.h"
 #include "task_rms.h"
 #include "task_kurtosis.h"
+#include "task_state_machine.h"
 #include "task_envelope.h"
 #include "wom_lis2dh12.h"
 #include "web_server.h"
-#include "task_state_machine.h"
 
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -127,6 +128,10 @@ esp_err_t init_comm_channel()
             }
 #endif
         }
+    }
+    
+    if (is_network_available) {
+      return data_dispatcher_start();
     }
 
     return err;

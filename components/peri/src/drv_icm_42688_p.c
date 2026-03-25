@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "esp_log.h"
 #include <string.h>
+#include <math.h>
 
 #define ICM_REG_DEVICE_CONFIG 0x11
 #define ICM_REG_FIFO_CONFIG 0x16
@@ -26,6 +27,7 @@ static uint8_t *s_dma_pong = NULL;
 static bool icm_42688_p_initialized = false;
 static volatile bool s_stream_running = false;
 static TaskHandle_t s_dma_task_handle = NULL;
+static float s_current_odr_hz = 0.0f;
 
 /* ========================================================================= *
  * 底层 SPI 读写辅助函数 (加锁)
@@ -86,6 +88,7 @@ static float ICM42688_Config_ODR_Callback(float ideal_odr)
     current_cfg = (current_cfg & 0xF0) | selected_reg;
     icm_write_reg(ICM_REG_ACCEL_CONFIG0, current_cfg);
 
+    s_current_odr_hz = selected_odr;
     return selected_odr;
 }
 
@@ -256,7 +259,14 @@ static void icm_dma_worker_task(void *arg)
 
     while (s_stream_running)
     {
-        vTaskDelay(pdMS_TO_TICKS(125));
+        float chunk_ms = 125.0f;
+        if (s_current_odr_hz > 0.0f)
+        {
+            chunk_ms = ((float)DMA_CHUNK_SAMPLES * 1000.0f) / s_current_odr_hz;
+            if (chunk_ms < 1.0f)
+                chunk_ms = 1.0f;
+        }
+        vTaskDelay(pdMS_TO_TICKS((uint32_t)ceilf(chunk_ms)));
 
         spi_transaction_t *t = (ping_pong_flag == 0) ? &trans[0] : &trans[1];
         ping_pong_flag = !ping_pong_flag;

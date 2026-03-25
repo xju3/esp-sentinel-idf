@@ -16,9 +16,7 @@
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 QueueHandle_t g_rms_job_queue = NULL;
-static task_rms_report_t report = {0};
-static esp_err_t rms_report(int32_t task_id,
-                            vib_3axis_features_t *features,
+static esp_err_t rms_report(vib_3axis_features_t *features,
                             iso_alarm_status_t status,
                             task_mode_t mode,
                             float sample_rate,
@@ -30,29 +28,30 @@ static esp_err_t rms_report(int32_t task_id,
         LOG_ERROR("Message dispatcher queue not initialized");
         return ESP_ERR_INVALID_STATE;
     }
+    
+    MsgRmsTriaxial msg_rms_triaxial = MSG_RMS_TRIAXIAL__INIT;
+    MsgTriaxialValue rms = MSG_TRIAXIAL_VALUE__INIT;
+    MsgTriaxialValue peak = MSG_TRIAXIAL_VALUE__INIT;
+    MsgTriaxialValue crest = MSG_TRIAXIAL_VALUE__INIT;
+    
+    rms.x = features->x_axis.rms;
+    rms.y = features->y_axis.rms;
+    rms.z = features->z_axis.rms;
+    msg_rms_triaxial.rms = &rms;
 
-    report.task_id = task_id; // 可根据实际情况设置
-    report.timestamp = time(NULL);
-    report.sample_rate = sample_rate; // 可根据实际情况设置
-    report.temperature = temperature; // 可根据实际情况设置
-    report.conclusion = (int8_t)status;
-    report.task_mode = mode;
-    report.x_axis.rms = features->x_axis.rms;
-    report.y_axis.rms = features->y_axis.rms;
-    report.z_axis.rms = features->z_axis.rms;
-    report.x_axis.peak = features->x_axis.peak;
-    report.y_axis.peak = features->y_axis.peak;
-    report.z_axis.peak = features->z_axis.peak;
-    report.x_axis.crest_factor = features->x_axis.crest_factor;
-    report.y_axis.crest_factor = features->y_axis.crest_factor;
-    report.z_axis.crest_factor = features->z_axis.crest_factor;
-    report.x_axis.impulse_factor = features->x_axis.impulse_factor;
-    report.y_axis.impulse_factor = features->y_axis.impulse_factor;
-    report.z_axis.impulse_factor = features->z_axis.impulse_factor;
-    g_binary_msg.data = (uint8_t *)&report;
-    g_binary_msg.len = sizeof(report);
-    strncpy(g_binary_msg.topic, "device/vibration/rms", sizeof(g_binary_msg.topic) - 1);
-    g_binary_msg.topic[sizeof(g_binary_msg.topic) - 1] = '\0';
+    peak.x = features->x_axis.peak;
+    peak.y = features->y_axis.peak;
+    peak.z = features->z_axis.peak;
+    msg_rms_triaxial.peak = &peak;
+
+    crest.x = features->x_axis.crest_factor;        
+    crest.y = features->y_axis.crest_factor;
+    crest.z = features->z_axis.crest_factor;
+    msg_rms_triaxial.crest = &crest;
+    
+    MsgPayload msg_payload = MSG_PAYLOAD__INIT;
+    msg_payload.et = 1; // event type 1 for RMS report
+    msg_payload.data = &msg_rms_triaxial;
 
     xQueueSend(g_msg_dispatcher_queue, &g_binary_msg, 0);
     return ESP_OK;
@@ -141,7 +140,7 @@ static void rms_task_entry(void *arg)
             {
                 LOG_ERROR("Failed to read temperature");
             }
-            rms_report(job.task_id, &features, status, job.task_mode, job.sample_rate, (temp * 100));
+            rms_report(&features, status, job.task_mode, job.sample_rate, (temp * 100));
         }
     }
 }

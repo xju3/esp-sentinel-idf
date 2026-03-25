@@ -1,13 +1,3 @@
-/*
- * 三态判断计算过程说明（OFF / TRANSIENT / STABLE）：
- * 1) 触发检测后先置为 TRANSIENT，采集数据并按固定 1s 时间窗分窗；
- *    每窗用 Welford 统计三轴 std，再取矢量模得到 RMS，并在 RMS 最强轴上做 FFT 提取主频。
- * 2) 当历史窗填满且已超过 MIN_STABLE_DURATION_MS，计算相邻窗口变化率：
- *    R_E = |RMS_k - RMS_{k-1}| / max(RMS_{k-1}, eps)
- *    若 max(R_E) <= STABILITY_RMS_VAR_RATIO 且平均 RMS >= MIN_RMS_FOR_STABLE，则判定稳定（stable_detected）。
- * 3) 采集结束后，计算历史平均 RMS：若 avg_rms < MIN_RMS_FOR_OFF 判为 OFF；
- *    否则若 stable_detected 为真判为 STABLE；否则保持 TRANSIENT。
- */
 #include "task_state_machine.h"
 #include "freertos/task.h"
 #include "machine_state.h"
@@ -38,8 +28,8 @@ SemaphoreHandle_t g_state_check_semaphore;
 #define MIN_VALID_FREQ_HZ 10.0f         // Ignore frequencies below this value as potential motor speed
 #define MIN_STABLE_DURATION_MS 1000     // Min duration in TRANSIENT before allowing switch to STABLE
 #define MAX_TRANSITION_DURATION_S 15    // Max time to spend trying to find a stable state
-#define MIN_RMS_FOR_STABLE 0.01f        // Minimum RMS acceleration (g) required for STABLE state
-#define MIN_RMS_FOR_OFF 0.005f          // Maximum RMS acceleration (g) for OFF state
+#define MIN_RMS_FOR_STABLE 0.05f        // Minimum RMS acceleration (g) required for STABLE state
+#define MIN_RMS_FOR_OFF 0.3f          // Maximum RMS acceleration (g) for OFF state
 // Max packed size for MsgMachineStatus (4x float + 1x uint32 varint + tags)
 #define MSG_MACHINE_STATUS_MAX_PACKED_SIZE 32U
 // Static buffers to avoid repeated heap allocations (reduce PSRAM fragmentation risk)
@@ -93,6 +83,7 @@ static void reset_window_stats(StateAnalysisContext_t *ctx);
 static void start_window(StateAnalysisContext_t *ctx);
 static float calc_avg_rms_history(const StateAnalysisContext_t *ctx);
 static uint32_t map_machine_state(machine_state_t state);
+static void send_machine_status_message(const StateAnalysisContext_t *ctx);
 
 typedef enum
 {
@@ -429,30 +420,30 @@ static void task_state_check_handler(void *pvParameters)
 
 static void send_machine_status_message(const StateAnalysisContext_t *ctx)
 {
-    // leave sn/ts empty, data_dispatcher in统一填充，以避免每个消息都重复赋值
-    uint32_t et = 1;
     // Create MsgMachineStatus
-    MsgMachineStatus msg_status = MSG_MACHINE_STATUS__INIT;
-    msg_status.rx = ctx->rms_x;
-    msg_status.ry = ctx->rms_y;
-    msg_status.rz = ctx->rms_z;
-    msg_status.rm = ctx->rms_mean;
-    msg_status.st = map_machine_state(get_machine_state());
+    MsgMachineStatus msg_machine_status = MSG_MACHINE_STATUS__INIT;
+    MsgTriaxialValue msg_triaxial_value = MSG_TRIAXIAL_VALUE__INIT;
+    msg_triaxial_value.x = ctx->rms_x;
+    msg_triaxial_value.y = ctx->rms_y;  
+    msg_triaxial_value.z = ctx->rms_z;
+    msg_triaxial_value.mean = ctx->rms_mean;
+    msg_machine_status.rms = &msg_triaxial_value;
+    msg_machine_status.st = map_machine_state(get_machine_state());
 
 
     // Serialize MsgMachineStatus using static buffer to avoid heap fragmentation
     static uint8_t s_status_buffer[MSG_MACHINE_STATUS_MAX_PACKED_SIZE];
-    size_t status_size = msg_machine_status__get_packed_size(&msg_status);
+    size_t status_size = msg_machine_status__get_packed_size(&msg_machine_status);
     if (status_size > sizeof(s_status_buffer))
     {
         LOG_ERRORF("MsgMachineStatus packed size too large: %u", (unsigned)status_size);
         return;
     }
-    msg_machine_status__pack(&msg_status, s_status_buffer);
+    msg_machine_status__pack(&msg_machine_status, s_status_buffer);
 
     // Create MsgPayload (shared header)
     msg_payload__init(&g_msg_payload);
-    g_msg_payload.et = et;
+    g_msg_payload.et =0;
     g_msg_payload.data.len = status_size;
     g_msg_payload.data.data = s_status_buffer;
 

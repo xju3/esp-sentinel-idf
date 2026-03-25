@@ -63,7 +63,6 @@ extern "C"
     } vib_job_t;
 
     extern MsgPayload g_msg_payload; // 全局消息头，避免频繁分配内存
-    extern binary_msg_t g_binary_msg; // 全局二进制消息结构体实例，避免频繁分配内存
 
 #ifdef __cplusplus
 }
