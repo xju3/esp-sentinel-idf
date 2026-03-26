@@ -15,6 +15,7 @@ static uint8_t onewire_read_byte(void);
 static esp_err_t ds18b20_read_scratchpad(uint8_t *scratchpad);
 static esp_err_t ds18b20_write_scratchpad(uint8_t th, uint8_t tl, uint8_t config);
 static float ds18b20_raw_to_celsius(int16_t raw_temp);
+static uint8_t ds18b20_crc8(const uint8_t *data, size_t len);
 
 // 驱动状态
 static bool s_initialized = false;
@@ -29,6 +30,9 @@ static ds18b20_temp_cb_t s_temp_callback = NULL;
 #define OW_SLOT_MIN_US      60
 #define OW_SLOT_MAX_US      120
 #define OW_RECOVERY_US      5
+#define DS18B20_TEMP_MIN_C  (-55.0f)
+#define DS18B20_TEMP_MAX_C  (125.0f)
+#define DS18B20_READ_RETRIES 2
 
 // 延时函数（微秒级）
 static void delay_us(uint32_t us) {
@@ -149,8 +153,12 @@ static esp_err_t ds18b20_read_scratchpad(uint8_t *scratchpad) {
         scratchpad[i] = onewire_read_byte();
     }
     
-    // 验证CRC（可选）
-    // 这里可以添加CRC校验
+    // 校验 scratchpad CRC（前8字节计算结果应等于第9字节）
+    uint8_t crc = ds18b20_crc8(scratchpad, 8);
+    if (crc != scratchpad[8]) {
+        LOG_WARNF("DS18B20 scratchpad CRC mismatch: calc=0x%02X recv=0x%02X", crc, scratchpad[8]);
+        return ESP_ERR_INVALID_CRC;
+    }
     
     return ESP_OK;
 }
@@ -174,6 +182,23 @@ static esp_err_t ds18b20_write_scratchpad(uint8_t th, uint8_t tl, uint8_t config
 // 原始温度值转换为摄氏度
 static float ds18b20_raw_to_celsius(int16_t raw_temp) {
     return (float)raw_temp / 16.0f;
+}
+
+// Dallas/Maxim CRC-8 (poly 0x31, reflected 0x8C)
+static uint8_t ds18b20_crc8(const uint8_t *data, size_t len) {
+    uint8_t crc = 0;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t inbyte = data[i];
+        for (int j = 0; j < 8; j++) {
+            uint8_t mix = (crc ^ inbyte) & 0x01;
+            crc >>= 1;
+            if (mix) {
+                crc ^= 0x8C;
+            }
+            inbyte >>= 1;
+        }
+    }
+    return crc;
 }
 
 // 公共函数实现
@@ -315,50 +340,62 @@ esp_err_t drv_ds18b20_read_temperature(float *temperature) {
         return ESP_ERR_INVALID_ARG;
     }
     
-    // 如果转换未完成，等待
-    if (!drv_ds18b20_is_conversion_done()) {
-        LOG_DEBUG("Waiting for temperature conversion to complete...");
-        
-        // 根据分辨率等待相应时间
-        uint32_t wait_time_ms;
-        switch (s_current_resolution) {
-            case DS18B20_RESOLUTION_9BIT:
-                wait_time_ms = 94;
-                break;
-            case DS18B20_RESOLUTION_10BIT:
-                wait_time_ms = 188;
-                break;
-            case DS18B20_RESOLUTION_11BIT:
-                wait_time_ms = 375;
-                break;
-            case DS18B20_RESOLUTION_12BIT:
-            default:
-                wait_time_ms = 750;
-                break;
+    for (int attempt = 0; attempt < DS18B20_READ_RETRIES; attempt++) {
+        if (s_conversion_start_time == 0) {
+            esp_err_t start_ret = drv_ds18b20_start_conversion();
+            if (start_ret != ESP_OK) {
+                return start_ret;
+            }
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(wait_time_ms));
+
+        // 如果转换未完成，等待
+        if (!drv_ds18b20_is_conversion_done()) {
+            LOG_DEBUG("Waiting for temperature conversion to complete...");
+
+            // 根据分辨率等待相应时间
+            uint32_t wait_time_ms;
+            switch (s_current_resolution) {
+                case DS18B20_RESOLUTION_9BIT:
+                    wait_time_ms = 94;
+                    break;
+                case DS18B20_RESOLUTION_10BIT:
+                    wait_time_ms = 188;
+                    break;
+                case DS18B20_RESOLUTION_11BIT:
+                    wait_time_ms = 375;
+                    break;
+                case DS18B20_RESOLUTION_12BIT:
+                default:
+                    wait_time_ms = 750;
+                    break;
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(wait_time_ms));
+        }
+
+        uint8_t scratchpad[9];
+        esp_err_t ret = ds18b20_read_scratchpad(scratchpad);
+        if (ret != ESP_OK) {
+            s_conversion_start_time = 0;
+            continue;
+        }
+
+        int16_t raw_temp = (int16_t)(((uint16_t)scratchpad[1] << 8) | scratchpad[0]);
+        float temp_c = ds18b20_raw_to_celsius(raw_temp);
+        if (temp_c < DS18B20_TEMP_MIN_C || temp_c > DS18B20_TEMP_MAX_C) {
+            LOG_WARNF("DS18B20 temperature out of range: raw=0x%04X temp=%.2f°C",
+                      (uint16_t)raw_temp, temp_c);
+            s_conversion_start_time = 0;
+            continue;
+        }
+
+        *temperature = temp_c;
+        LOG_DEBUGF("Temperature read: %.2f°C", *temperature);
+        s_conversion_start_time = 0;
+        return ESP_OK;
     }
-    
-    // 读取暂存器
-    uint8_t scratchpad[9];
-    esp_err_t ret = ds18b20_read_scratchpad(scratchpad);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    
-    // 提取温度值
-    int16_t raw_temp = (scratchpad[1] << 8) | scratchpad[0];
-    
-    // 转换为摄氏度
-    *temperature = ds18b20_raw_to_celsius(raw_temp);
-    
-    LOG_DEBUGF("Temperature read: %.2f°C", *temperature);
-    
-    // 重置转换开始时间
-    s_conversion_start_time = 0;
-    
-    return ESP_OK;
+
+    return ESP_FAIL;
 }
 
 esp_err_t drv_ds18b20_read_temperature_async(ds18b20_temp_cb_t callback) {

@@ -59,49 +59,49 @@ static void log_stage(init_stage_t stage)
     switch (stage)
     {
     case INIT_STAGE_START:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 0: Initialization Started");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 0: Initialization Started");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_POWER_ENABLE:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 1: Enabling Power (PEN Pin)");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 1: Enabling Power (PEN Pin)");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_POWER_ON:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 2: Power On Module (PWK Pin)");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 2: Power On Module (PWK Pin)");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_BAUD_DETECT:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 3: Detecting Baud Rate");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 3: Detecting Baud Rate");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_AT_SYNC:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 4: AT Command Synchronization");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 4: AT Command Synchronization");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_DISABLE_ECHO:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 5: Disabling Echo");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 5: Disabling Echo");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_CHECK_SIM:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 6: Checking SIM Card");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 6: Checking SIM Card");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_CHECK_NETWORK:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  Stage 7: Checking Network Status");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  Stage 7: Checking Network Status");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_COMPLETE:
-        ESP_LOGI(TAG, "========================================");
-        ESP_LOGI(TAG, "  ✓ Initialization Complete!");
-        ESP_LOGI(TAG, "========================================");
+        ESP_LOGD(TAG, "========================================");
+        ESP_LOGD(TAG, "  ✓ Initialization Complete!");
+        ESP_LOGD(TAG, "========================================");
         break;
     case INIT_STAGE_FAILED:
         ESP_LOGE(TAG, "========================================");
@@ -124,13 +124,13 @@ static void uart_drain_with_log(void)
         total += len;
         if (PPP_VERBOSE)
         {
-            ESP_LOGI(TAG, "Drained %d bytes:", len);
+            ESP_LOGD(TAG, "Drained %d bytes:", len);
             ESP_LOG_BUFFER_HEXDUMP(TAG, tmp, len, ESP_LOG_INFO);
         }
     }
     if (PPP_VERBOSE && total > 0)
     {
-        ESP_LOGI(TAG, "Total drained: %d bytes", total);
+        ESP_LOGD(TAG, "Total drained: %d bytes", total);
     }
     uart_flush_input(UART_PORT_NUM);
 }
@@ -138,31 +138,27 @@ static void uart_drain_with_log(void)
 // 电源使能
 static void ppp_4g_power_enable(void)
 {
-    ESP_LOGI(TAG, "→ Setting PEN pin HIGH (Enable power regulator)");
+    ESP_LOGD(TAG, "→ Setting PEN pin HIGH (Enable power regulator)");
     gpio_set_level(PIN_PEN, 1);
     vTaskDelay(pdMS_TO_TICKS(500));
-    ESP_LOGI(TAG, "✓ Power regulator enabled");
+    ESP_LOGD(TAG, "✓ Power regulator enabled");
 }
 
 // 开机操作
 static void ppp_4g_power_on(void)
 {
-    ESP_LOGI(TAG, "→ Toggling PWK pin to power on module");
-    ESP_LOGI(TAG, "  - Setting PWK LOW");
+    ESP_LOGD(TAG, "→ Toggling PWK pin to power on module");
+    ESP_LOGD(TAG, "  - Setting PWK LOW");
     gpio_set_level(PIN_PWK, 0);
     vTaskDelay(pdMS_TO_TICKS(1500));
 
-    ESP_LOGI(TAG, "  - Setting PWK HIGH (Release)");
+    ESP_LOGD(TAG, "  - Setting PWK HIGH (Release)");
     gpio_set_level(PIN_PWK, 1);
 
-    // A7670C 在带 SIM 卡时初始化更慢，提前预留更长启动窗口
-    ESP_LOGI(TAG, "→ Waiting for module boot (3 seconds)...");
-    for (int i = 3; i > 0; i--)
-    {
-        ESP_LOGI(TAG, "  %d...", i);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-    ESP_LOGI(TAG, "✓ Boot wait complete");
+    // 稳定场景下缩短开机等待
+    ESP_LOGD(TAG, "→ Waiting for module boot (1.2 seconds)...");
+    vTaskDelay(pdMS_TO_TICKS(1200));
+    ESP_LOGD(TAG, "✓ Boot wait complete");
 }
 
 // 发送 AT 命令
@@ -175,7 +171,7 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
     // 发送命令
     if (PPP_VERBOSE)
     {
-        ESP_LOGI(TAG, "→ Sending: %s", command);
+        ESP_LOGD(TAG, "→ Sending: %s", command);
     }
     uart_write_bytes(UART_PORT_NUM, command, strlen(command));
     uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
@@ -198,7 +194,7 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
             // 打印接收到的数据
             if (PPP_VERBOSE)
             {
-                ESP_LOGI(TAG, "← Received %d bytes:", len);
+                ESP_LOGD(TAG, "← Received %d bytes:", len);
                 ESP_LOG_BUFFER_HEXDUMP(TAG, (const uint8_t *)response_buffer + total_len - len,
                                        len, ESP_LOG_INFO);
             }
@@ -208,8 +204,8 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
             {
                 if (PPP_VERBOSE)
                 {
-                    ESP_LOGI(TAG, "✓ Got expected response: %s", expected_response);
-                    ESP_LOGI(TAG, "  Full response: %s", response_buffer);
+                    ESP_LOGD(TAG, "✓ Got expected response: %s", expected_response);
+                    ESP_LOGD(TAG, "  Full response: %s", response_buffer);
                 }
                 return ESP_OK;
             }
@@ -223,23 +219,6 @@ static esp_err_t send_at_command(const char *command, const char *expected_respo
         ESP_LOGW(TAG, "  Got: %s", response_buffer);
     }
     return ESP_FAIL;
-}
-
-static const char *cnmp_mode_to_str(int mode)
-{
-    switch (mode)
-    {
-    case 2:
-        return "AUTO (2G/3G/4G)";
-    case 13:
-        return "GSM only";
-    case 14:
-        return "WCDMA only";
-    case 38:
-        return "LTE only";
-    default:
-        return "Unknown";
-    }
 }
 
 static esp_err_t ppp_uart_transmit(void *h, void *buffer, size_t len)
@@ -384,18 +363,14 @@ static esp_err_t ppp_start_and_wait_ip(void)
 {
     char response_buffer[256];
 
-    ESP_LOGI(TAG, "→ Attaching to packet service...");
+    ESP_LOGD(TAG, "→ Attaching to packet service...");
     send_at_command("AT+CGATT=1", "OK", response_buffer, sizeof(response_buffer), 5000);
 
-    ESP_LOGI(TAG, "→ Starting PPP data call...");
+    ESP_LOGD(TAG, "→ Starting PPP data call...");
     if (send_at_command("ATD*99***1#", "CONNECT", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
     {
-        ESP_LOGW(TAG, "ATD*99***1# failed, trying AT+CGDATA...");
-        if (send_at_command("AT+CGDATA=\"PPP\",1", "CONNECT", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to enter PPP data mode");
-            return ESP_FAIL;
-        }
+        ESP_LOGE(TAG, "Failed to enter PPP data mode");
+        return ESP_FAIL;
     }
 
     if (!s_ppp_rx_task_running)
@@ -413,14 +388,14 @@ static esp_err_t ppp_start_and_wait_ip(void)
     esp_netif_action_start(s_ppp_netif, 0, 0, 0);
     esp_netif_action_connected(s_ppp_netif, 0, 0, 0);
 
-    ESP_LOGI(TAG, "→ Waiting for PPP IP...");
+    ESP_LOGD(TAG, "→ Waiting for PPP IP...");
     EventBits_t bits = xEventGroupWaitBits(s_ppp_event_group,
                                            PPP_GOT_IP_BIT | PPP_FAILED_BIT,
                                            pdTRUE, pdFALSE,
                                            pdMS_TO_TICKS(60000));
     if (bits & PPP_GOT_IP_BIT)
     {
-        ESP_LOGI(TAG, "✓ PPP connected");
+        ESP_LOGD(TAG, "✓ PPP connected");
         return ESP_OK;
     }
 
@@ -428,113 +403,26 @@ static esp_err_t ppp_start_and_wait_ip(void)
     return ESP_FAIL;
 }
 
-// 在成功注册网络后打印一次 4G 运行信息
-static void log_4g_runtime_info(void)
-{
-    char response_buffer[512];
-
-    const char *operator = "?";
-    int rssi = 99, ber = 99, dbm = -999;
-    int mode = -1, attached = -1;
-    char cell_info[128] = {0};
-    char phone_number[64] = {0};
-
-    if (send_at_command("AT+COPS?", "+COPS:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK)
-    {
-        char *name_start = strstr(response_buffer, "\"");
-        if (name_start)
-        {
-            name_start++;
-            char *name_end = strstr(name_start, "\"");
-            if (name_end)
-                *name_end = '\0';
-            operator = name_start;
-        }
-    }
-
-    if (send_at_command("AT+CSQ", "+CSQ:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-    {
-        char *csq_start = strstr(response_buffer, "+CSQ:");
-        if (csq_start && sscanf(csq_start, "+CSQ: %d,%d", &rssi, &ber) == 2)
-        {
-            if (rssi >= 0 && rssi <= 31)
-                dbm = -113 + 2 * rssi;
-        }
-    }
-
-    if (send_at_command("AT+CNMP?", "+CNMP:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-    {
-        sscanf(response_buffer, "%*[^:]: %d", &mode);
-    }
-
-    if (send_at_command("AT+CPSI?", "+CPSI:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK)
-    {
-        strncpy(cell_info, response_buffer, sizeof(cell_info) - 1);
-    }
-
-    if (send_at_command("AT+CGATT?", "+CGATT:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-    {
-        sscanf(response_buffer, "%*[^:]: %d", &attached);
-    }
-
-    // SIM 号码 (部分运营商可能未写入或被禁用)
-    if (send_at_command("AT+CNUM", "+CNUM:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK)
-    {
-        // +CNUM: "Voice","13800138000",129,7,4
-        char num[64] = {0};
-        if (sscanf(response_buffer, "%*[^,],\"%63[^\"]", num) == 1)
-        {
-            strncpy(phone_number, num, sizeof(phone_number) - 1);
-        }
-    }
-
-    ESP_LOGI(TAG, "4G: operator=%s, rssi=%d (%d dBm), ber=%d, mode=%s(%d), attached=%s",
-             operator, rssi, dbm, ber, cnmp_mode_to_str(mode), mode,
-             attached == 1 ? "yes" : (attached == 0 ? "no" : "?"));
-
-    if (cell_info[0])
-    {
-        ESP_LOGI(TAG, "4G cell: %s", cell_info);
-    }
-    if (phone_number[0])
-    {
-        ESP_LOGI(TAG, "SIM MSISDN: %s", phone_number);
-    }
-    else
-    {
-        ESP_LOGI(TAG, "SIM MSISDN: unavailable");
-    }
-}
-
 // 尝试不同波特率
 static esp_err_t detect_baudrate(uint32_t *detected_baud)
 {
-    uint32_t baud_rates[] = {115200, 9600, 57600, 38400, 19200};
-    int num_rates = sizeof(baud_rates) / sizeof(baud_rates[0]);
+    const uint32_t target_baud = 115200;
     char response_buffer[256];
 
-    for (int i = 0; i < num_rates; i++)
+    uart_set_baudrate(UART_PORT_NUM, target_baud);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    for (int retry = 0; retry < 2; retry++)
     {
-        ESP_LOGI(TAG, "→ Trying baud rate: %d", baud_rates[i]);
-        uart_set_baudrate(UART_PORT_NUM, baud_rates[i]);
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        // 尝试 3 次，SIM 初始化时模组响应会更慢
-        for (int retry = 0; retry < 3; retry++)
+        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK)
         {
-            if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1500) == ESP_OK)
-            {
-                *detected_baud = baud_rates[i];
-                ESP_LOGI(TAG, "✓ Baud rate detected: %d", baud_rates[i]);
-                return ESP_OK;
-            }
-            vTaskDelay(pdMS_TO_TICKS(300));
+            *detected_baud = target_baud;
+            ESP_LOGD(TAG, "✓ Baud rate detected: %d", target_baud);
+            return ESP_OK;
         }
-
-        ESP_LOGW(TAG, "✗ No response at %d baud", baud_rates[i]);
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
-    ESP_LOGE(TAG, "✗ Failed to detect baud rate");
+    ESP_LOGE(TAG, "✗ No response at %d baud", target_baud);
     return ESP_FAIL;
 }
 
@@ -551,7 +439,7 @@ esp_err_t ppp_4g_init()
     }
 
     // ============== GPIO 配置 ==============
-    ESP_LOGI(TAG, "→ Configuring GPIO pins");
+    ESP_LOGD(TAG, "→ Configuring GPIO pins");
 
     // 配置 PWK 引脚
     gpio_config_t pwk_conf = {
@@ -562,7 +450,7 @@ esp_err_t ppp_4g_init()
         .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&pwk_conf);
     gpio_set_level(PIN_PWK, 1); // PWK 初始状态为高
-    ESP_LOGI(TAG, "  ✓ PWK pin configured (GPIO%d)", PIN_PWK);
+    ESP_LOGD(TAG, "  ✓ PWK pin configured (GPIO%d)", PIN_PWK);
 
     // 配置 PEN 引脚
     gpio_config_t pen_conf = {
@@ -573,10 +461,10 @@ esp_err_t ppp_4g_init()
         .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&pen_conf);
     gpio_set_level(PIN_PEN, 0); // PEN 初始状态为低
-    ESP_LOGI(TAG, "  ✓ PEN pin configured (GPIO%d)", PIN_PEN);
+    ESP_LOGD(TAG, "  ✓ PEN pin configured (GPIO%d)", PIN_PEN);
 
     // ============== UART 配置 ==============
-    ESP_LOGI(TAG, "→ Configuring UART");
+    ESP_LOGD(TAG, "→ Configuring UART");
     uart_config_t uart_config = {
         .baud_rate = 115200, // 默认波特率，后续会尝试其他值
         .data_bits = UART_DATA_8_BITS,
@@ -589,12 +477,8 @@ esp_err_t ppp_4g_init()
     ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, PIN_TX, PIN_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    ESP_LOGI(TAG, "  ✓ UART%d configured: TX=GPIO%d, RX=GPIO%d, Baud=%d",
+    ESP_LOGD(TAG, "  ✓ UART%d configured: TX=GPIO%d, RX=GPIO%d, Baud=%d",
              UART_PORT_NUM, PIN_TX, PIN_RX, uart_config.baud_rate);
-
-    // 带 SIM 卡时模组会先做握卡流程，额外等待 2s 让串口稳定
-    ESP_LOGI(TAG, "→ Extra settle wait for SIM init (2 seconds)...");
-    vTaskDelay(pdMS_TO_TICKS(2000));
 
     char response_buffer[512];
 
@@ -607,7 +491,7 @@ esp_err_t ppp_4g_init()
     stage = INIT_STAGE_POWER_ON;
     log_stage(stage);
 
-    ESP_LOGI(TAG, "→ Checking if module is already powered on...");
+    ESP_LOGD(TAG, "→ Checking if module is already powered on...");
     bool module_on = false;
     uint32_t current_baud = 115200;
 
@@ -617,7 +501,7 @@ esp_err_t ppp_4g_init()
         if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 500) == ESP_OK)
         {
             module_on = true;
-            ESP_LOGI(TAG, "✓ 4G Module already powered on and responding");
+            ESP_LOGD(TAG, "✓ 4G Module already powered on and responding");
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -625,11 +509,11 @@ esp_err_t ppp_4g_init()
 
     if (!module_on)
     {
-        ESP_LOGI(TAG, "✗ Module not responding, will toggle power");
+        ESP_LOGD(TAG, "✗ Module not responding, will toggle power");
         ppp_4g_power_on();
 
         // 开机后清空 URC 消息
-        ESP_LOGI(TAG, "→ Draining boot messages (URC)...");
+        ESP_LOGD(TAG, "→ Draining boot messages (URC)...");
         vTaskDelay(pdMS_TO_TICKS(1500));
         uart_drain_with_log();
     }
@@ -649,22 +533,22 @@ esp_err_t ppp_4g_init()
     stage = INIT_STAGE_AT_SYNC;
     log_stage(stage);
 
-    ESP_LOGI(TAG, "→ Synchronizing with module (sending AT)...");
-    int sync_retries = 3;
+    ESP_LOGD(TAG, "→ Synchronizing with module (sending AT)...");
+    int sync_retries = 2;
     while (sync_retries-- > 0)
     {
         if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
         {
-            ESP_LOGI(TAG, "✓ AT sync successful");
+            ESP_LOGD(TAG, "✓ AT sync successful");
             break;
         }
-        ESP_LOGW(TAG, "  Retry %d/10...", 10 - sync_retries);
+        ESP_LOGW(TAG, "  Retry %d/2...", 2 - sync_retries);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     if (sync_retries <= 0)
     {
-        ESP_LOGE(TAG, "✗ AT sync failed after 10 retries");
+        ESP_LOGE(TAG, "✗ AT sync failed");
         stage = INIT_STAGE_FAILED;
         log_stage(stage);
         return ESP_FAIL;
@@ -680,27 +564,27 @@ esp_err_t ppp_4g_init()
     }
     else
     {
-        ESP_LOGI(TAG, "✓ Echo disabled");
+        ESP_LOGD(TAG, "✓ Echo disabled");
     }
 
     // ============== Stage 6: 检查 SIM 卡 ==============
     stage = INIT_STAGE_CHECK_SIM;
     log_stage(stage);
 
-    ESP_LOGI(TAG, "→ Checking SIM card status...");
+    ESP_LOGD(TAG, "→ Checking SIM card status...");
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    int sim_retries = 3;
+    int sim_retries = 2;
     while (sim_retries-- > 0)
     {
         if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer,
                             sizeof(response_buffer), 3000) == ESP_OK)
         {
-            ESP_LOGI(TAG, "✓ SIM Card Ready");
+            ESP_LOGD(TAG, "✓ SIM Card Ready");
             break;
         }
-        ESP_LOGW(TAG, "  SIM not ready, retry %d/10...", 10 - sim_retries);
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        ESP_LOGW(TAG, "  SIM not ready, retry %d/2...", 2 - sim_retries);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 
     if (sim_retries <= 0)
@@ -716,7 +600,7 @@ esp_err_t ppp_4g_init()
     }
 
     // 读取 SIM 卡 ICCID
-    ESP_LOGI(TAG, "→ Reading SIM card ICCID...");
+    ESP_LOGD(TAG, "→ Reading SIM card ICCID...");
     if (send_at_command("AT+CCID", "+CCID:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
     {
         char *iccid_start = strstr(response_buffer, "+CCID:");
@@ -728,7 +612,7 @@ esp_err_t ppp_4g_init()
             char *newline = strstr(iccid_start, "\r");
             if (newline)
                 *newline = '\0';
-            ESP_LOGI(TAG, "✓ SIM ICCID: %s", iccid_start);
+            ESP_LOGD(TAG, "✓ SIM ICCID: %s", iccid_start);
         }
     }
 
@@ -737,7 +621,7 @@ esp_err_t ppp_4g_init()
     log_stage(stage);
 
     // 获取运营商信息
-    ESP_LOGI(TAG, "→ Getting operator information...");
+    ESP_LOGD(TAG, "→ Getting operator information...");
     if (send_at_command("AT+COPS?", "+COPS:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK)
     {
         char *start = strstr(response_buffer, "\"");
@@ -748,75 +632,22 @@ esp_err_t ppp_4g_init()
             if (end != NULL)
             {
                 *end = '\0';
-                ESP_LOGI(TAG, "✓ Operator: %s", start);
+                ESP_LOGD(TAG, "✓ Operator: %s", start);
             }
         }
-    }
-
-    bool antenna_suspect = false;
-
-    // 获取信号强度（多次重试，避免刚开机误报 99）
-    ESP_LOGI(TAG, "→ Getting signal strength...");
-    int rssi = 99, ber = 99;
-    bool got_signal = false;
-    for (int attempt = 0; attempt < 5; attempt++)
-    {
-        if (send_at_command("AT+CSQ", "+CSQ:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-        {
-            char *csq_start = strstr(response_buffer, "+CSQ:");
-            if (csq_start != NULL && sscanf(csq_start, "+CSQ: %d,%d", &rssi, &ber) == 2)
-            {
-                ESP_LOGI(TAG, "  Attempt %d: RSSI=%d, BER=%d", attempt + 1, rssi, ber);
-                if (rssi != 99)
-                {
-                    got_signal = true;
-                    break;
-                }
-            }
-        }
-        ESP_LOGW(TAG, "  No valid signal yet, retrying...");
-        vTaskDelay(pdMS_TO_TICKS(2000));
-    }
-
-    if (!got_signal && rssi == 99)
-    {
-        antenna_suspect = true; // 延后在注册结束时统一报警，避免重复刷屏
-    }
-    else if (rssi < 10)
-    {
-        ESP_LOGW(TAG, "  Warning: Weak signal (RSSI=%d)", rssi);
-    }
-    else
-    {
-        ESP_LOGI(TAG, "  Signal quality: Good (RSSI=%d)", rssi);
     }
 
     // 启用网络注册 URC
-    ESP_LOGI(TAG, "→ Enabling network registration notifications...");
+    ESP_LOGD(TAG, "→ Enabling network registration notifications...");
     send_at_command("AT+CREG=1", "OK", response_buffer, sizeof(response_buffer), 2000);
 
-    // 检查当前网络模式
-    ESP_LOGI(TAG, "→ Checking network mode...");
-    if (send_at_command("AT+CNMP?", "+CNMP:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "  Current mode: %s", response_buffer);
-    }
-
     // 中国移动常用 APN：CMNET（物联网卡可能为 CMIOT，可根据需要改）
-    ESP_LOGI(TAG, "→ Setting PDP APN to CMNET...");
+    ESP_LOGD(TAG, "→ Setting PDP APN to CMNET...");
     send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 3000);
 
-    // 设置为自动模式（2=自动，支持 2G/3G/4G）
-    ESP_LOGI(TAG, "→ Setting network mode to AUTO...");
-    send_at_command("AT+CNMP=2", "OK", response_buffer, sizeof(response_buffer), 2000);
-
-    // 手动触发网络搜索
-    ESP_LOGI(TAG, "→ Manually triggering network search...");
-    send_at_command("AT+COPS=0", "OK", response_buffer, sizeof(response_buffer), 30000);
-
     // 检查网络注册状态
-    ESP_LOGI(TAG, "→ Checking network registration...");
-    int reg_retries = 45; // 最多等待 90 秒，部分网络初始注册较慢
+    ESP_LOGD(TAG, "→ Checking network registration...");
+    int reg_retries = 20; // 最多等待 20 秒
     bool registered_success = false;
     while (reg_retries-- > 0)
     {
@@ -830,67 +661,28 @@ esp_err_t ppp_4g_init()
                 {
                     if (stat == 1)
                     {
-                        ESP_LOGI(TAG, "✓ Registered to home network");
+                        ESP_LOGD(TAG, "✓ Registered to home network");
                         registered_success = true;
                         break;
                     }
                     else if (stat == 5)
                     {
-                        ESP_LOGI(TAG, "✓ Registered to roaming network");
+                        ESP_LOGD(TAG, "✓ Registered to roaming network");
                         registered_success = true;
                         break;
                     }
                 }
             }
-        }
-
-        // LTE/EPS 注册结果（有些网络只在 CEREG 上报告）
-        if (!registered_success &&
-            send_at_command("AT+CEREG?", "+CEREG:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-        {
-            int n = 0, stat = 0;
-            char *cereg_start = strstr(response_buffer, "+CEREG:");
-            if (cereg_start != NULL)
-            {
-                if (sscanf(cereg_start, "+CEREG: %d,%d", &n, &stat) == 2)
-                {
-                    if (stat == 1 || stat == 5)
-                    {
-                        ESP_LOGI(TAG, "✓ EPS Registered (CEREG stat=%d)", stat);
-                        registered_success = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // 中途仍未注册时，尝试切到 LTE only 再回自动，加速中国移动驻网
-        if (!registered_success && reg_retries == 25)
-        {
-            ESP_LOGW(TAG, "  Long searching, switching to LTE only (CNMP=38)...");
-            send_at_command("AT+CNMP=38", "OK", response_buffer, sizeof(response_buffer), 5000);
-            send_at_command("AT+COPS=0", "OK", response_buffer, sizeof(response_buffer), 30000);
-        }
-        if (!registered_success && reg_retries == 15)
-        {
-            ESP_LOGW(TAG, "  Restoring AUTO search (CNMP=2) and retrying...");
-            send_at_command("AT+CNMP=2", "OK", response_buffer, sizeof(response_buffer), 5000);
-            send_at_command("AT+COPS=0", "OK", response_buffer, sizeof(response_buffer), 30000);
         }
 
         if (reg_retries > 0)
         {
-            ESP_LOGI(TAG, "  Waiting for network registration (%d seconds left)...", reg_retries * 2);
-            vTaskDelay(pdMS_TO_TICKS(2000));
+            ESP_LOGD(TAG, "  Waiting for network registration (%d seconds left)...", reg_retries);
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
 
-    if (registered_success)
-    {
-        // 注册成功后打印详细的 4G 运行信息
-        log_4g_runtime_info();
-    }
-    else
+    if (!registered_success)
     {
         ESP_LOGW(TAG, "✗ Network registration timeout");
         ESP_LOGW(TAG, "  Note: Module may still work for some operations");
@@ -900,28 +692,13 @@ esp_err_t ppp_4g_init()
             ESP_LOGW(TAG, "  Last error: %s", response_buffer);
         }
 
-        if (antenna_suspect)
-        {
-            ESP_LOGE(TAG, "");
-            ESP_LOGE(TAG, "================================================");
-            ESP_LOGE(TAG, "  CRITICAL: NO ANTENNA OR NO SIGNAL DETECTED!");
-            ESP_LOGE(TAG, "================================================");
-            ESP_LOGE(TAG, "  If antenna is connected, wait in open area or check band settings.");
-            ESP_LOGE(TAG, "  Check RF cable / antenna seating / supported bands.");
-            ESP_LOGE(TAG, "================================================");
-            ESP_LOGE(TAG, "");
-        }
-        else
-        {
-            ESP_LOGW(TAG, "  RSSI had valid reading earlier; timeout may be coverage/PLMN issue.");
-        }
         stage = INIT_STAGE_FAILED;
         log_stage(stage);
         return ESP_FAIL;
     }
 
     // ============== Stage 8: 启动 PPP 拨号 ==============
-    ESP_LOGI(TAG, "→ Starting PPP session...");
+    ESP_LOGD(TAG, "→ Starting PPP session...");
     err = ppp_start_and_wait_ip();
     if (err != ESP_OK)
     {
@@ -934,19 +711,19 @@ esp_err_t ppp_4g_init()
     stage = INIT_STAGE_COMPLETE;
     log_stage(stage);
 
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "Module Information:");
-    ESP_LOGI(TAG, "  - Baud Rate: %d", current_baud);
-    ESP_LOGI(TAG, "  - UART: UART%d (TX=GPIO%d, RX=GPIO%d)", UART_PORT_NUM, PIN_TX, PIN_RX);
-    ESP_LOGI(TAG, "  - Control: PWK=GPIO%d, PEN=GPIO%d", PIN_PWK, PIN_PEN);
-    ESP_LOGI(TAG, "");
+    ESP_LOGD(TAG, "");
+    ESP_LOGD(TAG, "Module Information:");
+    ESP_LOGD(TAG, "  - Baud Rate: %d", current_baud);
+    ESP_LOGD(TAG, "  - UART: UART%d (TX=GPIO%d, RX=GPIO%d)", UART_PORT_NUM, PIN_TX, PIN_RX);
+    ESP_LOGD(TAG, "  - Control: PWK=GPIO%d, PEN=GPIO%d", PIN_PWK, PIN_PEN);
+    ESP_LOGD(TAG, "");
 
     return ESP_OK;
 }
 
 esp_err_t ppp_4g_deinit(void)
 {
-    ESP_LOGI(TAG, "→ Shutting down 4G module...");
+    ESP_LOGD(TAG, "→ Shutting down 4G module...");
     if (s_ppp_rx_task_running)
     {
         s_ppp_rx_task_running = false;
@@ -959,11 +736,11 @@ esp_err_t ppp_4g_deinit(void)
 
     // 关闭电源使能
     gpio_set_level(PIN_PEN, 0);
-    ESP_LOGI(TAG, "  ✓ Power disabled");
+    ESP_LOGD(TAG, "  ✓ Power disabled");
 
     // 删除 UART 驱动
     ESP_ERROR_CHECK(uart_driver_delete(UART_PORT_NUM));
-    ESP_LOGI(TAG, "✓ 4G module shutdown complete");
+    ESP_LOGD(TAG, "✓ 4G module shutdown complete");
 
     return ESP_OK;
 }
