@@ -22,14 +22,10 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
                             float sample_rate,
                             float temperature)
 {
+    (void)mode;
+    (void)sample_rate;
 
-    if (g_msg_dispatcher_queue == NULL)
-    {
-        LOG_ERROR("Message dispatcher queue not initialized");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    MsgRmsTriaxial msg_rms_triaxial = MSG_RMS_TRIAXIAL__INIT;
+    MsgRmsReport msg_rms_report = MSG_RMS_REPORT__INIT;
     MsgTriaxialValue rms = MSG_TRIAXIAL_VALUE__INIT;
     MsgTriaxialValue peak = MSG_TRIAXIAL_VALUE__INIT;
     MsgTriaxialValue crest = MSG_TRIAXIAL_VALUE__INIT;
@@ -37,24 +33,28 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
     rms.x = features->x_axis.rms;
     rms.y = features->y_axis.rms;
     rms.z = features->z_axis.rms;
-    msg_rms_triaxial.rms = &rms;
+    msg_rms_report.rms = &rms;
 
     peak.x = features->x_axis.peak;
     peak.y = features->y_axis.peak;
     peak.z = features->z_axis.peak;
-    msg_rms_triaxial.peak = &peak;
+    msg_rms_report.peak = &peak;
 
     crest.x = features->x_axis.crest_factor;        
     crest.y = features->y_axis.crest_factor;
     crest.z = features->z_axis.crest_factor;
-    msg_rms_triaxial.crest = &crest;
-    
-    MsgPayload msg_payload = MSG_PAYLOAD__INIT;
-    msg_payload.et = 1; // event type 1 for RMS report
-    msg_payload.data = &msg_rms_triaxial;
+    msg_rms_report.crest = &crest;
 
-    xQueueSend(g_msg_dispatcher_queue, &g_binary_msg, 0);
-    return ESP_OK;
+    MsgTriaxialValue impulse = MSG_TRIAXIAL_VALUE__INIT;
+    impulse.x = features->x_axis.impulse_factor;
+    impulse.y = features->y_axis.impulse_factor;
+    impulse.z = features->z_axis.impulse_factor;
+    msg_rms_report.impulse = &impulse;
+    msg_rms_report.iso = (int8_t)status;
+    msg_rms_report.temperature = temperature;
+
+    // Send using unified message dispatcher
+    return send_protobuf_message(1, &msg_rms_report.base);
 }
 
 static void rms_task_entry(void *arg)
@@ -132,7 +132,6 @@ static void rms_task_entry(void *arg)
                 {
                 }
             }
-
             // 6. 生成报告并发送到数据分发器
             float temp = 0.0f;
             // 读取温度传感器
@@ -140,7 +139,7 @@ static void rms_task_entry(void *arg)
             {
                 LOG_ERROR("Failed to read temperature");
             }
-            rms_report(&features, status, job.task_mode, job.sample_rate, (temp * 100));
+            rms_report(&features, status, job.task_mode, job.sample_rate, temp);
         }
     }
 }

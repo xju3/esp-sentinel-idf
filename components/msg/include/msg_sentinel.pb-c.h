@@ -17,7 +17,7 @@ PROTOBUF_C__BEGIN_DECLS
 
 typedef struct MsgPayload MsgPayload;
 typedef struct MsgTriaxialValue MsgTriaxialValue;
-typedef struct MsgRmsTriaxial MsgRmsTriaxial;
+typedef struct MsgRmsReport MsgRmsReport;
 typedef struct MsgMachineStatus MsgMachineStatus;
 
 
@@ -67,21 +67,22 @@ struct  MsgTriaxialValue
 , 0, 0, 0, 0 }
 
 
-struct  MsgRmsTriaxial
+struct  MsgRmsReport
 {
   ProtobufCMessage base;
   MsgTriaxialValue *rms;
   MsgTriaxialValue *peak;
   MsgTriaxialValue *crest;
   MsgTriaxialValue *impulse;
+  float temperature;
   /*
    * iso标准
    */
   uint32_t iso;
 };
-#define MSG_RMS_TRIAXIAL__INIT \
- { PROTOBUF_C_MESSAGE_INIT (&msg_rms_triaxial__descriptor) \
-, NULL, NULL, NULL, NULL, 0 }
+#define MSG_RMS_REPORT__INIT \
+ { PROTOBUF_C_MESSAGE_INIT (&msg_rms_report__descriptor) \
+, NULL, NULL, NULL, NULL, 0, 0 }
 
 
 struct  MsgMachineStatus
@@ -136,24 +137,24 @@ MsgTriaxialValue *
 void   msg_triaxial_value__free_unpacked
                      (MsgTriaxialValue *message,
                       ProtobufCAllocator *allocator);
-/* MsgRmsTriaxial methods */
-void   msg_rms_triaxial__init
-                     (MsgRmsTriaxial         *message);
-size_t msg_rms_triaxial__get_packed_size
-                     (const MsgRmsTriaxial   *message);
-size_t msg_rms_triaxial__pack
-                     (const MsgRmsTriaxial   *message,
+/* MsgRmsReport methods */
+void   msg_rms_report__init
+                     (MsgRmsReport         *message);
+size_t msg_rms_report__get_packed_size
+                     (const MsgRmsReport   *message);
+size_t msg_rms_report__pack
+                     (const MsgRmsReport   *message,
                       uint8_t             *out);
-size_t msg_rms_triaxial__pack_to_buffer
-                     (const MsgRmsTriaxial   *message,
+size_t msg_rms_report__pack_to_buffer
+                     (const MsgRmsReport   *message,
                       ProtobufCBuffer     *buffer);
-MsgRmsTriaxial *
-       msg_rms_triaxial__unpack
+MsgRmsReport *
+       msg_rms_report__unpack
                      (ProtobufCAllocator  *allocator,
                       size_t               len,
                       const uint8_t       *data);
-void   msg_rms_triaxial__free_unpacked
-                     (MsgRmsTriaxial *message,
+void   msg_rms_report__free_unpacked
+                     (MsgRmsReport *message,
                       ProtobufCAllocator *allocator);
 /* MsgMachineStatus methods */
 void   msg_machine_status__init
@@ -182,8 +183,8 @@ typedef void (*MsgPayload_Closure)
 typedef void (*MsgTriaxialValue_Closure)
                  (const MsgTriaxialValue *message,
                   void *closure_data);
-typedef void (*MsgRmsTriaxial_Closure)
-                 (const MsgRmsTriaxial *message,
+typedef void (*MsgRmsReport_Closure)
+                 (const MsgRmsReport *message,
                   void *closure_data);
 typedef void (*MsgMachineStatus_Closure)
                  (const MsgMachineStatus *message,
@@ -196,7 +197,7 @@ typedef void (*MsgMachineStatus_Closure)
 
 extern const ProtobufCMessageDescriptor msg_payload__descriptor;
 extern const ProtobufCMessageDescriptor msg_triaxial_value__descriptor;
-extern const ProtobufCMessageDescriptor msg_rms_triaxial__descriptor;
+extern const ProtobufCMessageDescriptor msg_rms_report__descriptor;
 extern const ProtobufCMessageDescriptor msg_machine_status__descriptor;
 
 PROTOBUF_C__END_DECLS

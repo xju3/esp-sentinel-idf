@@ -424,37 +424,21 @@ static void send_machine_status_message(const StateAnalysisContext_t *ctx)
     MsgMachineStatus msg_machine_status = MSG_MACHINE_STATUS__INIT;
     MsgTriaxialValue msg_triaxial_value = MSG_TRIAXIAL_VALUE__INIT;
     msg_triaxial_value.x = ctx->rms_x;
-    msg_triaxial_value.y = ctx->rms_y;  
+    msg_triaxial_value.y = ctx->rms_y;
     msg_triaxial_value.z = ctx->rms_z;
-    msg_triaxial_value.mean = ctx->rms_mean;
+    msg_triaxial_value.m = ctx->rms_mean;
     msg_machine_status.rms = &msg_triaxial_value;
     msg_machine_status.st = map_machine_state(get_machine_state());
 
-
-    // Serialize MsgMachineStatus using static buffer to avoid heap fragmentation
-    static uint8_t s_status_buffer[MSG_MACHINE_STATUS_MAX_PACKED_SIZE];
-    size_t status_size = msg_machine_status__get_packed_size(&msg_machine_status);
-    if (status_size > sizeof(s_status_buffer))
+    // Send using unified message dispatcher
+    esp_err_t ret = send_protobuf_message(0, &msg_machine_status.base);
+    if (ret != ESP_OK)
     {
-        LOG_ERRORF("MsgMachineStatus packed size too large: %u", (unsigned)status_size);
-        return;
-    }
-    msg_machine_status__pack(&msg_machine_status, s_status_buffer);
-
-    // Create MsgPayload (shared header)
-    msg_payload__init(&g_msg_payload);
-    g_msg_payload.et =0;
-    g_msg_payload.data.len = status_size;
-    g_msg_payload.data.data = s_status_buffer;
-
-    // Send to dispatcher queue
-    if (xQueueSend(g_msg_dispatcher_queue, &g_msg_payload, 0) != pdTRUE)
-    {
-        LOG_WARN("Failed to send MsgPayload to dispatcher queue");
+        LOG_WARN("Failed to send machine status message");
     }
     else
     {
-        LOG_INFO("MsgPayload sent to dispatcher");
+        LOG_INFO("Machine status message sent");
     }
 }
 

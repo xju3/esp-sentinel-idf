@@ -294,13 +294,13 @@ static void fft_task_entry(void *arg)
         {
             LOG_INFOF("Received job for FFT analysis. Mode: %d, Len: %lu, SR: %.1f",
                       job.task_mode, job.length, job.sample_rate);
-
             const uint32_t n = job.length;
             if (n < 2 || n > MAX_DAQ_SAMPLES || ((n & (n - 1U)) != 0U))
             {
                 LOG_ERRORF("Invalid FFT length: %lu", n);
-                continue;
+                continue; 
             }
+
             if (job.raw_data == NULL)
             {
                 LOG_ERROR("raw_data is NULL");

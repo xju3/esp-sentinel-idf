@@ -5,6 +5,7 @@
 #include "drv_icm_42688_p.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "msg_sentinel.pb-c.h"
 
 #ifndef SN
 #define SN 0 // Default SN value if not defined in config
@@ -25,6 +26,9 @@ extern "C"
     // Queue items are of type binary_msg_t
     extern QueueHandle_t g_msg_dispatcher_queue;
     esp_err_t data_dispatcher_start(void);
+
+    // Unified message sending function for protobuf messages
+    esp_err_t send_protobuf_message(uint32_t event_type, const ProtobufCMessage *message);
 
 #ifdef __cplusplus
 }

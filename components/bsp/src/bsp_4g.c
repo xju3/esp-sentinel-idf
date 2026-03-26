@@ -21,7 +21,7 @@
 #define PIN_TX GPIO_NUM_18  // ESP32-S3 TX -> 转接板 TX
 #define PIN_RX GPIO_NUM_17  // ESP32-S3 RX -> 转接板 RX
 #define PIN_PEN GPIO_NUM_14 // ESP32-S3 GPIO13 -> 转接板 PEN (Power Enable)
-#define PIN_PWK GPIO_NUM_13  // ESP32-S3 GPIO14 -> 转接板 PWK (PWRKEY)
+#define PIN_PWK GPIO_NUM_13 // ESP32-S3 GPIO14 -> 转接板 PWK (PWRKEY)
 
 #define UART_PORT_NUM UART_NUM_1
 #define BUF_SIZE (1024)
@@ -36,8 +36,8 @@ static EventGroupHandle_t s_ppp_event_group = NULL;
 static TaskHandle_t s_ppp_rx_task = NULL;
 static volatile bool s_ppp_rx_task_running = false;
 
-#define PPP_GOT_IP_BIT     BIT0
-#define PPP_FAILED_BIT     BIT1
+#define PPP_GOT_IP_BIT BIT0
+#define PPP_FAILED_BIT BIT1
 
 // 初始化状态
 typedef enum
@@ -652,7 +652,7 @@ esp_err_t ppp_4g_init()
     ESP_LOGI(TAG, "→ Synchronizing with module (sending AT)...");
     int sync_retries = 3;
     while (sync_retries-- > 0)
-     {
+    {
         if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
         {
             ESP_LOGI(TAG, "✓ AT sync successful");

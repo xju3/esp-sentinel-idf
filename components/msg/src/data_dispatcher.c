@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <stdlib.h>
 
 QueueHandle_t g_msg_dispatcher_queue = NULL;
 
@@ -96,6 +97,7 @@ static void dispatcher_task(void *arg)
             bool success = send_binary_to_mqtt("sentinel", buffer, packed_size);
 
             free(buffer);
+            free(msg.data.data);
 
             if (!success)
             {
@@ -103,6 +105,43 @@ static void dispatcher_task(void *arg)
             }
         }
     }
+}
+
+esp_err_t send_protobuf_message(uint32_t event_type, const ProtobufCMessage *message)
+{
+    if (g_msg_dispatcher_queue == NULL || message == NULL)
+    {
+        LOG_ERROR("Message dispatcher queue not initialized or invalid message");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Pack the protobuf message
+    size_t packed_size = protobuf_c_message_get_packed_size(message);
+    uint8_t *buffer = malloc(packed_size);
+    if (buffer == NULL)
+    {
+        LOG_ERROR("Failed to allocate buffer for message packing");
+        return ESP_ERR_NO_MEM;
+    }
+    protobuf_c_message_pack(message, buffer);
+
+    // Create MsgPayload
+    MsgPayload payload = MSG_PAYLOAD__INIT;
+    payload.et = event_type;
+    payload.data.len = packed_size;
+    payload.data.data = buffer;
+
+    // Send to queue
+    BaseType_t result = xQueueSend(g_msg_dispatcher_queue, &payload, 0);
+
+    if (result != pdTRUE)
+    {
+        free(buffer);
+        LOG_WARN("Failed to send message to dispatcher queue");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    return ESP_OK;
 }
 
 esp_err_t data_dispatcher_start(void)

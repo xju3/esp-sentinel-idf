@@ -14,12 +14,13 @@ message MsgTriaxialValue {
   float   m   = 4;  // 均值
 }
 
-message MsgRmsTriaxial {
+message MsgRmsReport {
   MsgTriaxialValue rms      = 1;
   MsgTriaxialValue peak     = 2;
   MsgTriaxialValue crest    = 3;
   MsgTriaxialValue impulse  = 4;
-  uint32 iso                = 5;  // iso标准
+  float temperature         = 5; 
+  uint32 iso                = 6;  // iso标准
 }
 
 message MsgMachineStatus{

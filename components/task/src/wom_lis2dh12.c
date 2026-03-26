@@ -22,6 +22,7 @@ static int s_int1_idle_level = -1;
 static int s_int2_idle_level = -1;
 static gpio_int_type_t s_int1_intr_type = GPIO_INTR_DISABLE;
 static gpio_int_type_t s_int2_intr_type = GPIO_INTR_DISABLE;
+// disabled, there is no hardware on production device.
 static bool s_buzzer_ready = false;
 static uint64_t s_last_beep_us = 0;
 static uint64_t s_int1_suppress_until_us = 0;
@@ -130,7 +131,7 @@ static void wom_int1_clear_and_rearm(bool suppress_log)
         {
             // 如果只是为了中断而不需要加速度数据，可以将这部分LOG信息注释掉。
             LOG_WARNF("WoM INT1: shock/vibration (thr=%d mg) INT1_SRC=0x%02X", s_default_wom_cfg.threshold_mg_int1, int_src);
-            wom_beep(WOM_BEEP_INT1_COUNT, WOM_BEEP_MIN_GAP_INT1_MS);
+            // wom_beep(WOM_BEEP_INT1_COUNT, WOM_BEEP_MIN_GAP_INT1_MS);
         }
         else
         {
@@ -224,7 +225,7 @@ static void wom_listener_task(void *arg)
 
                 LOG_WARNF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                           s_default_wom_cfg.threshold_mg_int2, int_src);
-                wom_beep(WOM_BEEP_INT2_COUNT, WOM_BEEP_MIN_GAP_INT2_MS);
+                // wom_beep(WOM_BEEP_INT2_COUNT, WOM_BEEP_MIN_GAP_INT2_MS);
             }
             else
             {
@@ -254,29 +255,29 @@ static void wom_listener_task(void *arg)
 esp_err_t start_wom_lis2dh12_listener(void)
 {
     // Best-effort init: WoM can still work without a buzzer.
-    {
-        esp_err_t ret = drv_tmb12a05_init();
-        if (ret != ESP_OK)
-        {
-            LOG_ERRORF("Buzzer init failed (continuing without beep): %s", esp_err_to_name(ret));
-            s_buzzer_ready = false;
-        }
-        else
-        {
-            s_buzzer_ready = true;
-        }
-    }
+    // {
+    //     esp_err_t ret = drv_tmb12a05_init();
+    //     if (ret != ESP_OK)
+    //     {
+    //         LOG_ERRORF("Buzzer init failed (continuing without beep): %s", esp_err_to_name(ret));
+    //         s_buzzer_ready = false;
+    //     }
+    //     else
+    //     {
+    //         s_buzzer_ready = true;
+    //     }
+    // }
 
     BaseType_t task_created =
         xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, &s_wom_task, TASK_MEM_CAPS);
     if (task_created != pdPASS)
     {
         LOG_ERRORF("Failed to create WoM listener task");
-        if (s_buzzer_ready)
-        {
-            (void)drv_tmb12a05_deinit();
-            s_buzzer_ready = false;
-        }
+        // if (s_buzzer_ready)
+        // {
+        //     (void)drv_tmb12a05_deinit();
+        //     s_buzzer_ready = false;
+        // }
         s_wom_task = NULL;
         return ESP_FAIL;
     }
