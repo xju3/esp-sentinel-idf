@@ -168,12 +168,12 @@ static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, voi
 
 esp_err_t set_device_baseline(const char *device_id)
 {
-    bool existing = load_existing(device_id, &g_baseline);
-    if (existing)
-    {
-        print_baseline();
-        return ESP_OK;
-    }
+    // bool existing = load_existing(device_id, &g_baseline);
+    // if (existing)
+    // {
+    //     print_baseline();
+    //     return ESP_OK;
+    // }
 
     DSP_Config_t baseline_dsp_config = IMU_Calculate_DSP_Config(
         &icm42688_driver,

@@ -77,7 +77,7 @@ static void rms_task_entry(void *arg)
 
             // 2. 调用纯算法库计算 RMS (包含 HPF/LPF/积分)
             vib_3axis_features_t features = algo_rms_calculate(x_ptr, y_ptr, z_ptr, job.length, job.sample_rate);
-            LOG_DEBUGF("rms(mm/s): X=%.2f, Y=%.2f, Z=%.2f, sample rate=%.2f",
+            LOG_DEBUGF("rms(mm/s): X=%.4f, Y=%.4f, Z=%.4f, sample rate=%.4f",
                        features.x_axis.rms,
                        features.y_axis.rms,
                        features.z_axis.rms, job.sample_rate);

@@ -32,6 +32,7 @@ static const char *TAG = "ALGO_RMS";
 #define G_TO_MM_S2 9806.65f   // 1g = 9806.65 mm/s^2
 #define HPF_CUTOFF_HZ 10.0f   // 高通截止频率 (去除重力和漂移)
 #define LPF_CUTOFF_HZ 1000.0f // 低通截止频率 (业务关注频段)
+#define BIQUAD_Q 0.7071f      // Butterworth Q
 
 #define MAX_RMS_PROCESS_POINTS 8192
 // 定义静态暂存区，强制 16 字节对齐以满足 SIMD 指令要求
@@ -56,22 +57,33 @@ static axis_features_t process_axis(const float *input, uint32_t length, float s
     // 1. 使用静态暂存区 (无需申请)
     float *buf = s_scratch_buf;
 
-    // 2. 单位转换与拷贝 (g -> mm/s^2)
-    // dsps_mul_c_f32: output[i] = input[i * step_in] * C
-    // 这里同时完成了数据从 const input 到 scratch buf 的拷贝
-    dsps_mulc_f32(input, buf, length, G_TO_MM_S2, 1, 1);
+    // 2. 去均值 + 单位转换与拷贝 (g -> mm/s^2)
+    // 先去掉 DC (重力) 分量，避免每个窗口 HPF 产生较大瞬态
+    float mean_g = 0.0f;
+    for (int i = 0; i < length; i++)
+    {
+        mean_g += input[i];
+    }
+    mean_g /= (float)length;
+    for (int i = 0; i < length; i++)
+    {
+        buf[i] = (input[i] - mean_g) * G_TO_MM_S2;
+    }
 
     // 3. 第一级高通滤波 (HPF) - 去除重力分量 (DC)
     // 生成 2 阶 IIR Biquad 系数
     float coeffs_hpf[5];
     float w_hpf[2] = {0}; // 滤波器状态 (延迟线)
-    dsps_biquad_gen_hpf_f32(coeffs_hpf, HPF_CUTOFF_HZ, sample_rate);
+    // ESP-DSP expects normalized frequency (0..0.5) and Q factor
+    float hpf_norm = HPF_CUTOFF_HZ / sample_rate;
+    dsps_biquad_gen_hpf_f32(coeffs_hpf, hpf_norm, BIQUAD_Q);
     dsps_biquad_f32(buf, buf, length, coeffs_hpf, w_hpf);
 
     // 4. 低通滤波 (LPF) - 限制带宽到 1kHz
     float coeffs_lpf[5];
     float w_lpf[2] = {0};
-    dsps_biquad_gen_lpf_f32(coeffs_lpf, LPF_CUTOFF_HZ, sample_rate);
+    float lpf_norm = LPF_CUTOFF_HZ / sample_rate;
+    dsps_biquad_gen_lpf_f32(coeffs_lpf, lpf_norm, BIQUAD_Q);
     dsps_biquad_f32(buf, buf, length, coeffs_lpf, w_lpf);
 
     // 5. 时域积分 (Acceleration mm/s^2 -> Velocity mm/s)
@@ -141,4 +153,3 @@ vib_3axis_features_t algo_rms_calculate(const float *x, const float *y, const fl
 
     return features;
 }
-
