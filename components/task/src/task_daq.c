@@ -75,10 +75,10 @@ static void generic_task_handler(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         // Check machine state before proceeding - only run DAQ in STABLE state
-        if (get_machine_state() != STATE_STABLE) {
-            LOG_DEBUGF("%s task skipped: machine state is not STABLE", ctx->task_name);
-            continue;
-        }
+        // if (get_machine_state() != STATE_STABLE) {
+        //     LOG_DEBUGF("%s task skipped: machine state is not STABLE", ctx->task_name);
+        //     continue;
+        // }
 
         // 获取锁，如果当前有其他任务（如 Patrol）正在运行，Diagnosis 会在此阻塞等待
         // 由于 Diagnosis 任务优先级更高，一旦锁释放，它会优先获得锁并立即执行

@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
+
 // 必须与 daq_worker.c 中的定义保持一致
 #define MAX_DAQ_SAMPLES 8192
 #define RMS_QUEUE_LEN 5
@@ -52,7 +53,6 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
     msg_rms_report.impulse = &impulse;
     msg_rms_report.iso = (int8_t)status;
     msg_rms_report.temperature = temperature;
-
     // Send using unified message dispatcher
     return send_protobuf_message(1, &msg_rms_report.base);
 }
@@ -139,6 +139,7 @@ static void rms_task_entry(void *arg)
             {
                 LOG_ERROR("Failed to read temperature");
             }
+            LOG_DEBUGF("Current temperature: %.2f °C", temp);
             rms_report(&features, status, job.task_mode, job.sample_rate, temp);
         }
     }

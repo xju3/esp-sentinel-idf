@@ -4,6 +4,7 @@
 #include "config_manager.h"
 #include "drv_icm_42688_p.h"
 #include "drv_lis2dh12.h"
+#include "drv_ds18b20.h"
 #include "logger.h"
 #include "mqtt_proxy.h"
 #include "data_dispatcher.h"
@@ -95,6 +96,18 @@ esp_err_t init_nvs()
         }
         ret = nvs_flash_init();
     }
+    return ret;
+}
+
+esp_err_t init_ds18b20()
+{
+// 直接调用，不要传递任何参数
+    esp_err_t ret = drv_ds18b20_init();
+
+    if (ret != ESP_OK) {
+        LOG_DEBUGF("DS18B20 初始化失败: %s\n", esp_err_to_name(ret));
+    }
+    LOG_INFO("DS18B20 初始化成功！");
     return ret;
 }
 

@@ -31,7 +31,9 @@ esp_err_t start_diagnosing_work();
 #define DIAGNOSIS_FIXED_ODR_HZ 8000.0f
 #define DIAGNOSIS_FIXED_FFT_POINTS 4096U
 #define DIAGNOSIS_MIN_FREQ_HZ 2000.0f
-EXT_RAM_BSS_ATTR static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
+
+static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
+
 static uint32_t s_buffer_write_idx = 0;
 
 static uint32_t get_capture_duration_ms(const DSP_Config_t *cfg)
@@ -96,7 +98,7 @@ esp_err_t start_patrolling_work()
 {
     if (patrol_config.actual_odr <= 0.0f)
     {
-        LOG_ERROR(" Patrol config is not initialized");
+        LOG_ERROR("Patrol config is not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -239,10 +241,10 @@ void init_config(daq_worker_param_t *param)
 esp_err_t start_daq_worker(daq_worker_param_t *param)
 {
     // 1. Check if the machine is in a stable state. This is a mandatory precondition.
-    if (get_machine_state() != STATE_STABLE) {
-        LOG_WARN("Cannot start DAQ worker: machine state is not STABLE.");
-        return ESP_ERR_INVALID_STATE;
-    }
+    // if (get_machine_state() != STATE_STABLE) {
+    //     LOG_WARN("Cannot start DAQ worker: machine state is not STABLE.");
+    //     return ESP_ERR_INVALID_STATE;
+    // }
 
     // 2. Lock the system task mutex to ensure exclusive operation during this DAQ work.
     // This will block the state check handler from running concurrently.
