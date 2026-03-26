@@ -33,6 +33,7 @@ static const char *TAG = "ALGO_RMS";
 #define HPF_CUTOFF_HZ 10.0f   // 高通截止频率 (去除重力和漂移)
 #define LPF_CUTOFF_HZ 1000.0f // 低通截止频率 (业务关注频段)
 #define BIQUAD_Q 0.7071f      // Butterworth Q
+#define STEADY_SKIP_MS 50U // 丢弃前 50ms 以避免滤波瞬态影响（可按需修改）
 
 #define MAX_RMS_PROCESS_POINTS 8192
 // 定义静态暂存区，强制 16 字节对齐以满足 SIMD 指令要求
@@ -109,22 +110,33 @@ static axis_features_t process_axis(const float *input, uint32_t length, float s
     dsps_biquad_f32(buf, buf, length, coeffs_hpf, w_hpf);
 
     // 7. 计算特征参数
+    // 丢弃前一小段以避开滤波瞬态
+    uint32_t skip = (uint32_t)(sample_rate * ((float)STEADY_SKIP_MS / 1000.0f));
+    if (skip >= length)
+        skip = 0;
+    const float *feat_ptr = buf + skip;
+    uint32_t feat_len = length - skip;
+    if (feat_len == 0)
+    {
+        return result;
+    }
+
     // 7.1 计算 RMS
     float rms = 0.0f;
-    dsps_rms_f32(buf, length, &rms);
+    dsps_rms_f32(feat_ptr, feat_len, &rms);
     result.rms = rms;
 
     // 7.2 计算峰值 (Peak, 最大绝对值)
     float peak = 0.0f;
     float mav = 0.0f; // Mean Absolute Value (平均绝对值)
-    for (int i = 0; i < length; i++)
+    for (uint32_t i = 0; i < feat_len; i++)
     {
-        float abs_val = fabsf(buf[i]);
+        float abs_val = fabsf(feat_ptr[i]);
         if (abs_val > peak)
             peak = abs_val;
         mav += abs_val;
     }
-    mav /= length;
+    mav /= (float)feat_len;
     result.peak = peak;
 
     // 7.3 计算峰值因子 (Crest Factor = Peak / RMS)

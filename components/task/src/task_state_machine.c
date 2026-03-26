@@ -19,9 +19,11 @@
 SemaphoreHandle_t g_state_check_semaphore;
 
 // --- Configuration Constants for State Machine ---
-#define STATE_MACHINE_ODR_HZ 3200.0f    // ODR for state analysis. Must be supported by ICM42688
+// Use a fixed ODR aligned with patrol sampling to avoid oversized FFT windows.
+#define STATE_MACHINE_ODR_HZ 4000.0f    // ODR for state analysis. Must be supported by ICM42688
 #define STATE_MACHINE_WINDOW_SEC 1.0f   // Target analysis window length (seconds)
-#define STATE_MACHINE_MAX_SAMPLES 8192U // Max FFT points for state analysis (power of 2)
+#define STATE_MACHINE_MAX_SAMPLES 4096U // Max FFT points for state analysis (power of 2)
+#define STATE_MACHINE_MAX_FREQ_HZ 2000.0f
 #define STABILITY_HISTORY_SIZE 5        // Number of consecutive windows to check for stability
 #define ODR_SMOOTH_HISTORY_SIZE 5       // Number of windows for ODR sliding average
 #define STABILITY_RMS_VAR_RATIO 0.15f   // Allowed relative variance for RMS to be considered stable (15%)
@@ -35,6 +37,7 @@ SemaphoreHandle_t g_state_check_semaphore;
 // Static buffers to avoid repeated heap allocations (reduce PSRAM fragmentation risk)
 EXT_RAM_BSS_ATTR static float s_state_fft_input[STATE_MACHINE_MAX_SAMPLES * 3];
 EXT_RAM_BSS_ATTR static float s_state_fft_output[STATE_MACHINE_MAX_SAMPLES / 2];
+static DSP_Config_t s_state_dsp_config = {0};
 
 // --- Data Structures ---
 
@@ -84,6 +87,7 @@ static void start_window(StateAnalysisContext_t *ctx);
 static float calc_avg_rms_history(const StateAnalysisContext_t *ctx);
 static uint32_t map_machine_state(machine_state_t state);
 static void send_machine_status_message(const StateAnalysisContext_t *ctx);
+static esp_err_t init_state_dsp_config(void);
 
 typedef enum
 {
@@ -125,7 +129,9 @@ static void init_state_context(StateAnalysisContext_t *ctx)
     ctx->fft_input_z = ctx->fft_input_buffer + (STATE_MACHINE_MAX_SAMPLES * 2);
     algo_odr_smoother_init(&ctx->odr_smoother, ODR_SMOOTH_HISTORY_SIZE);
     reset_window_stats(ctx);
-    ctx->window_samples = calc_window_samples(STATE_MACHINE_ODR_HZ);
+    float init_odr = (s_state_dsp_config.actual_odr > 0.0f) ? s_state_dsp_config.actual_odr : STATE_MACHINE_ODR_HZ;
+    ctx->window_odr_hz = init_odr;
+    ctx->window_samples = calc_window_samples(init_odr);
     ctx->start_time_us = esp_timer_get_time();
 }
 
@@ -141,6 +147,35 @@ static void start_window(StateAnalysisContext_t *ctx)
 {
     ctx->window_start_time_us = esp_timer_get_time();
     ctx->window_samples = calc_window_samples(ctx->window_odr_hz);
+}
+
+static esp_err_t init_state_dsp_config(void)
+{
+    DSP_Config_t cfg = IMU_Get_Fixed_DSP_Config(
+        &icm42688_driver,
+        STATE_MACHINE_ODR_HZ,
+        STATE_MACHINE_MAX_SAMPLES,
+        STATE_MACHINE_MAX_FREQ_HZ
+    );
+    if (cfg.actual_odr <= 0.0f)
+    {
+        LOG_ERROR("State machine DSP config init failed");
+        return ESP_FAIL;
+    }
+
+    bool changed = (s_state_dsp_config.actual_odr != cfg.actual_odr) ||
+                   (s_state_dsp_config.fft_points != cfg.fft_points);
+    s_state_dsp_config = cfg;
+
+    if (changed)
+    {
+        LOG_INFOF("State machine DSP config: ODR=%.2f Hz, Time=%.3f s, FFT Points=%u, Fmax=%.1f Hz",
+                  s_state_dsp_config.actual_odr,
+                  s_state_dsp_config.actual_time,
+                  s_state_dsp_config.fft_points,
+                  s_state_dsp_config.f_max_interest);
+    }
+    return ESP_OK;
 }
 
 static float calc_avg_rms_history(const StateAnalysisContext_t *ctx)
@@ -369,6 +404,13 @@ static void task_state_check_handler(void *pvParameters)
             LOG_INFO("State check handler triggered. Starting state determination...");
             lock_system_task();
             set_machine_state(STATE_TRANSIENT);
+
+            if (init_state_dsp_config() != ESP_OK)
+            {
+                LOG_ERROR("State analysis aborted: DSP config init failed");
+                unlock_system_task();
+                continue;
+            }
 
             StateAnalysisContext_t context;
             init_state_context(&context);
