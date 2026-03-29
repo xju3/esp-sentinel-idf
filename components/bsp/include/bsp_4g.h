@@ -14,8 +14,8 @@ extern "C" {
  * * 用于在没有 Wi-Fi 环境时，通过蜂窝网络上报数据。
  */
 
-esp_err_t ppp_4g_init(cb_communication_channel_established cb);
-
+esp_err_t init_ppp_4g(cb_communication_channel_established cb);
+esp_err_t shutdown_ppp_4g(void);
 
 #ifdef __cplusplus
 }

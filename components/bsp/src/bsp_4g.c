@@ -338,7 +338,7 @@ static esp_err_t detect_baudrate(uint32_t *detected_baud)
     return ESP_FAIL;
 }
 
-esp_err_t ppp_4g_init(cb_communication_channel_established cb)
+esp_err_t init_ppp_4g(cb_communication_channel_established cb)
 {
     esp_err_t err = ppp_stack_init();
     if (err != ESP_OK)
@@ -566,7 +566,7 @@ esp_err_t ppp_4g_init(cb_communication_channel_established cb)
     return ESP_OK;
 }
 
-esp_err_t ppp_4g_deinit(void)
+esp_err_t shutdown_ppp_4g(void)
 {
     if (s_ppp_rx_task_running)
     {
