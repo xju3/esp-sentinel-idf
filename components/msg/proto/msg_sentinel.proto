@@ -3,8 +3,9 @@ syntax = "proto3";
 message MsgPayload {
   uint32  sn   = 1;  // 设备序列号 1000-9999，varint 2B
   uint32  et   = 2;  // event_type 0/1/2，varint 1B
-  uint64  ts   = 3;  // Unix时间戳 ms，varint ~6B
   bytes   data = 4;  // 对应 message 的序列化字节
+  reserved 3;        // 设备时间字段已移除（NTP）
+  reserved "ts";
 }
 
 message MsgTriaxialValue {
@@ -27,5 +28,4 @@ message MsgMachineStatus{
   MsgTriaxialValue rms = 1;
   uint32  st   = 2;  // 设备状态, 0 -> 关机,  1 -> 过度态, 2-> 稳定态
 }
-
 

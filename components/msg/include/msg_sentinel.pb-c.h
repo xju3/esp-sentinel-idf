@@ -38,17 +38,13 @@ struct  MsgPayload
    */
   uint32_t et;
   /*
-   * Unix时间戳 ms，varint ~6B
-   */
-  uint64_t ts;
-  /*
    * 对应 message 的序列化字节
    */
   ProtobufCBinaryData data;
 };
 #define MSG_PAYLOAD__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&msg_payload__descriptor) \
-, 0, 0, 0, {0,NULL} }
+, 0, 0, {0,NULL} }
 
 
 struct  MsgTriaxialValue

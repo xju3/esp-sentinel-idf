@@ -187,7 +187,7 @@ void   msg_machine_status__free_unpacked
   assert(message->base.descriptor == &msg_machine_status__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
-static const ProtobufCFieldDescriptor msg_payload__field_descriptors[4] =
+static const ProtobufCFieldDescriptor msg_payload__field_descriptors[3] =
 {
   {
     "sn",
@@ -214,18 +214,6 @@ static const ProtobufCFieldDescriptor msg_payload__field_descriptors[4] =
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
-    "ts",
-    3,
-    PROTOBUF_C_LABEL_NONE,
-    PROTOBUF_C_TYPE_UINT64,
-    0,   /* quantifier_offset */
-    offsetof(MsgPayload, ts),
-    NULL,
-    NULL,
-    0,             /* flags */
-    0,NULL,NULL    /* reserved1,reserved2, etc */
-  },
-  {
     "data",
     4,
     PROTOBUF_C_LABEL_NONE,
@@ -239,15 +227,15 @@ static const ProtobufCFieldDescriptor msg_payload__field_descriptors[4] =
   },
 };
 static const unsigned msg_payload__field_indices_by_name[] = {
-  3,   /* field[3] = data */
+  2,   /* field[2] = data */
   1,   /* field[1] = et */
   0,   /* field[0] = sn */
-  2,   /* field[2] = ts */
 };
-static const ProtobufCIntRange msg_payload__number_ranges[1 + 1] =
+static const ProtobufCIntRange msg_payload__number_ranges[2 + 1] =
 {
   { 1, 0 },
-  { 0, 4 }
+  { 4, 2 },
+  { 0, 3 }
 };
 const ProtobufCMessageDescriptor msg_payload__descriptor =
 {
@@ -257,10 +245,10 @@ const ProtobufCMessageDescriptor msg_payload__descriptor =
   "MsgPayload",
   "",
   sizeof(MsgPayload),
-  4,
+  3,
   msg_payload__field_descriptors,
   msg_payload__field_indices_by_name,
-  1,  msg_payload__number_ranges,
+  2,  msg_payload__number_ranges,
   (ProtobufCMessageInit) msg_payload__init,
   NULL,NULL,NULL    /* reserved[123] */
 };

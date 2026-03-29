@@ -77,11 +77,6 @@ static void dispatcher_task(void *arg)
             {
                 msg.sn = SN;
             }
-            if (msg.ts == 0)
-            {
-                msg.ts = esp_timer_get_time() / 1000; // us -> ms
-            }
-
             // 序列化 MsgPayload
             size_t packed_size = msg_payload__get_packed_size(&msg);
             uint8_t *buffer = malloc(packed_size);

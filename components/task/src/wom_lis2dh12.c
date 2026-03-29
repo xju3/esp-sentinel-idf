@@ -93,10 +93,10 @@ static void wom_beep(uint8_t count, uint32_t min_gap_ms)
 // ---------------------------------------------------------------------------
 static lis2dh12_wom_cfg_t s_default_wom_cfg = {
     .fs = LIS2DH12_FS_2G,
-    .threshold_mg_int1 = 1000, // vibration/shock
-    .duration_int1 = 0,
-    .threshold_mg_int2 = 2000, // posture/orientation
-    .duration_int2 = 5,
+    .threshold_mg_int1 = 600, // vibration/shock
+    .duration_int1 = 3,        // 3 × 20 ms = 60 ms
+    .threshold_mg_int2 = 1200, // posture/orientation
+    .duration_int2 = 6,
 };
 
 static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
