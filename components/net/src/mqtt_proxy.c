@@ -56,7 +56,7 @@ static void mqtt_event_handler(void *handler_args,
 }
 
 // 初始化 MQTT 客户端
-esp_err_t mqtt_client_init(void)
+esp_err_t init_mqtt_client(void)
 {
     if (g_mqtt_client != NULL)
     {

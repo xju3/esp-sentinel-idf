@@ -28,6 +28,11 @@ extern "C"
 {
 #endif
 
+#ifndef IMU
+#define IMU 1
+#endif
+
+
 #define LSB_TO_G_2G (2.0f / 32768.0f)
 #define LSB_TO_G_4G (4.0f / 32768.0f)
 #define LSB_TO_G_8G (8.0f / 32768.0f)

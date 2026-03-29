@@ -7,8 +7,8 @@
 #include "lwip/sockets.h"
 #include "logger.h"
 
-// 静态变量用于存储连接成功回调函数
-static void (*s_connected_callback)(void) = NULL;
+// STA 连接成功回调（仅 STA 使用）
+static cb_wifi_connected s_wifi_connected_cb = NULL;
 
 // 内部事件处理函数，处理STA连接成功事件和IP获取事件
 static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
@@ -22,18 +22,16 @@ static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
     {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         LOG_INFOF("Got IP address: " IPSTR, IP2STR(&event->ip_info.ip));
-
         // 等待网络完全就绪
         vTaskDelay(pdMS_TO_TICKS(1000));
-
-        if (s_connected_callback != NULL)
+        if (s_wifi_connected_cb)
         {
-            s_connected_callback();
+            s_wifi_connected_cb();
         }
     }
 }
 
-esp_err_t wifi_init_sta(const char *ssid, const char *pass)
+esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_wifi_connected cb)
 {
     if (!ssid || ssid[0] == '\0')
     {
@@ -42,6 +40,7 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass)
     }
 
     // 保存回调函数
+    s_wifi_connected_cb = cb;
 
     // 使用公共初始化函数，创建 STA 网络接口（不需要 AP）
     ESP_ERROR_CHECK(wifi_common_init(false, true));
@@ -49,6 +48,7 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass)
     // 注册STA连接成功和IP获取事件处理器
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &wifi_sta_event_handler, NULL, NULL));
+
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL, NULL));
 

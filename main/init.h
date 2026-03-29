@@ -7,16 +7,13 @@
 #include "bsp_wifi.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
-extern bool is_network_available;
-esp_err_t init_nvs();
-esp_err_t init_ds18b20();
-esp_err_t init_imu_sensors();
-esp_err_t enable_tasks();
-esp_err_t init_comm_channel();
-esp_err_t enable_mqtt_proxy();
-void enable_config_service();
+    extern bool is_network_available;
+    esp_err_t init_nvs();
+    esp_err_t establish_communication_channel();
+    void enable_config_service();
 #ifdef __cplusplus
 }
 #endif

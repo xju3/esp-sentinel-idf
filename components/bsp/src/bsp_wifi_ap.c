@@ -19,6 +19,7 @@ void captive_dns_stop(void);
 // 静态变量跟踪事件循环是否已初始化
 static bool s_event_loop_initialized = false;
 
+
 // AP 参数定义
 #define SENTINEL_WIFI_PASS "12345678"
 #define SENTINEL_MAX_CONN 4

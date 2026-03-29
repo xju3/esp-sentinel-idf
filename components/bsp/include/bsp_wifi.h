@@ -3,6 +3,7 @@
 
 #include "esp_err.h"
 #include "esp_event.h"
+#include "bsp_network.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -29,13 +30,16 @@ esp_err_t scan_wifi(void);
  * @param connected_cb Wi-Fi连接成功后的回调函数（可选，可为NULL）
  * @return esp_err_t 返回 ESP_OK 表示连接成功
  */
-esp_err_t wifi_init_sta(const char *ssid, const char *pass);
+esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_wifi_connected cb);
+
 
 /**
  * @brief Wi-Fi 扫描完成标志
  * * 当 Wi-Fi 扫描完成时设置为 true
  */
 extern volatile bool s_scan_done;
+
+
 
 /**
  * @brief Wi-Fi 扫描开始标志

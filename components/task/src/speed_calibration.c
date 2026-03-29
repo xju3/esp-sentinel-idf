@@ -29,9 +29,9 @@ static void calib_data_handler(const imu_raw_data_t *data, size_t count, void *c
         if (s_calib_write_idx >= CALIB_FFT_SIZE) break;
 
         // 转换为物理量 (g)
-        float x = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
-        float y = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
-        float z = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
+        float x = (float)data[i].x * LSB_TO_G_16G;
+        float y = (float)data[i].y * LSB_TO_G_16G;
+        float z = (float)data[i].z * LSB_TO_G_16G;
 
         // 存入平面化 Buffer
         s_calib_raw_buf[s_calib_write_idx] = x;

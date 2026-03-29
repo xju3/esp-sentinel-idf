@@ -20,7 +20,7 @@
 
 static SemaphoreHandle_t s_spi_mutex = NULL;
 static spi_device_handle_t s_spi_handle = NULL;
-static icm_data_cb_t s_data_cb = NULL;
+static imu_data_cb_t s_data_cb = NULL;
 
 static uint8_t *s_dma_ping = NULL;
 static uint8_t *s_dma_pong = NULL;
@@ -28,6 +28,21 @@ static bool icm_42688_p_initialized = false;
 static volatile bool s_stream_running = false;
 static TaskHandle_t s_dma_task_handle = NULL;
 static float s_current_odr_hz = 0.0f;
+
+static inline int16_t icm_bswap16(int16_t v)
+{
+    return (int16_t)__builtin_bswap16((uint16_t)v);
+}
+
+static void icm_fix_endianness(imu_raw_data_t *data, size_t count)
+{
+    for (size_t i = 0; i < count; i++)
+    {
+        data[i].x = icm_bswap16(data[i].x);
+        data[i].y = icm_bswap16(data[i].y);
+        data[i].z = icm_bswap16(data[i].z);
+    }
+}
 
 /* ========================================================================= *
  * 底层 SPI 读写辅助函数 (加锁)
@@ -278,7 +293,9 @@ static void icm_dma_worker_task(void *arg)
         {
             if (s_stream_running && s_data_cb)
             {
-                s_data_cb((const imu_raw_data_t *)p_trans->rx_buffer, DMA_CHUNK_SAMPLES);
+                imu_raw_data_t *dst = (imu_raw_data_t *)p_trans->rx_buffer;
+                icm_fix_endianness(dst, DMA_CHUNK_SAMPLES);
+                s_data_cb(dst, DMA_CHUNK_SAMPLES);
             }
         }
     }
@@ -291,7 +308,7 @@ static void icm_dma_worker_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb)
+esp_err_t drv_icm42688_start_stream(imu_data_cb_t cb)
 {
     if (!cb || !s_spi_handle)
         return ESP_ERR_INVALID_ARG;

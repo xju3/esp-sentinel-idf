@@ -23,7 +23,7 @@ extern esp_mqtt_client_handle_t g_mqtt_client;
  * * 在网络连接成功后调用，启动 MQTT_PROXY 客户端
  * * @return esp_err_t 返回 ESP_OK 表示初始化成功
  */
-esp_err_t mqtt_client_init(void);
+esp_err_t init_mqtt_client(void);
 
 #ifdef __cplusplus
 }

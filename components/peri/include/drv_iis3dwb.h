@@ -42,25 +42,17 @@ typedef enum {
 } iis3dwb_fs_t;
 
 typedef struct {
-    uint8_t header; // FIFO TAG
-    int16_t x;      // X-axis
-    int16_t y;      // Y-axis
-    int16_t z;      // Z-axis
-    int8_t  temp;   // reserved, align to imu_raw_data_t
-} __attribute__((packed)) ;
-
-typedef struct {
     iis3dwb_fs_t fs;
 } iis3dwb_cfg_t;
 
-typedef void (*iis3dwb_data_cb_t)(const iis3dwb_raw_data_t *data, size_t count);
 
 // Sensor driver instance for imu_config
 extern SensorDriver_t iis3dwb_driver;
 
 esp_err_t drv_iis3dwb_init(void);
 esp_err_t drv_iis3dwb_config(const iis3dwb_cfg_t *cfg);
-esp_err_t drv_iis3dwb_start_stream(iis3dwb_data_cb_t cb);
+esp_err_t drv_iis3dwb_start_stream(imu_data_cb_t cb);
+esp_err_t drv_iis3dwb_start_stream_ex(imu_data_cb_ctx_t cb, void *user_ctx);
 esp_err_t drv_iis3dwb_stop_stream(void);
 
 #ifdef __cplusplus

@@ -38,14 +38,6 @@ typedef enum {
     ICM_FS_2G  = 0x03  
 } icm_fs_t;
 
-// 原始数据包结构 (DMA 直接灌装)
-typedef struct {
-    uint8_t header; // 数据包头
-    int16_t x;      // 原始X轴
-    int16_t y;      // 原始Y轴
-    int16_t z;      // 原始Z轴
-    int8_t  temp;   // 8位截断温度辅助数据
-} __attribute__((packed)) imu_raw_data_t;
 
 // 业务下发的硬件配置 (去除了 ODR)
 typedef struct {
@@ -54,16 +46,13 @@ typedef struct {
     uint16_t wom_thr_mg;// WoM 唤醒阈值 (单位: 毫g，例如 200)
 } icm_cfg_t;
 
-// DMA 批量数据就绪回调函数签名
-typedef void (*icm_data_cb_t)(const imu_raw_data_t *data, size_t count);
-
 // 暴露出 HAL 驱动实例，供应用层传入调度器
 extern SensorDriver_t icm42688_driver;
 
 /* --- 驱动 API --- */
 esp_err_t drv_icm42688_init();
 esp_err_t drv_icm42688_config(const icm_cfg_t *cfg);
-esp_err_t drv_icm42688_start_stream(icm_data_cb_t cb);
+esp_err_t drv_icm42688_start_stream(imu_data_cb_t cb);
 esp_err_t drv_icm42688_stop_stream(void);
 
 /* --- WoM API --- */

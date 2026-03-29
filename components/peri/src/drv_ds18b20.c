@@ -18,7 +18,7 @@ static float ds18b20_raw_to_celsius(int16_t raw_temp);
 static uint8_t ds18b20_crc8(const uint8_t *data, size_t len);
 
 // 驱动状态
-static bool s_initialized = false;
+bool g_ds18b20_initialized = false;
 static ds18b20_resolution_t s_current_resolution = DS18B20_RESOLUTION_12BIT;
 static uint64_t s_conversion_start_time = 0;
 static ds18b20_temp_cb_t s_temp_callback = NULL;
@@ -204,7 +204,7 @@ static uint8_t ds18b20_crc8(const uint8_t *data, size_t len) {
 // 公共函数实现
 
 esp_err_t drv_ds18b20_init(void) {
-    if (s_initialized) {
+    if (g_ds18b20_initialized) {
         return ESP_OK;
     }
     
@@ -233,13 +233,13 @@ esp_err_t drv_ds18b20_init(void) {
         // 继续初始化
     }
     
-    s_initialized = true;
+    g_ds18b20_initialized = true;
     LOG_DEBUG("DS18B20 initialized successfully");
     return ESP_OK;
 }
 
 esp_err_t drv_ds18b20_set_resolution(ds18b20_resolution_t resolution) {
-    if (!s_initialized) {
+    if (!g_ds18b20_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -281,7 +281,7 @@ esp_err_t drv_ds18b20_set_resolution(ds18b20_resolution_t resolution) {
 }
 
 esp_err_t drv_ds18b20_start_conversion(void) {
-    if (!s_initialized) {
+    if (!g_ds18b20_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -303,7 +303,7 @@ esp_err_t drv_ds18b20_start_conversion(void) {
 }
 
 bool drv_ds18b20_is_conversion_done(void) {
-    if (!s_initialized || s_conversion_start_time == 0) {
+    if (!g_ds18b20_initialized || s_conversion_start_time == 0) {
         return false;
     }
     
@@ -332,7 +332,7 @@ bool drv_ds18b20_is_conversion_done(void) {
 }
 
 esp_err_t drv_ds18b20_read_temperature(float *temperature) {
-    if (!s_initialized) {
+    if (!g_ds18b20_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -399,7 +399,7 @@ esp_err_t drv_ds18b20_read_temperature(float *temperature) {
 }
 
 esp_err_t drv_ds18b20_read_temperature_async(ds18b20_temp_cb_t callback) {
-    if (!s_initialized) {
+    if (!g_ds18b20_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     
@@ -426,7 +426,7 @@ esp_err_t drv_ds18b20_read_temperature_async(ds18b20_temp_cb_t callback) {
 }
 
 esp_err_t drv_ds18b20_self_test(void) {
-    if (!s_initialized) {
+    if (!g_ds18b20_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
     

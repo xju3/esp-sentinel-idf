@@ -24,14 +24,16 @@
 
 static SemaphoreHandle_t s_spi_mutex = NULL;
 static spi_device_handle_t s_spi_handle = NULL;
-static iis3dwb_data_cb_t s_data_cb = NULL;
+static imu_data_cb_t s_data_cb = NULL;
+static imu_data_cb_ctx_t s_data_cb_ctx = NULL;
+static void *s_data_cb_user_ctx = NULL;
 
 static uint8_t *s_dma_ping_raw = NULL;
 static uint8_t *s_dma_pong_raw = NULL;
-static iis3dwb_raw_data_t *s_conv_ping = NULL;
-static iis3dwb_raw_data_t *s_conv_pong = NULL;
+static imu_raw_data_t *s_conv_ping = NULL;
+static imu_raw_data_t *s_conv_pong = NULL;
 
-static bool s_initialized = false;
+static bool g_ds18b20_initialized = false;
 static volatile bool s_stream_running = false;
 static TaskHandle_t s_dma_task_handle = NULL;
 static float s_current_odr_hz = IIS3DWB_ODR_HZ;
@@ -64,7 +66,7 @@ static inline int16_t iis3dwb_le16(const uint8_t *p)
     return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
 }
 
-static void iis3dwb_unpack_fifo(const uint8_t *raw, iis3dwb_raw_data_t *out, size_t count)
+static void iis3dwb_unpack_fifo(const uint8_t *raw, imu_raw_data_t *out, size_t count)
 {
     const uint8_t *p = raw;
     for (size_t i = 0; i < count; i++)
@@ -100,7 +102,7 @@ SensorDriver_t iis3dwb_driver = {
 
 esp_err_t drv_iis3dwb_init(void)
 {
-    if (s_initialized)
+    if (g_ds18b20_initialized)
         return ESP_OK;
 
     if (s_spi_mutex == NULL)
@@ -139,9 +141,9 @@ esp_err_t drv_iis3dwb_init(void)
     if (!s_dma_ping_raw || !s_dma_pong_raw)
         return ESP_ERR_NO_MEM;
 
-    s_conv_ping = (iis3dwb_raw_data_t *)heap_caps_malloc(sizeof(iis3dwb_raw_data_t) * DMA_CHUNK_SAMPLES,
+    s_conv_ping = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * DMA_CHUNK_SAMPLES,
                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_conv_pong = (iis3dwb_raw_data_t *)heap_caps_malloc(sizeof(iis3dwb_raw_data_t) * DMA_CHUNK_SAMPLES,
+    s_conv_pong = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * DMA_CHUNK_SAMPLES,
                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_conv_ping || !s_conv_pong)
         return ESP_ERR_NO_MEM;
@@ -154,7 +156,7 @@ esp_err_t drv_iis3dwb_init(void)
 
     iis3dwb_write_reg(IIS3DWB_REG_CTRL3_C, IIS3DWB_CTRL3_C_BDU_IF_INC);
 
-    s_initialized = true;
+    g_ds18b20_initialized = true;
     return ESP_OK;
 }
 
@@ -207,12 +209,19 @@ static void iis3dwb_dma_worker_task(void *arg)
         spi_transaction_t *p_trans = NULL;
         if (spi_device_get_trans_result(s_spi_handle, &p_trans, portMAX_DELAY) == ESP_OK)
         {
-            if (s_stream_running && s_data_cb)
+            if (s_stream_running && (s_data_cb || s_data_cb_ctx))
             {
                 const uint8_t *raw = (const uint8_t *)p_trans->rx_buffer;
-                iis3dwb_raw_data_t *dst = (raw == s_dma_ping_raw) ? s_conv_ping : s_conv_pong;
+                imu_raw_data_t *dst = (raw == s_dma_ping_raw) ? s_conv_ping : s_conv_pong;
                 iis3dwb_unpack_fifo(raw, dst, DMA_CHUNK_SAMPLES);
-                s_data_cb(dst, DMA_CHUNK_SAMPLES);
+                if (s_data_cb_ctx)
+                {
+                    s_data_cb_ctx(dst, DMA_CHUNK_SAMPLES, s_data_cb_user_ctx);
+                }
+                else if (s_data_cb)
+                {
+                    s_data_cb(dst, DMA_CHUNK_SAMPLES);
+                }
             }
         }
     }
@@ -225,7 +234,7 @@ static void iis3dwb_dma_worker_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t drv_iis3dwb_start_stream(iis3dwb_data_cb_t cb)
+esp_err_t drv_iis3dwb_start_stream(imu_data_cb_t cb)
 {
     if (!cb || !s_spi_handle)
         return ESP_ERR_INVALID_ARG;
@@ -233,6 +242,8 @@ esp_err_t drv_iis3dwb_start_stream(iis3dwb_data_cb_t cb)
         return ESP_ERR_INVALID_STATE;
 
     s_data_cb = cb;
+    s_data_cb_ctx = NULL;
+    s_data_cb_user_ctx = NULL;
     s_stream_running = true;
 
     iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL4, IIS3DWB_FIFO_MODE_BYPASS);
@@ -252,6 +263,36 @@ esp_err_t drv_iis3dwb_start_stream(iis3dwb_data_cb_t cb)
     return ESP_OK;
 }
 
+esp_err_t drv_iis3dwb_start_stream_ex(imu_data_cb_ctx_t cb, void *user_ctx)
+{
+    if (!cb || !s_spi_handle)
+        return ESP_ERR_INVALID_ARG;
+    if (s_stream_running)
+        return ESP_ERR_INVALID_STATE;
+
+    s_data_cb_ctx = cb;
+    s_data_cb_user_ctx = user_ctx;
+    s_data_cb = NULL;
+    s_stream_running = true;
+
+    iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL4, IIS3DWB_FIFO_MODE_BYPASS);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL1, 0x00);
+    iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL2, 0x00);
+    iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL3, IIS3DWB_FIFO_BDR_XL_26667);
+    iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL4, IIS3DWB_FIFO_MODE_CONTINUOUS);
+
+    if (xTaskCreatePinnedToCore(iis3dwb_dma_worker_task, "iis3dwb_dma_task", 4096, NULL,
+                                configMAX_PRIORITIES - 1, &s_dma_task_handle, 1) != pdPASS)
+    {
+        s_stream_running = false;
+        s_data_cb_ctx = NULL;
+        s_data_cb_user_ctx = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
 esp_err_t drv_iis3dwb_stop_stream(void)
 {
     if (!s_stream_running)
@@ -264,5 +305,7 @@ esp_err_t drv_iis3dwb_stop_stream(void)
         vTaskDelay(pdMS_TO_TICKS(1));
     }
     s_data_cb = NULL;
+    s_data_cb_ctx = NULL;
+    s_data_cb_user_ctx = NULL;
     return ESP_OK;
 }

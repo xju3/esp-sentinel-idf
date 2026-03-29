@@ -179,6 +179,8 @@ esp_err_t drv_ds18b20_read_temperature_async(ds18b20_temp_cb_t callback);
  */
 esp_err_t drv_ds18b20_self_test(void);
 
+extern bool g_ds18b20_initialized;
+
 #ifdef __cplusplus
 }
 #endif

@@ -4,6 +4,7 @@ idf_component_register(
         "src/bsp_wifi_sta.c" 
         "src/captive_dns.c" 
         "src/bsp_4g.c"
+        "src/bsp_network.c"
     INCLUDE_DIRS 
         "include"
     REQUIRES 

@@ -6,6 +6,7 @@
 
 #include "cJSON.h"
 #include "esp_err.h"
+#include "task_stash.h"
 
 #ifdef __cplusplus
 extern "C" {

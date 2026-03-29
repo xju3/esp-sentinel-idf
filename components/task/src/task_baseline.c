@@ -3,6 +3,7 @@
 #include "algo_welford.h"
 #include "config_manager.h"
 #include "drv_icm_42688_p.h"
+#include "drv_iis3dwb.h"
 #include "daq_icm_42688_p.h"
 #include "fs_utils.h"
 #include "logger.h"
@@ -21,6 +22,15 @@
 // Define global baseline variable
 vib_baseline_t g_baseline = {0};
 static int64_t baseline_sample_count = 0;
+static int64_t s_iis3dwb_skip_until_us = 0;
+static int64_t s_iis3dwb_end_time_us = 0;
+static volatile bool s_iis3dwb_capture_running = false;
+
+typedef struct
+{
+    vib_welford_3d_t *welford;
+    bool use_time_window;
+} baseline_cb_ctx_t;
 
 static void print_baseline()
 {
@@ -152,22 +162,60 @@ static void append_entry(const char *device_id, const vib_baseline_t *p)
     LOG_DEBUGF("file written: %s", FILE_PATH_DEVICE_PROFILE);
 }
 
+static esp_err_t handle_baseline_data(const char *device_id, vib_welford_3d_t *welford_st)
+{
+    // ==============================================================
+    // 3. 概念映射：统计学(Stats) -> 业务基线(Baseline)
+    // 利用您已有的提取函数，将方差转为 RMS 存入 offset
+    // ==============================================================
+    g_baseline.x.val = vib_welford_1d_mean(&welford_st->x);
+    g_baseline.y.val = vib_welford_1d_mean(&welford_st->y);
+    g_baseline.z.val = vib_welford_1d_mean(&welford_st->z);
+
+    // 您的库中提供的是方差(Var)，业务上这里通常记作环境噪声的 RMS (即标准差)
+    g_baseline.x.offset = sqrtf(vib_welford_1d_var_sample(&welford_st->x));
+    g_baseline.y.offset = sqrtf(vib_welford_1d_var_sample(&welford_st->y));
+    g_baseline.z.offset = sqrtf(vib_welford_1d_var_sample(&welford_st->z));
+
+    LOG_DEBUGF("Baseline sample count: %lld", baseline_sample_count);
+    baseline_sample_count = 0; // Reset for next time
+    print_baseline();
+    // vib_welford_3d_destroy(&welford_st);
+    append_entry(device_id, &g_baseline);
+    return ESP_OK;
+}
+
 // 专属的业务数据处理算子
 static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
-    vib_welford_3d_t *welford_st = (vib_welford_3d_t *)ctx;
+    baseline_cb_ctx_t *cb_ctx = (baseline_cb_ctx_t *)ctx;
+    if (!cb_ctx || !cb_ctx->welford)
+        return;
+
+    if (cb_ctx->use_time_window)
+    {
+        if (!s_iis3dwb_capture_running)
+            return;
+        int64_t now_us = esp_timer_get_time();
+        if (now_us < s_iis3dwb_skip_until_us || now_us > s_iis3dwb_end_time_us)
+            return;
+    }
+
     for (size_t i = 0; i < count; i++)
     {
-        float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
-        float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
-        float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
-        vib_welford_3d_update(welford_st, x_g, y_g, z_g);
+        float x_g = (float)data[i].x * LSB_TO_G_16G;
+        float y_g = (float)data[i].y * LSB_TO_G_16G;
+        float z_g = (float)data[i].z * LSB_TO_G_16G;
+        vib_welford_3d_update(cb_ctx->welford, x_g, y_g, z_g);
     }
     baseline_sample_count += 1;
 }
 
-esp_err_t set_device_baseline(const char *device_id)
+static esp_err_t handle_baseline_by_icm42688P(const char *device_id)
 {
+
+    esp_err_t err = ESP_OK;
+
     // bool existing = load_existing(device_id, &g_baseline);
     // if (existing)
     // {
@@ -188,38 +236,93 @@ esp_err_t set_device_baseline(const char *device_id)
     icm_cfg_t cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
     vib_welford_3d_t welford_st;
     vib_welford_3d_init(&welford_st);
+    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st, .use_time_window = false};
 
     // 召唤引擎！把配置、时间和自己的处理函数传进去
-    esp_err_t err = daq_icm_42688_p_capture(&cfg,
-                                            baseline_dsp_config.actual_time * 1000.0f,
-                                            baseline_chunk_handler,
-                                            &welford_st, 64, 0);
+    err = daq_icm_42688_p_capture(&cfg,
+                                  baseline_dsp_config.actual_time * 1000.0f,
+                                  baseline_chunk_handler,
+                                  &cb_ctx, 64, 0);
     if (err == ESP_OK)
     {
-        // ==============================================================
-        // 3. 概念映射：统计学(Stats) -> 业务基线(Baseline)
-        // 利用您已有的提取函数，将方差转为 RMS 存入 offset
-        // ==============================================================
-        g_baseline.x.val = vib_welford_1d_mean(&welford_st.x);
-        g_baseline.y.val = vib_welford_1d_mean(&welford_st.y);
-        g_baseline.z.val = vib_welford_1d_mean(&welford_st.z);
-
-        // 您的库中提供的是方差(Var)，业务上这里通常记作环境噪声的 RMS (即标准差)
-        g_baseline.x.offset = sqrtf(vib_welford_1d_var_sample(&welford_st.x));
-        g_baseline.y.offset = sqrtf(vib_welford_1d_var_sample(&welford_st.y));
-        g_baseline.z.offset = sqrtf(vib_welford_1d_var_sample(&welford_st.z));
+        err = handle_baseline_data(device_id, &welford_st);
+        if (err != ESP_OK)
+        {
+            LOG_WARN("failed to set baseline");
+        }
     }
+    return err;
+}
 
-    // 7. (极其重要) 基线算完后，拆除水管释放宝贵的内部 RAM！
+static esp_err_t handle_baseline_by_iis3dwb(const char *device_id)
+{
+    esp_err_t err = ESP_OK;
+    err = drv_iis3dwb_init();
     if (err != ESP_OK)
     {
-        LOG_ERROR("Baseline capture failed!");
-        return ESP_ERR_INVALID_STATE;
+        LOG_WARN("iis3dwb init failed");
+        return err;
     }
-    LOG_DEBUGF("Baseline sample count: %lld", baseline_sample_count);
-    baseline_sample_count = 0; // Reset for next time
-    print_baseline();
-    // vib_welford_3d_destroy(&welford_st);
-    append_entry(device_id, &g_baseline);
-    return ESP_OK;
+
+    DSP_Config_t baseline_dsp_config = IMU_Calculate_DSP_Config(
+        &iis3dwb_driver,
+        (float)g_user_config.rpm,
+        10.0f,   // C
+        10.0f,   // H
+        1000.0f, // F_env
+        1.0f     // delta_f_max
+    );
+    if (baseline_dsp_config.actual_time <= 0.0f || baseline_dsp_config.actual_odr <= 0.0f)
+    {
+        LOG_WARN("iis3dwb dsp config failed");
+        return ESP_FAIL;
+    }
+
+    iis3dwb_cfg_t cfg = {.fs = IIS3DWB_FS_16G};
+    err = drv_iis3dwb_config(&cfg);
+    if (err != ESP_OK)
+        return err;
+
+    vib_welford_3d_t welford_st;
+    vib_welford_3d_init(&welford_st);
+    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st, .use_time_window = true};
+
+    baseline_sample_count = 0;
+    s_iis3dwb_capture_running = true;
+
+    int64_t start_us = esp_timer_get_time();
+    s_iis3dwb_skip_until_us = start_us; // 暂不跳过启动瞬态
+    s_iis3dwb_end_time_us = start_us + (int64_t)(baseline_dsp_config.actual_time * 1000000.0f);
+
+    err = drv_iis3dwb_start_stream_ex(baseline_chunk_handler, &cb_ctx);
+    if (err != ESP_OK)
+    {
+        s_iis3dwb_capture_running = false;
+        return err;
+    }
+
+    while (esp_timer_get_time() < s_iis3dwb_end_time_us)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    s_iis3dwb_capture_running = false;
+    drv_iis3dwb_stop_stream();
+
+    err = handle_baseline_data(device_id, &welford_st);
+    if (err != ESP_OK)
+    {
+        LOG_WARN("failed to set baseline");
+    }
+
+    return err;
+}
+
+esp_err_t set_device_baseline(const char *device_id)
+{
+#if IMU == 1
+    return handle_baseline_by_iis3dwb(device_id);
+#else
+    return handle_baseline_by_icm42688P(device_id);
+#endif
 }

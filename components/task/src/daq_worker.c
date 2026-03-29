@@ -64,10 +64,7 @@ static inline void daq_push_sample(float x, float y, float z)
     s_buffer_write_idx++;
 }
 
-// ICM-42688-P 专用处理函数 (Big-Endian)
-// 注意：这是一个临时方案，用于 PoV 阶段。
-// 未来替换为 ST IIS3DWB 后，将与 LIS2DH12 一样使用 Little-Endian 处理逻辑，
-// 届时可以考虑合并 Handler 或使用统一的 ST 处理模板。
+// ICM-42688-P 专用处理函数
 static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, void *ctx)
 {
     for (size_t i = 0; i < count; i++)
@@ -76,9 +73,9 @@ static void daq_buffer_handler_icm(const imu_raw_data_t *data, size_t count, voi
         {
             break;
         }
-        const float x_g = (int16_t)__builtin_bswap16((uint16_t)data[i].x) * LSB_TO_G_16G;
-        const float y_g = (int16_t)__builtin_bswap16((uint16_t)data[i].y) * LSB_TO_G_16G;
-        const float z_g = (int16_t)__builtin_bswap16((uint16_t)data[i].z) * LSB_TO_G_16G;
+        const float x_g = (float)data[i].x * LSB_TO_G_16G;
+        const float y_g = (float)data[i].y * LSB_TO_G_16G;
+        const float z_g = (float)data[i].z * LSB_TO_G_16G;
         daq_push_sample(x_g, y_g, z_g);
     }
 }
@@ -250,37 +247,37 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     // This will block the state check handler from running concurrently.
     lock_system_task();
 
-    esp_err_t ret;
+    // esp_err_t ret;
 
-    if (param == NULL)
-    {
-        ret = ESP_ERR_INVALID_ARG;
-    } else {
-        // The original function body is now protected by the state check and mutex.
-        init_config(param);
+    // if (param == NULL)
+    // {
+    //     ret = ESP_ERR_INVALID_ARG;
+    // } else {
+    //     // The original function body is now protected by the state check and mutex.
+    //     init_config(param);
 
-        // 根据任务模式启动相应的工作
-        if (param->task_mode == TASK_MODE_PATROLING)
-        {
-            LOG_DEBUG("Starting patrol work...");
-            ret = start_patrolling_work();
-        }
-        else if (param->task_mode == TASK_MODE_DIAGNOSIS)
-        {
-            LOG_DEBUG("Starting diagnosis work...");
-            ret = start_diagnosing_work();
-        }
-        else
-        {
-            LOG_ERROR("Invalid task mode");
-            ret = ESP_ERR_INVALID_ARG;
-        }
-    }
+    //     // 根据任务模式启动相应的工作
+    //     if (param->task_mode == TASK_MODE_PATROLING)
+    //     {
+    //         LOG_DEBUG("Starting patrol work...");
+    //         ret = start_patrolling_work();
+    //     }
+    //     else if (param->task_mode == TASK_MODE_DIAGNOSIS)
+    //     {
+    //         LOG_DEBUG("Starting diagnosis work...");
+    //         ret = start_diagnosing_work();
+    //     }
+    //     else
+    //     {
+    //         LOG_ERROR("Invalid task mode");
+    //         ret = ESP_ERR_INVALID_ARG;
+    //     }
+    // }
 
     // 3. Unlock the mutex now that the blocking DAQ work is complete.
     unlock_system_task();
 
-    return ret;
+    return ESP_OK;
 }
 
 // /**

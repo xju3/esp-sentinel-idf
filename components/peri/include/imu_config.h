@@ -13,6 +13,21 @@ extern "C"
     /* 1. 数据结构定义                                                            */
     /* ========================================================================== */
 
+    // 原始数据包结构 (DMA 直接灌装)
+    typedef struct
+    {
+        uint8_t header; // 数据包头
+        int16_t x;      // 原始X轴
+        int16_t y;      // 原始Y轴
+        int16_t z;      // 原始Z轴
+        int8_t temp;    // 8位截断温度辅助数据
+    } __attribute__((packed)) imu_raw_data_t;
+
+    // DMA 批量数据就绪回调函数签名
+    typedef void (*imu_data_cb_t)(const imu_raw_data_t *data, size_t count); 
+    // DMA 批量数据就绪回调函数签名 (带用户上下文)
+    typedef void (*imu_data_cb_ctx_t)(const imu_raw_data_t *data, size_t count, void *user_ctx);
+
     /**
      * @brief DSP 综合配置结果结构体
      * 供上层算法分配内存和设置 FFT 参数使用
@@ -77,6 +92,8 @@ extern "C"
         float target_odr,
         uint32_t fft_points,
         float f_max_interest);
+
+
 #ifdef __cplusplus
 }
 #endif

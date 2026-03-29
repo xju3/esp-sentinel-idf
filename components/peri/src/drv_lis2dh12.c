@@ -80,7 +80,7 @@
 // --- Driver state ---
 static spi_device_handle_t s_spi_handle = NULL;
 static SemaphoreHandle_t s_spi_mutex = NULL;
-static bool s_initialized = false;
+static bool g_ds18b20_initialized = false;
 static float s_current_odr = 0.0f;
 static lis2dh12_fs_t s_current_fs = LIS2DH12_FS_2G;
 
@@ -223,7 +223,7 @@ SensorDriver_t lis2dh12_driver = {
 
 esp_err_t drv_lis2dh12_init(void)
 {
-    if (s_initialized)
+    if (g_ds18b20_initialized)
     {
         return ESP_OK;
     }
@@ -321,13 +321,13 @@ esp_err_t drv_lis2dh12_init(void)
     }
 
     LOG_DEBUG("LIS2DH12 initialized successfully");
-    s_initialized = true;
+    g_ds18b20_initialized = true;
     return ESP_OK;
 }
 
 esp_err_t drv_lis2dh12_set_config(lis2dh12_fs_t fs, float odr)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
 
     lis2dh12_config_odr_callback(odr);
@@ -341,7 +341,7 @@ esp_err_t drv_lis2dh12_set_config(lis2dh12_fs_t fs, float odr)
 
 esp_err_t drv_lis2dh12_get_raw_data(lis2dh12_raw_data_t *data)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
     if (!data)
         return ESP_ERR_INVALID_ARG;
@@ -379,7 +379,7 @@ esp_err_t drv_lis2dh12_self_test(void)
 
 esp_err_t drv_lis2dh12_read_int1_source(uint8_t *source)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
     if (!source)
         return ESP_ERR_INVALID_ARG;
@@ -388,7 +388,7 @@ esp_err_t drv_lis2dh12_read_int1_source(uint8_t *source)
 
 esp_err_t drv_lis2dh12_read_int2_source(uint8_t *source)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
     if (!source)
         return ESP_ERR_INVALID_ARG;
@@ -397,7 +397,7 @@ esp_err_t drv_lis2dh12_read_int2_source(uint8_t *source)
 
 esp_err_t drv_lis2dh12_read_register(uint8_t reg, uint8_t *value)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
     if (!value)
         return ESP_ERR_INVALID_ARG;
@@ -427,7 +427,7 @@ esp_err_t drv_lis2dh12_read_register(uint8_t reg, uint8_t *value)
 // ---------------------------------------------------------------------------
 esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
     if (!wom_cfg)
         return ESP_ERR_INVALID_ARG;
@@ -570,7 +570,7 @@ esp_err_t drv_lis2dh12_enable_wom(const lis2dh12_wom_cfg_t *wom_cfg)
 
 esp_err_t drv_lis2dh12_disable_wom(void)
 {
-    if (!s_initialized)
+    if (!g_ds18b20_initialized)
         return ESP_ERR_INVALID_STATE;
 
     LOG_DEBUG("Disabling WoM mode...");

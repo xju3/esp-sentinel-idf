@@ -156,7 +156,7 @@ static void rms_task_entry(void *arg)
             // 6. 生成报告并发送到数据分发器
             float temp = 0.0f;
             // 读取温度传感器
-            if (drv_ds18b20_read_temperature(&temp) != ESP_OK)
+            if (g_ds18b20_initialized && drv_ds18b20_read_temperature(&temp) != ESP_OK)
             {
                 LOG_ERROR("Failed to read temperature");
             }
