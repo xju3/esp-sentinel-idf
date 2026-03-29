@@ -5,12 +5,12 @@
 #include "drv_icm_42688_p.h"
 #include "drv_iis3dwb.h"
 #include "daq_icm_42688_p.h"
+#include "daq_iis3dwb.h"
 #include "fs_utils.h"
 #include "logger.h"
 #include "task_stash.h"
 // system
 #include "cJSON.h"
-#include "esp_timer.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -22,14 +22,10 @@
 // Define global baseline variable
 vib_baseline_t g_baseline = {0};
 static int64_t baseline_sample_count = 0;
-static int64_t s_iis3dwb_skip_until_us = 0;
-static int64_t s_iis3dwb_end_time_us = 0;
-static volatile bool s_iis3dwb_capture_running = false;
 
 typedef struct
 {
     vib_welford_3d_t *welford;
-    bool use_time_window;
 } baseline_cb_ctx_t;
 
 static void print_baseline()
@@ -192,20 +188,11 @@ static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, voi
     if (!cb_ctx || !cb_ctx->welford)
         return;
 
-    if (cb_ctx->use_time_window)
-    {
-        if (!s_iis3dwb_capture_running)
-            return;
-        int64_t now_us = esp_timer_get_time();
-        if (now_us < s_iis3dwb_skip_until_us || now_us > s_iis3dwb_end_time_us)
-            return;
-    }
-
     for (size_t i = 0; i < count; i++)
     {
-        float x_g = (float)data[i].x * LSB_TO_G_16G;
-        float y_g = (float)data[i].y * LSB_TO_G_16G;
-        float z_g = (float)data[i].z * LSB_TO_G_16G;
+        float x_g = (float)data[i].x * LSB_TO_G_2;
+        float y_g = (float)data[i].y * LSB_TO_G_2;
+        float z_g = (float)data[i].z * LSB_TO_G_2;
         vib_welford_3d_update(cb_ctx->welford, x_g, y_g, z_g);
     }
     baseline_sample_count += 1;
@@ -233,10 +220,10 @@ static esp_err_t handle_baseline_by_icm42688P(const char *device_id)
     );
 
     // 3. 配置传感器
-    icm_cfg_t cfg = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
+    icm_cfg_t cfg = {.fs = ICM_FS_2G, .enable_wom = false, .wom_thr_mg = 0};
     vib_welford_3d_t welford_st;
     vib_welford_3d_init(&welford_st);
-    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st, .use_time_window = false};
+    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st};
 
     // 召唤引擎！把配置、时间和自己的处理函数传进去
     err = daq_icm_42688_p_capture(&cfg,
@@ -257,7 +244,7 @@ static esp_err_t handle_baseline_by_icm42688P(const char *device_id)
 static esp_err_t handle_baseline_by_iis3dwb(const char *device_id)
 {
     esp_err_t err = ESP_OK;
-    err = drv_iis3dwb_init();
+    err = daq_iis3dwb_init();
     if (err != ESP_OK)
     {
         LOG_WARN("iis3dwb init failed");
@@ -272,42 +259,25 @@ static esp_err_t handle_baseline_by_iis3dwb(const char *device_id)
         1000.0f, // F_env
         1.0f     // delta_f_max
     );
+
     if (baseline_dsp_config.actual_time <= 0.0f || baseline_dsp_config.actual_odr <= 0.0f)
     {
         LOG_WARN("iis3dwb dsp config failed");
         return ESP_FAIL;
     }
 
-    iis3dwb_cfg_t cfg = {.fs = IIS3DWB_FS_16G};
-    err = drv_iis3dwb_config(&cfg);
-    if (err != ESP_OK)
-        return err;
-
+    iis3dwb_cfg_t cfg = {.fs = IIS3DWB_FS_2G};
     vib_welford_3d_t welford_st;
     vib_welford_3d_init(&welford_st);
-    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st, .use_time_window = true};
+    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st};
 
     baseline_sample_count = 0;
-    s_iis3dwb_capture_running = true;
-
-    int64_t start_us = esp_timer_get_time();
-    s_iis3dwb_skip_until_us = start_us; // 暂不跳过启动瞬态
-    s_iis3dwb_end_time_us = start_us + (int64_t)(baseline_dsp_config.actual_time * 1000000.0f);
-
-    err = drv_iis3dwb_start_stream_ex(baseline_chunk_handler, &cb_ctx);
+    err = daq_iis3dwb_capture(&cfg,
+                              baseline_dsp_config.actual_time * 1000.0f,
+                              baseline_chunk_handler,
+                              &cb_ctx, 64, 0);
     if (err != ESP_OK)
-    {
-        s_iis3dwb_capture_running = false;
         return err;
-    }
-
-    while (esp_timer_get_time() < s_iis3dwb_end_time_us)
-    {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
-    s_iis3dwb_capture_running = false;
-    drv_iis3dwb_stop_stream();
 
     err = handle_baseline_data(device_id, &welford_st);
     if (err != ESP_OK)

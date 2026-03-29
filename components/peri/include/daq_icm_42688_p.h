@@ -1,15 +1,13 @@
 #ifndef DAQ_ICM_42688_P_H_
 #define DAQ_ICM_42688_P_H_
 
-#include "drv_icm_42688_p.h"
 #include <stdint.h>
+#include "daq_common.h"
+#include "drv_icm_42688_p.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// 业务层用来接收数据的 回调合同
-typedef void (*daq_data_handler_t)(const imu_raw_data_t *data, size_t count, void *user_ctx);
 
 esp_err_t daq_icm_42688_p_init(void);
 

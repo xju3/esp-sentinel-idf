@@ -352,9 +352,9 @@ static void state_analysis_handler(const imu_raw_data_t *data, size_t count, voi
         }
 
         // Convert raw data to G's
-        const float x_g = (float)data[i].x * LSB_TO_G_16G;
-        const float y_g = (float)data[i].y * LSB_TO_G_16G;
-        const float z_g = (float)data[i].z * LSB_TO_G_16G;
+        const float x_g = (float)data[i].x * LSB_TO_G_16;
+        const float y_g = (float)data[i].y * LSB_TO_G_16;
+        const float z_g = (float)data[i].z * LSB_TO_G_16;
 
         // Update Welford stats for RMS calculation
         vib_welford_1d_update(&ctx->welford_state_x, x_g);

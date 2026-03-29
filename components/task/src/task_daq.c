@@ -167,75 +167,75 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
 
 esp_err_t start_task_daq(void)
 {
-    // // 创建互斥锁 (Mutex)
-    // s_daq_mutex = xSemaphoreCreateMutex();
-    // if (s_daq_mutex == NULL)
-    // {
-    //     LOG_ERROR("Failed to create mutex");
-    //     return ESP_ERR_INVALID_STATE;
-    // }
+    // 创建互斥锁 (Mutex)
+    s_daq_mutex = xSemaphoreCreateMutex();
+    if (s_daq_mutex == NULL)
+    {
+        LOG_ERROR("Failed to create mutex");
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    // // 创建任务上下文 (必须是 static 或堆内存，因为任务会长期引用)
-    // static task_context_t patrol_ctx = {
-    //     .task_mode = TASK_MODE_PATROLING,
-    //     .task_name = "Patrol"};
+    // 创建任务上下文 (必须是 static 或堆内存，因为任务会长期引用)
+    static task_context_t patrol_ctx = {
+        .task_mode = TASK_MODE_PATROLING,
+        .task_name = "Patrol"};
 
-    // static task_context_t diagnosis_ctx = {
-    //     .task_mode = TASK_MODE_DIAGNOSIS,
-    //     .task_name = "Diagnosis"};
+    static task_context_t diagnosis_ctx = {
+        .task_mode = TASK_MODE_DIAGNOSIS,
+        .task_name = "Diagnosis"};
 
-    // // 创建巡逻任务
-    // BaseType_t result = xTaskCreateWithCaps(
-    //     generic_task_handler,
-    //     "patrol_task",
-    //     4096,
-    //     &patrol_ctx,
-    //     2,
-    //     &patrol_task_handle,
-    //     TASK_MEM_CAPS);
+    // 创建巡逻任务
+    BaseType_t result = xTaskCreateWithCaps(
+        generic_task_handler,
+        "patrol_task",
+        4096,
+        &patrol_ctx,
+        2,
+        &patrol_task_handle,
+        TASK_MEM_CAPS);
 
-    // if (result != pdPASS)
-    // {
-    //     LOG_ERROR("Failed to create patrol task");
-    //     vSemaphoreDelete(s_daq_mutex);
-    //     return ESP_ERR_INVALID_STATE;
-    // }
+    if (result != pdPASS)
+    {
+        LOG_ERROR("Failed to create patrol task");
+        vSemaphoreDelete(s_daq_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
 
-    // // 创建诊断任务
-    // result = xTaskCreateWithCaps(
-    //     generic_task_handler,
-    //     "diagnosis_task",
-    //     4096,
-    //     &diagnosis_ctx,
-    //     3,
-    //     &diagnosis_task_handle,
-    //     TASK_MEM_CAPS);
+    // 创建诊断任务
+    result = xTaskCreateWithCaps(
+        generic_task_handler,
+        "diagnosis_task",
+        4096,
+        &diagnosis_ctx,
+        3,
+        &diagnosis_task_handle,
+        TASK_MEM_CAPS);
 
-    // if (result != pdPASS)
-    // {
-    //     LOG_ERROR("Failed to create diagnosis task");
-    //     vTaskDeleteWithCaps(patrol_task_handle);
-    //     vSemaphoreDelete(s_daq_mutex);
-    //     return ESP_ERR_INVALID_STATE;
-    // }
-    // // 初始化巡逻定时器（分钟级）
-    // LOG_DEBUGF("Initializing DAQ timers with patrol interval: %d minutes, diagnosis interval: %d minutes",
-    //            g_user_config.patrol, g_user_config.diagnosis);
+    if (result != pdPASS)
+    {
+        LOG_ERROR("Failed to create diagnosis task");
+        vTaskDeleteWithCaps(patrol_task_handle);
+        vSemaphoreDelete(s_daq_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    // 初始化巡逻定时器（分钟级）
+    LOG_DEBUGF("Initializing DAQ timers with patrol interval: %d minutes, diagnosis interval: %d minutes",
+               g_user_config.patrol, g_user_config.diagnosis);
 
-    // if (!init_task_timer(&patrol_timer_handle, patrol_task_handle,
-    //                      g_user_config.patrol, "Patrol"))
-    // {
-    //     LOG_WARN("Patrol timer not started");
-    // }
+    if (!init_task_timer(&patrol_timer_handle, patrol_task_handle,
+                         g_user_config.patrol, "Patrol"))
+    {
+        LOG_WARN("Patrol timer not started");
+    }
 
-    // // 初始化诊断定时器（分钟级）
-    // if (!init_task_timer(&diagnosis_timer_handle, diagnosis_task_handle,
-    //                      g_user_config.diagnosis, "Diagnosis"))
-    // {
-    //     LOG_WARN("Diagnosis timer not started");
-    // }
+    // 初始化诊断定时器（分钟级）
+    if (!init_task_timer(&diagnosis_timer_handle, diagnosis_task_handle,
+                         g_user_config.diagnosis, "Diagnosis"))
+    {
+        LOG_WARN("Diagnosis timer not started");
+    }
 
-    // LOG_INFO("DAQ tasks started successfully");
+    LOG_INFO("DAQ tasks started successfully");
 
     return ESP_OK;
 }
