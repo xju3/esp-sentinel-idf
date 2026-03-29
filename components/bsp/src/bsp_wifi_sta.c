@@ -8,7 +8,7 @@
 #include "logger.h"
 
 // STA 连接成功回调（仅 STA 使用）
-static cb_wifi_connected s_wifi_connected_cb = NULL;
+static cb_communication_channel_established s_wifi_connected_cb = NULL;
 
 // 内部事件处理函数，处理STA连接成功事件和IP获取事件
 static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
@@ -31,7 +31,7 @@ static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_wifi_connected cb)
+esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_communication_channel_established cb)
 {
     if (!ssid || ssid[0] == '\0')
     {

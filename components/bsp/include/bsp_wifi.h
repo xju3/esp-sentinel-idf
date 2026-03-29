@@ -30,7 +30,7 @@ esp_err_t scan_wifi(void);
  * @param connected_cb Wi-Fi连接成功后的回调函数（可选，可为NULL）
  * @return esp_err_t 返回 ESP_OK 表示连接成功
  */
-esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_wifi_connected cb);
+esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_communication_channel_established cb);
 
 
 /**

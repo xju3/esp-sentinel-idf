@@ -6,7 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef void (*cb_wifi_connected)(void);
+typedef void (*cb_communication_channel_established)(void);
 /**
  * @brief Initialize the network
  *

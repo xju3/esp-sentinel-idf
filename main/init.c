@@ -145,7 +145,7 @@ esp_err_t establish_communication_channel()
     if (g_user_config.network == 1)
     {
         LOG_INFO("Initializing 4G Module...");
-        err = ppp_4g_init();
+        err = ppp_4g_init(network_channel_established_handler);
         if (err == ESP_OK) // Ensure ppp_4g_init returns esp_err_t
         {
             LOG_DEBUG("communication channel established by 4G.");

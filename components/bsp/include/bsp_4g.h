@@ -3,6 +3,7 @@
 
 #include "esp_err.h"
 #include "esp_event.h"
+#include "bsp_network.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -13,7 +14,7 @@ extern "C" {
  * * 用于在没有 Wi-Fi 环境时，通过蜂窝网络上报数据。
  */
 
-esp_err_t ppp_4g_init();
+esp_err_t ppp_4g_init(cb_communication_channel_established cb);
 
 
 #ifdef __cplusplus
