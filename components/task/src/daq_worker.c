@@ -269,13 +269,6 @@ void config_icm_42688_p(daq_worker_param_t *param)
 
 void config_iis3dwb(daq_worker_param_t *param)
 {
-    esp_err_t err = ESP_OK;
-    err = drv_iis3dwb_init();
-    if (err != ESP_OK)
-    {
-        LOG_WARN("iis3dwb init failed");
-        return;
-    }
     if (param->task_mode == TASK_MODE_PATROLING)
     {
 

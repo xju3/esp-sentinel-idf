@@ -6,6 +6,11 @@
 #include "esp_err.h"
 #include "bsp_wifi.h"
 
+#ifndef IMU
+#define IMU 1
+#endif
+
+
 #ifdef __cplusplus
 extern "C"
 {

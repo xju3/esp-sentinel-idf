@@ -84,7 +84,7 @@ static void generic_task_handler(void *arg)
         // 由于 Diagnosis 任务优先级更高，一旦锁释放，它会优先获得锁并立即执行
         if (xSemaphoreTake(s_daq_mutex, portMAX_DELAY) == pdTRUE)
         {
-            LOG_INFOF("%s task triggered", ctx->task_name);
+            // LOG_INFOF("%s task triggered", ctx->task_name);
 
             daq_worker_param_t param = {
                 .rpm = g_user_config.rpm,
@@ -108,11 +108,15 @@ static void generic_task_handler(void *arg)
  * @param target_task 目标任务句柄
  * @param interval_minutes 定时器间隔（分钟）
  * @param timer_name 定时器名称（用于日志）
+ * @param accel_rate 加速测试（用于检查电池耗用）
  * @return true 定时器创建成功
  * @return false 定时器创建失败或间隔为0
  */
-static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target_task,
-                            int16_t interval_minutes, const char *timer_name)
+static bool init_task_timer(TimerHandle_t *timer_handle_ptr,
+                            TaskHandle_t target_task,
+                            int16_t interval_minutes,
+                            const char *timer_name,
+                            const int8_t accel_rate)
 {
     // 如果间隔为0，则禁用定时器
     if (interval_minutes <= 0)
@@ -123,7 +127,7 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr, TaskHandle_t target
     }
 
     // 计算间隔（分钟转换为毫秒）
-    uint64_t interval_ms = (uint64_t)interval_minutes * 60 * 1000;
+    uint64_t interval_ms = (uint64_t)interval_minutes * 60 * 1000 * (1 / accel_rate);
 
     // 检查是否超过最大允许值（portMAX_DELAY ticks）
     TickType_t interval_ticks = pdMS_TO_TICKS(interval_ms);
@@ -223,14 +227,14 @@ esp_err_t start_task_daq(void)
                g_user_config.patrol, g_user_config.diagnosis);
 
     if (!init_task_timer(&patrol_timer_handle, patrol_task_handle,
-                         g_user_config.patrol, "Patrol"))
+                         g_user_config.patrol, "Patrol", 10))
     {
         LOG_WARN("Patrol timer not started");
     }
 
     // 初始化诊断定时器（分钟级）
     if (!init_task_timer(&diagnosis_timer_handle, diagnosis_task_handle,
-                         g_user_config.diagnosis, "Diagnosis"))
+                         g_user_config.diagnosis, "Diagnosis", 1))
     {
         LOG_WARN("Diagnosis timer not started");
     }

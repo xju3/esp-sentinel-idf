@@ -39,6 +39,14 @@ static TaskHandle_t s_dma_task_handle = NULL;
 static float s_current_odr_hz = IIS3DWB_ODR_HZ;
 static iis3dwb_fs_t s_current_fs = IIS3DWB_FS_16G;
 
+iis3dwb_cfg_t iis3dwb_accel_fs_cfg_16 = {
+    .fs = IIS3DWB_FS_16G,
+};
+
+iis3dwb_cfg_t iis3dwb_accel_fs_cfg_2 = {
+    .fs = IIS3DWB_FS_2G,
+};
+
 static esp_err_t iis3dwb_write_reg(uint8_t reg, uint8_t data)
 {
     if (!s_spi_mutex)

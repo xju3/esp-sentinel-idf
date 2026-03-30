@@ -30,6 +30,17 @@
 #define IMU 1
 #endif
 
+static void init_drivers()
+{
+#if IMU == 1
+    drv_iis3dwb_init();
+#else
+    drv_ds18b20_init();
+    drv_lis2dh12_init();
+    drv_icm42688_init();
+#endif
+}
+
 static esp_err_t enable_tasks()
 {
     esp_err_t ret = start_task_daq();
@@ -59,26 +70,27 @@ static esp_err_t enable_tasks()
     }
 
     // Create the task that will handle state determination logic.
-    // create_state_check_handler_task();
+    create_state_check_handler_task();
 
-    // ret = start_wom_lis2dh12_listener();
-    // if (ret != ESP_OK)
-    // {
-    //     // Avoid reboot loops when LIS2DH12 is absent/miswired.
-    //     LOG_ERRORF("LIS2DH12 WoM listener disabled: %s", esp_err_to_name(ret));
-    // }
+    ret = start_wom_lis2dh12_listener();
+    if (ret != ESP_OK)
+    {
+        // Avoid reboot loops when LIS2DH12 is absent/miswired.
+        LOG_ERRORF("LIS2DH12 WoM listener disabled: %s", esp_err_to_name(ret));
+    }
     return ESP_OK;
 }
 
 static void network_channel_established_handler(void)
 {
+    init_drivers();
     esp_err_t err = init_mqtt_client();
     if (err != ESP_OK)
     {
         LOG_ERROR("MQTT proxy initialization failed.");
         return;
     }
-    
+
     err = data_dispatcher_start();
     if (err != ESP_OK)
     {
@@ -99,7 +111,6 @@ static void network_channel_established_handler(void)
         LOG_ERROR("Tasks initialization failed.");
         return;
     }
-
 
 #ifdef CONFIG_DEV_MODE // 开发模式下仍保留 Web 调试入口
     err = web_server_start();
@@ -126,19 +137,6 @@ esp_err_t init_nvs()
     return ret;
 }
 
-static esp_err_t init_ds18b20()
-{
-    // 直接调用，不要传递任何参数
-    esp_err_t ret = drv_ds18b20_init();
-
-    if (ret != ESP_OK)
-    {
-        LOG_DEBUGF("DS18B20 初始化失败: %s\n", esp_err_to_name(ret));
-    }
-    LOG_INFO("DS18B20 初始化成功！");
-    return ret;
-}
-
 esp_err_t establish_communication_channel()
 {
     esp_err_t err = ESP_OK;
@@ -162,13 +160,14 @@ esp_err_t establish_communication_channel()
         if (err == ESP_OK)
         {
             LOG_DEBUG("communication channel established by WIFI.");
-        } else {
+        }
+        else
+        {
             LOG_WARN("communication channel failed.");
         }
     }
     return err;
 }
-
 
 void enable_config_service()
 {

@@ -29,6 +29,12 @@ static volatile bool s_stream_running = false;
 static TaskHandle_t s_dma_task_handle = NULL;
 static float s_current_odr_hz = 0.0f;
 
+icm_cfg_t icm42688p_accel_fs_cfg_16 = {
+    .fs = ICM_FS_16G,
+    .enable_wom = false,
+    .wom_thr_mg = 0,
+};
+
 static inline int16_t icm_bswap16(int16_t v)
 {
     return (int16_t)__builtin_bswap16((uint16_t)v);
