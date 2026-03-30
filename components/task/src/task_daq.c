@@ -227,7 +227,7 @@ esp_err_t start_task_daq(void)
                g_user_config.patrol, g_user_config.diagnosis);
 
     if (!init_task_timer(&patrol_timer_handle, patrol_task_handle,
-                         g_user_config.patrol, "Patrol", 10))
+                         g_user_config.patrol, "Patrol", 12))
     {
         LOG_WARN("Patrol timer not started");
     }
