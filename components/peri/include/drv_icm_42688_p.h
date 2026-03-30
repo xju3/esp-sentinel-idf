@@ -30,6 +30,7 @@
 extern "C" {
 #endif
 
+
 // 满量程 (FS) 枚举
 typedef enum {
     ICM_FS_16G = 0x00, 
@@ -39,12 +40,15 @@ typedef enum {
 } icm_fs_t;
 
 
+
 // 业务下发的硬件配置 (去除了 ODR)
 typedef struct {
     icm_fs_t fs;        // 量程
     bool enable_wom;    // 是否开启 Wake-on-Motion (休眠守卫)
     uint16_t wom_thr_mg;// WoM 唤醒阈值 (单位: 毫g，例如 200)
 } icm_cfg_t;
+static icm_cfg_t 
+icm42688p_accel_fs_cfg_16 = {.fs = ICM_FS_16G, .enable_wom = false, .wom_thr_mg = 0};
 
 // 暴露出 HAL 驱动实例，供应用层传入调度器
 extern SensorDriver_t icm42688_driver;

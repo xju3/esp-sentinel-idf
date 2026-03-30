@@ -33,7 +33,7 @@ static uint8_t *s_dma_pong_raw = NULL;
 static imu_raw_data_t *s_conv_ping = NULL;
 static imu_raw_data_t *s_conv_pong = NULL;
 
-static bool g_ds18b20_initialized = false;
+static bool g_iis3dwb_initialized = false;
 static volatile bool s_stream_running = false;
 static TaskHandle_t s_dma_task_handle = NULL;
 static float s_current_odr_hz = IIS3DWB_ODR_HZ;
@@ -102,7 +102,7 @@ SensorDriver_t iis3dwb_driver = {
 
 esp_err_t drv_iis3dwb_init(void)
 {
-    if (g_ds18b20_initialized)
+    if (g_iis3dwb_initialized)
         return ESP_OK;
 
     if (s_spi_mutex == NULL)
@@ -156,7 +156,7 @@ esp_err_t drv_iis3dwb_init(void)
 
     iis3dwb_write_reg(IIS3DWB_REG_CTRL3_C, IIS3DWB_CTRL3_C_BDU_IF_INC);
 
-    g_ds18b20_initialized = true;
+    g_iis3dwb_initialized = true;
     return ESP_OK;
 }
 
