@@ -127,10 +127,12 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr,
     }
 
     // 计算间隔（分钟转换为毫秒）
-    uint64_t interval_ms = (uint64_t)interval_minutes * 60 * 1000 * (1 / accel_rate);
-
+    uint64_t interval_ms = (uint64_t)interval_minutes * 60 * 1000 / accel_rate;
+    LOG_DEBUGF("%s timer interval: %d minutes (%llu ms)",
+               timer_name, interval_minutes, interval_ms / 1000);
     // 检查是否超过最大允许值（portMAX_DELAY ticks）
     TickType_t interval_ticks = pdMS_TO_TICKS(interval_ms);
+
     if (interval_ticks == portMAX_DELAY)
     {
         LOG_ERRORF("%s timer interval too large: %d minutes", timer_name, interval_minutes);
@@ -227,7 +229,7 @@ esp_err_t start_task_daq(void)
                g_user_config.patrol, g_user_config.diagnosis);
 
     if (!init_task_timer(&patrol_timer_handle, patrol_task_handle,
-                         g_user_config.patrol, "Patrol", 12))
+                         g_user_config.patrol, "Patrol", 15))
     {
         LOG_WARN("Patrol timer not started");
     }
