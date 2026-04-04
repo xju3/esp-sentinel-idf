@@ -60,7 +60,7 @@ extern "C"
     typedef struct
     {
         float task_id;         // 任务 ID (可用于追踪和日志)
-        int32_t timestamp;     // 任务创建时间 (Unix 时间戳)
+        int32_t timestamp;     // 本次采集首条样本写入时间 (Unix 时间戳)
         uint32_t length;       // 单轴有效数据点数
         float *raw_data;       // 指向静态 Buffer 的指针 (平面化布局: X, Y, Z)
         float sample_rate;     // 实际采样率

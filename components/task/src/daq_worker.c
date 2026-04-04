@@ -37,7 +37,24 @@ esp_err_t start_diagnosing_work();
 
 static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
 
-static uint32_t s_buffer_write_idx = 0;
+typedef struct
+{
+    uint32_t write_idx;
+    int32_t first_sample_timestamp;
+} daq_capture_state_t;
+
+static daq_capture_state_t s_capture_state = {0};
+
+static inline void daq_capture_reset(void)
+{
+    s_capture_state.write_idx = 0;
+    s_capture_state.first_sample_timestamp = 0;
+}
+
+static inline uint32_t daq_capture_sample_count(void)
+{
+    return s_capture_state.write_idx;
+}
 
 static uint32_t get_capture_duration_ms(const DSP_Config_t *cfg)
 {
@@ -58,14 +75,19 @@ static uint32_t get_capture_duration_ms(const DSP_Config_t *cfg)
  */
 static inline void daq_push_sample(float x, float y, float z)
 {
-    if (s_buffer_write_idx >= MAX_DAQ_SAMPLES)
+    if (s_capture_state.write_idx >= MAX_DAQ_SAMPLES)
         return;
 
-    s_vib_buffer[s_buffer_write_idx] = x;
-    s_vib_buffer[MAX_DAQ_SAMPLES + s_buffer_write_idx] = y;
-    s_vib_buffer[MAX_DAQ_SAMPLES * 2 + s_buffer_write_idx] = z;
+    if (s_capture_state.write_idx == 0)
+    {
+        s_capture_state.first_sample_timestamp = (int32_t)time(NULL);
+    }
 
-    s_buffer_write_idx++;
+    s_vib_buffer[s_capture_state.write_idx] = x;
+    s_vib_buffer[MAX_DAQ_SAMPLES + s_capture_state.write_idx] = y;
+    s_vib_buffer[MAX_DAQ_SAMPLES * 2 + s_capture_state.write_idx] = z;
+
+    s_capture_state.write_idx++;
 }
 
 // ICM-42688-P 专用处理函数
@@ -74,7 +96,7 @@ static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *c
     (void)ctx;
     for (size_t i = 0; i < count; i++)
     {
-        if (s_buffer_write_idx >= MAX_DAQ_SAMPLES)
+        if (daq_capture_sample_count() >= MAX_DAQ_SAMPLES)
         {
             break;
         }
@@ -142,7 +164,7 @@ esp_err_t start_patrolling_work()
         return ESP_ERR_INVALID_STATE;
     }
 
-    s_buffer_write_idx = 0;
+    daq_capture_reset();
     esp_err_t ret = ESP_OK;
 
 #if IMU == 1
@@ -155,16 +177,17 @@ esp_err_t start_patrolling_work()
         LOG_ERRORF("Patrol capture failed: %d", ret);
         return ret;
     }
-    if (s_buffer_write_idx < patrol_config.fft_points)
+    if (daq_capture_sample_count() < patrol_config.fft_points)
     {
-        LOG_ERRORF("Patrol samples insufficient: %lu/%lu", s_buffer_write_idx, patrol_config.fft_points);
+        LOG_ERRORF("Patrol samples insufficient: %lu/%lu", daq_capture_sample_count(), patrol_config.fft_points);
         return ESP_ERR_INVALID_SIZE;
     }
     LOG_DEBUGF("Patrol samples captured: %lu, using fixed FFT window=%lu",
-               s_buffer_write_idx, patrol_config.fft_points);
+               daq_capture_sample_count(), patrol_config.fft_points);
 
     // 巡逻工作完成后，将数据发送给 RMS 任务进行分析
     vib_job_t job = {
+        .timestamp = s_capture_state.first_sample_timestamp,
         .raw_data = s_vib_buffer,
         .length = patrol_config.fft_points,
         .sample_rate = patrol_config.actual_odr,
@@ -174,7 +197,7 @@ esp_err_t start_patrolling_work()
         xQueueSend(g_rms_job_queue, &job, 0);
     }
 
-    s_buffer_write_idx = 0;
+    daq_capture_reset();
     return ESP_OK;
 }
 
@@ -195,7 +218,7 @@ esp_err_t start_diagnosing_work()
         LOG_ERROR(" Diagnosis config is not initialized");
         return ESP_ERR_INVALID_STATE;
     }
-    s_buffer_write_idx = 0; // 重置写入索引
+    daq_capture_reset();
     esp_err_t ret = ESP_OK;
 #if IMU == 1
     ret = data_acquire_by_iis3dwb(TASK_MODE_DIAGNOSIS);
@@ -208,15 +231,16 @@ esp_err_t start_diagnosing_work()
         LOG_ERRORF(" Diagnosis capture failed: %d", ret);
         return ret;
     }
-    if (s_buffer_write_idx < diagnosis_config.fft_points)
+    if (daq_capture_sample_count() < diagnosis_config.fft_points)
     {
-        LOG_ERRORF("Diagnosis samples insufficient: %lu/%lu", s_buffer_write_idx, diagnosis_config.fft_points);
+        LOG_ERRORF("Diagnosis samples insufficient: %lu/%lu", daq_capture_sample_count(), diagnosis_config.fft_points);
         return ESP_ERR_INVALID_SIZE;
     }
     LOG_INFOF("Diagnosis samples captured: %lu, using fixed FFT window=%lu",
-              s_buffer_write_idx, diagnosis_config.fft_points);
+              daq_capture_sample_count(), diagnosis_config.fft_points);
 
     vib_job_t job = {
+        .timestamp = s_capture_state.first_sample_timestamp,
         .raw_data = s_vib_buffer,
         .length = diagnosis_config.fft_points,
         .sample_rate = diagnosis_config.actual_odr,

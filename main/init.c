@@ -20,114 +20,23 @@
 #include "web_server.h"
 
 #include "esp_err.h"
-#include "esp_netif_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 #include <string.h>
-#include <time.h>
 
 #ifndef IMU
 #define IMU 1
 #endif
 
-#define NTP_SYNC_WAIT_TIMEOUT_MS 30000
-
-static bool s_ntp_initialized = false;
-static TaskHandle_t s_ntp_wait_task_handle = NULL;
-
-static void ntp_time_sync_notification_cb(struct timeval *tv)
-{
-    time_t now = tv->tv_sec;
-    struct tm utc_time = {0};
-    char time_buf[32] = {0};
-
-    gmtime_r(&now, &utc_time);
-    strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S UTC", &utc_time);
-    LOG_INFOF("NTP time synchronized: %s", time_buf);
-}
-
-static void ntp_sync_wait_task(void *arg)
-{
-    (void)arg;
-
-    esp_err_t err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(NTP_SYNC_WAIT_TIMEOUT_MS));
-    if (err == ESP_OK)
-    {
-        LOG_INFO("NTP initial synchronization completed.");
-    }
-    else if (err == ESP_ERR_TIMEOUT)
-    {
-        LOG_WARN("NTP initial synchronization timed out.");
-    }
-    else
-    {
-        LOG_WARNF("NTP sync wait failed: %s", esp_err_to_name(err));
-    }
-
-    s_ntp_wait_task_handle = NULL;
-    vTaskDelete(NULL);
-}
-
-static esp_err_t start_ntp_sync(void)
-{
-    esp_err_t err = ESP_OK;
-
-    if (!s_ntp_initialized)
-    {
-        esp_sntp_config_t ntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(
-            3,
-            ESP_SNTP_SERVER_LIST("ntp.aliyun.com", "ntp1.aliyun.com", "pool.ntp.org"));
-        ntp_cfg.wait_for_sync = true;
-        ntp_cfg.sync_cb = ntp_time_sync_notification_cb;
-
-        err = esp_netif_sntp_init(&ntp_cfg);
-        if (err != ESP_OK)
-        {
-            return err;
-        }
-
-        s_ntp_initialized = true;
-        LOG_INFO("NTP service started.");
-    }
-    else
-    {
-        err = esp_netif_sntp_start();
-        if (err != ESP_OK)
-        {
-            return err;
-        }
-        LOG_INFO("NTP resynchronization triggered.");
-    }
-
-    if (s_ntp_wait_task_handle == NULL)
-    {
-        BaseType_t created = xTaskCreate(
-            ntp_sync_wait_task,
-            "ntp_sync_wait",
-            3072,
-            NULL,
-            tskIDLE_PRIORITY + 1,
-            &s_ntp_wait_task_handle);
-        if (created != pdTRUE)
-        {
-            s_ntp_wait_task_handle = NULL;
-            LOG_WARN("Failed to create NTP sync wait task.");
-            return ESP_ERR_NO_MEM;
-        }
-    }
-
-    return ESP_OK;
-}
-
 static void init_drivers()
 {
+    drv_ds18b20_init();
+    drv_lis2dh12_init();
 #if IMU == 1
     drv_iis3dwb_init();
 #else
-    drv_ds18b20_init();
-    drv_lis2dh12_init();
     drv_icm42688_init();
 #endif
 }
@@ -174,14 +83,8 @@ static esp_err_t enable_tasks()
 
 static void network_channel_established_handler(void)
 {
-    esp_err_t err = start_ntp_sync();
-    if (err != ESP_OK)
-    {
-        LOG_WARNF("NTP synchronization startup failed: %s", esp_err_to_name(err));
-    }
-
     init_drivers();
-    err = init_mqtt_client();
+    esp_err_t err = init_mqtt_client();
     if (err != ESP_OK)
     {
         LOG_ERROR("MQTT proxy initialization failed.");

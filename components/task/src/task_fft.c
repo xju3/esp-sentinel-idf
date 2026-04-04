@@ -236,7 +236,7 @@ static void send_patrol_fft_report(const vib_job_t *job)
     }
 
     s_patrol_fft_report.task_id = (int32_t)job->task_id;
-    s_patrol_fft_report.timestamp = (int32_t)time(NULL);
+    s_patrol_fft_report.timestamp = (job->timestamp > 0) ? job->timestamp : (int32_t)time(NULL);
 
     if (job->task_mode == TASK_MODE_PATROLING)
     {

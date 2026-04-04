@@ -14,6 +14,7 @@ QueueHandle_t g_msg_dispatcher_queue = NULL;
 // 全局 MQTT 句柄 (在 network_manager 中定义和初始化)
 extern esp_mqtt_client_handle_t g_mqtt_client;
 
+// MuKqZ3VckkTIM3q4Gj_4TYEoYI-OYLRJueKWQPDPOsQZzHnjKHC56GXgrUKd3vZiGhATJ4EnhWsMSuumdVzaCw==
 // 发送重试配置
 #define MAX_SEND_RETRIES 3
 #define RETRY_DELAY_MS 1000
