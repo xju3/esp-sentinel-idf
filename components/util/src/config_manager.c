@@ -10,7 +10,9 @@
 #include "fs_utils.h"
 #include "logger.h"
 
-#define CONFIG_LOG_CHUNK 512
+// logger.c 的单条日志缓冲区较小，这里预留文件名/行号前缀空间，
+// 避免 JSON 分段后仍在 logger 内部被再次截断。
+#define CONFIG_LOG_CHUNK 192
 
 user_config_t g_user_config;
 
@@ -226,6 +228,25 @@ static esp_err_t load_and_apply(const char *path, user_config_t *cfg)
     return fsu_parse_json(path, parser_apply_wrapper, cfg);
 }
 
+static void log_json_chunks(const char *prefix, const char *json, size_t len)
+{
+    if (!json)
+    {
+        return;
+    }
+
+    if (prefix)
+    {
+        LOG_DEBUG(prefix);
+    }
+
+    for (size_t i = 0; i < len; i += CONFIG_LOG_CHUNK)
+    {
+        size_t chunk = (len - i > CONFIG_LOG_CHUNK) ? CONFIG_LOG_CHUNK : (len - i);
+        LOG_DEBUGF("%.*s", (int)chunk, json + i);
+    }
+}
+
 // 打印指定路径的 JSON 内容（分段避免日志过长）。
 static esp_err_t log_config_json(const char *path, const char *label)
 {
@@ -247,12 +268,9 @@ static esp_err_t log_config_json(const char *path, const char *label)
         return ESP_ERR_NOT_FOUND;
     }
 
-    LOG_INFOF("%s config (len=%u):", label ? label : "config", (unsigned)len);
-    for (size_t i = 0; i < len; i += CONFIG_LOG_CHUNK)
-    {
-        size_t chunk = (len - i > CONFIG_LOG_CHUNK) ? CONFIG_LOG_CHUNK : (len - i);
-        LOG_INFOF("%.*s", (int)chunk, json + i);
-    }
+    char header[64];
+    snprintf(header, sizeof(header), "%s config (len=%u):", label ? label : "config", (unsigned)len);
+    log_json_chunks(header, json, len);
 
     free(json);
     return ESP_OK;
@@ -321,7 +339,9 @@ esp_err_t config_manager_save_user_json(const char *json)
     {
         return ESP_ERR_INVALID_ARG;
     }
-    LOG_DEBUGF("file contents: %s", json);
+    char header[48];
+    snprintf(header, sizeof(header), "file contents (len=%u):", (unsigned)strlen(json));
+    log_json_chunks(header, json, strlen(json));
 
     if (config_manager_init() != ESP_OK)
     {
