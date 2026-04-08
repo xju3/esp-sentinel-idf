@@ -15,6 +15,7 @@
 #define MAX_DAQ_SAMPLES 8192
 #define FFT_QUEUE_LEN   5
 #define TASK_MEM_CAPS   (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#define PATROL_LOG_LOW_FREQ_MAX_HZ 200.0f
 
 QueueHandle_t g_fft_job_queue = NULL;
 static patrol_fft_report_t s_patrol_fft_report;
@@ -1181,6 +1182,7 @@ static void send_patrol_fft_report(const vib_job_t *job)
         s_patrol_fft_report.confidence = 0.0f;
     }
 
+    bool logged_lowfreq = false;
     for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
     {
         const patrol_peak_t *peak = &s_patrol_fft_report.peaks[i];
@@ -1190,7 +1192,7 @@ static void send_patrol_fft_report(const vib_job_t *job)
         }
 
         const char pos_code = position_code_for_axis(&g_user_config.pos, peak->dominant_axis);
-        LOG_INFOF("Patrol peak[%d]: %.2fHz, dom=%c(%s), amp[X=%.4f,Y=%.4f,Z=%.4f]",
+        LOG_INFOF("Patrol spectral peak[%d]: %.2fHz, dom=%c(%s), amp[X=%.4f,Y=%.4f,Z=%.4f]",
                   i,
                   peak->freq_hz,
                   "XYZ"[peak->dominant_axis],
@@ -1198,6 +1200,24 @@ static void send_patrol_fft_report(const vib_job_t *job)
                   peak->amp_x,
                   peak->amp_y,
                   peak->amp_z);
+
+        if (job->task_mode == TASK_MODE_PATROLING && peak->freq_hz <= PATROL_LOG_LOW_FREQ_MAX_HZ)
+        {
+            LOG_INFOF("Patrol lowfreq peak[%d]: %.2fHz, dom=%c(%s), amp[X=%.4f,Y=%.4f,Z=%.4f]",
+                      i,
+                      peak->freq_hz,
+                      "XYZ"[peak->dominant_axis],
+                      position_name(pos_code),
+                      peak->amp_x,
+                      peak->amp_y,
+                      peak->amp_z);
+            logged_lowfreq = true;
+        }
+    }
+
+    if (job->task_mode == TASK_MODE_PATROLING && !logged_lowfreq)
+    {
+        LOG_INFOF("Patrol lowfreq peaks: none below %.1fHz in representative peak set", PATROL_LOG_LOW_FREQ_MAX_HZ);
     }
 
     if (g_msg_dispatcher_queue == NULL)

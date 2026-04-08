@@ -34,6 +34,9 @@ static TaskHandle_t diagnosis_task_handle = NULL;
 
 // 互斥锁，确保同一时间只有一个采集任务在运行
 static SemaphoreHandle_t s_daq_mutex = NULL;
+static portMUX_TYPE s_task_state_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_diagnosis_pending = false;
+static bool s_diagnosis_running = false;
 
 // FreeRTOS 软件定时器句柄
 static TimerHandle_t patrol_timer_handle = NULL;
@@ -47,6 +50,31 @@ typedef struct
     const char *task_name;
 } task_context_t;
 
+static bool diagnosis_active_or_pending(void)
+{
+    bool active = false;
+
+    taskENTER_CRITICAL(&s_task_state_lock);
+    active = s_diagnosis_pending || s_diagnosis_running;
+    taskEXIT_CRITICAL(&s_task_state_lock);
+
+    return active;
+}
+
+static void set_diagnosis_pending(bool pending)
+{
+    taskENTER_CRITICAL(&s_task_state_lock);
+    s_diagnosis_pending = pending;
+    taskEXIT_CRITICAL(&s_task_state_lock);
+}
+
+static void set_diagnosis_running(bool running)
+{
+    taskENTER_CRITICAL(&s_task_state_lock);
+    s_diagnosis_running = running;
+    taskEXIT_CRITICAL(&s_task_state_lock);
+}
+
 /**
  * @brief 定时器回调函数
  *
@@ -58,6 +86,16 @@ static void timer_callback(TimerHandle_t timer_handle)
     TaskHandle_t target_task = (TaskHandle_t)pvTimerGetTimerID(timer_handle);
     if (target_task != NULL)
     {
+        if (target_task == diagnosis_task_handle)
+        {
+            set_diagnosis_pending(true);
+        }
+        else if (target_task == patrol_task_handle && diagnosis_active_or_pending())
+        {
+            LOG_INFO("Patrol trigger skipped: diagnosis is pending or running");
+            return;
+        }
+
         xTaskNotifyGive(target_task);
     }
 }
@@ -74,6 +112,12 @@ static void generic_task_handler(void *arg)
         // 等待定时器通知
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        if (ctx->task_mode == TASK_MODE_PATROLING && diagnosis_active_or_pending())
+        {
+            LOG_INFO("Patrol task skipped: diagnosis is pending or running");
+            continue;
+        }
+
         // Check machine state before proceeding - only run DAQ in STABLE state
         // if (get_machine_state() != STATE_STABLE) {
         //     LOG_DEBUGF("%s task skipped: machine state is not STABLE", ctx->task_name);
@@ -84,6 +128,19 @@ static void generic_task_handler(void *arg)
         // 由于 Diagnosis 任务优先级更高，一旦锁释放，它会优先获得锁并立即执行
         if (xSemaphoreTake(s_daq_mutex, portMAX_DELAY) == pdTRUE)
         {
+            if (ctx->task_mode == TASK_MODE_PATROLING && diagnosis_active_or_pending())
+            {
+                LOG_INFO("Patrol task skipped after lock: diagnosis is pending or running");
+                xSemaphoreGive(s_daq_mutex);
+                continue;
+            }
+
+            if (ctx->task_mode == TASK_MODE_DIAGNOSIS)
+            {
+                set_diagnosis_pending(false);
+                set_diagnosis_running(true);
+            }
+
             // LOG_INFOF("%s task triggered", ctx->task_name);
 
             daq_worker_param_t param = {
@@ -94,6 +151,11 @@ static void generic_task_handler(void *arg)
             if (err != ESP_OK)
             {
                 LOG_ERRORF("%s work failed: %s", ctx->task_name, esp_err_to_name(err));
+            }
+
+            if (ctx->task_mode == TASK_MODE_DIAGNOSIS)
+            {
+                set_diagnosis_running(false);
             }
 
             xSemaphoreGive(s_daq_mutex);
