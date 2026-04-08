@@ -112,14 +112,7 @@ static void network_channel_established_handler(void)
         return;
     }
 
-#ifdef CONFIG_DEV_MODE // 开发模式下仍保留 Web 调试入口
-    err = web_server_start();
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Web server initialization failed.");
-        return;
-    }
-#endif
+
 }
 
 esp_err_t init_nvs()

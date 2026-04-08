@@ -9,6 +9,7 @@
 #include "task_rms.h"
 #include "task_kurtosis.h"
 #include <math.h>
+#include <string.h>
 #include "esp_attr.h"
 #include "machine_state.h"
 
@@ -26,6 +27,7 @@ esp_err_t start_diagnosing_work();
 #define IIS3_DMA_CHUNK_SIZE 512
 #define DAQ_SKIP_MS 20U
 #define DAQ_CAPTURE_GUARD_MS 100U
+#define PATROL_CAPTURE_EXTRA_MS 700U
 
 #define PATROL_FIXED_ODR_HZ 4000.0f
 #define PATROL_FIXED_FFT_POINTS 4096U
@@ -35,20 +37,44 @@ esp_err_t start_diagnosing_work();
 #define DIAGNOSIS_FIXED_FFT_POINTS 4096U
 #define DIAGNOSIS_MIN_FREQ_HZ 2000.0f
 
+#define IIS3DWB_HW_ODR_HZ 26667.0f
+#define IIS3DWB_PATROL_DECIMATION 13U
+#define IIS3DWB_PATROL_LPF_CUTOFF_HZ 800.0f
+
 static float s_vib_buffer[MAX_DAQ_SAMPLES * 3];
+static float s_accel_lsb_to_g = LSB_TO_G_16;
 
 typedef struct
 {
     uint32_t write_idx;
+    uint32_t raw_idx;
+    uint32_t decimation_factor;
     int32_t first_sample_timestamp;
 } daq_capture_state_t;
 
+typedef struct
+{
+    bool initialized;
+    uint32_t decimation_phase;
+    float alpha;
+    float x1;
+    float y1;
+    float z1;
+    float x2;
+    float y2;
+    float z2;
+} patrol_preprocess_state_t;
+
 static daq_capture_state_t s_capture_state = {0};
+static patrol_preprocess_state_t s_patrol_preprocess = {0};
 
 static inline void daq_capture_reset(void)
 {
     s_capture_state.write_idx = 0;
+    s_capture_state.raw_idx = 0;
+    s_capture_state.decimation_factor = 1;
     s_capture_state.first_sample_timestamp = 0;
+    memset(&s_patrol_preprocess, 0, sizeof(s_patrol_preprocess));
 }
 
 static inline uint32_t daq_capture_sample_count(void)
@@ -66,6 +92,13 @@ static uint32_t get_capture_duration_ms(const DSP_Config_t *cfg)
     uint32_t duration_ms = (uint32_t)ceilf(cfg->actual_time * 1000.0f);
     duration_ms += DAQ_SKIP_MS;
     duration_ms += DAQ_CAPTURE_GUARD_MS;
+    return duration_ms;
+}
+
+static uint32_t get_patrol_capture_duration_ms(void)
+{
+    uint32_t duration_ms = get_capture_duration_ms(&patrol_config);
+    duration_ms += PATROL_CAPTURE_EXTRA_MS;
     return duration_ms;
 }
 
@@ -90,6 +123,91 @@ static inline void daq_push_sample(float x, float y, float z)
     s_capture_state.write_idx++;
 }
 
+static inline void daq_push_sample_with_decimation(float x, float y, float z)
+{
+    uint32_t decimation = s_capture_state.decimation_factor;
+    if (decimation == 0U)
+    {
+        decimation = 1U;
+    }
+
+    const uint32_t raw_idx = s_capture_state.raw_idx++;
+    if ((raw_idx % decimation) != 0U)
+    {
+        return;
+    }
+
+    daq_push_sample(x, y, z);
+}
+
+static float lowpass_alpha(float sample_rate_hz, float cutoff_hz)
+{
+    if (sample_rate_hz <= 0.0f || cutoff_hz <= 0.0f)
+    {
+        return 1.0f;
+    }
+
+    const float dt = 1.0f / sample_rate_hz;
+    const float rc = 1.0f / (2.0f * (float)M_PI * cutoff_hz);
+    return dt / (rc + dt);
+}
+
+static void patrol_preprocess_init(float sample_rate_hz)
+{
+    memset(&s_patrol_preprocess, 0, sizeof(s_patrol_preprocess));
+    s_patrol_preprocess.alpha = lowpass_alpha(sample_rate_hz, IIS3DWB_PATROL_LPF_CUTOFF_HZ);
+}
+
+static inline void daq_push_patrol_sample(float x, float y, float z)
+{
+    if (!s_patrol_preprocess.initialized)
+    {
+        s_patrol_preprocess.initialized = true;
+        s_patrol_preprocess.x1 = x;
+        s_patrol_preprocess.y1 = y;
+        s_patrol_preprocess.z1 = z;
+        s_patrol_preprocess.x2 = x;
+        s_patrol_preprocess.y2 = y;
+        s_patrol_preprocess.z2 = z;
+    }
+    else
+    {
+        const float a = s_patrol_preprocess.alpha;
+
+        s_patrol_preprocess.x1 += a * (x - s_patrol_preprocess.x1);
+        s_patrol_preprocess.y1 += a * (y - s_patrol_preprocess.y1);
+        s_patrol_preprocess.z1 += a * (z - s_patrol_preprocess.z1);
+
+        s_patrol_preprocess.x2 += a * (s_patrol_preprocess.x1 - s_patrol_preprocess.x2);
+        s_patrol_preprocess.y2 += a * (s_patrol_preprocess.y1 - s_patrol_preprocess.y2);
+        s_patrol_preprocess.z2 += a * (s_patrol_preprocess.z1 - s_patrol_preprocess.z2);
+    }
+
+    uint32_t decimation = s_capture_state.decimation_factor;
+    if (decimation == 0U)
+    {
+        decimation = 1U;
+    }
+
+    if (++s_patrol_preprocess.decimation_phase >= decimation)
+    {
+        s_patrol_preprocess.decimation_phase = 0U;
+        daq_push_sample(s_patrol_preprocess.x2, s_patrol_preprocess.y2, s_patrol_preprocess.z2);
+    }
+}
+
+static float accel_lsb_to_g_for_iis3dwb(iis3dwb_fs_t fs)
+{
+    switch (fs)
+    {
+        case IIS3DWB_FS_2G: return LSB_TO_G_2;
+        case IIS3DWB_FS_4G: return LSB_TO_G_4;
+        case IIS3DWB_FS_8G: return LSB_TO_G_8;
+        case IIS3DWB_FS_16G:
+        default: return LSB_TO_G_16;
+    }
+}
+
 // ICM-42688-P 专用处理函数
 static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
@@ -100,19 +218,27 @@ static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *c
         {
             break;
         }
-        const float x_g = (float)data[i].x * LSB_TO_G_16;
-        const float y_g = (float)data[i].y * LSB_TO_G_16;
-        const float z_g = (float)data[i].z * LSB_TO_G_16;
-        daq_push_sample(x_g, y_g, z_g);
+        const float x_g = (float)data[i].x * s_accel_lsb_to_g;
+        const float y_g = (float)data[i].y * s_accel_lsb_to_g;
+        const float z_g = (float)data[i].z * s_accel_lsb_to_g;
+        if (s_capture_state.decimation_factor > 1U)
+        {
+            daq_push_patrol_sample(x_g, y_g, z_g);
+        }
+        else
+        {
+            daq_push_sample_with_decimation(x_g, y_g, z_g);
+        }
     }
 }
 esp_err_t data_acquire_by_icm42688p(int8_t task_mode)
 {
     uint32_t duration_ms = get_capture_duration_ms(&patrol_config);
     esp_err_t err = ESP_OK;
+    s_accel_lsb_to_g = LSB_TO_G_16;
     if (task_mode == TASK_MODE_PATROLING)
     {
-        duration_ms = get_capture_duration_ms(&patrol_config);
+        duration_ms = get_patrol_capture_duration_ms();
     }
     else
     {
@@ -131,7 +257,7 @@ esp_err_t data_acquire_by_iis3dwb(int8_t task_mode)
     uint32_t duration_ms = 0;
     if (task_mode == TASK_MODE_PATROLING)
     {
-        duration_ms = get_capture_duration_ms(&patrol_config);
+        duration_ms = get_patrol_capture_duration_ms();
     }
     else
     {
@@ -142,8 +268,15 @@ esp_err_t data_acquire_by_iis3dwb(int8_t task_mode)
         duration_ms = 1200;
 
     LOG_DEBUGF("duration(iis3dwb): %lu ms, %s ", duration_ms, task_mode == TASK_MODE_PATROLING ? "Patrol" : "Diagnosis");
+    iis3dwb_cfg_t *cfg = &iis3dwb_accel_fs_cfg_16;
+    if (task_mode == TASK_MODE_PATROLING)
+    {
+        cfg = &iis3dwb_accel_fs_cfg_2;
+    }
+    s_accel_lsb_to_g = accel_lsb_to_g_for_iis3dwb(cfg->fs);
+
     return daq_iis3dwb_capture(
-        &iis3dwb_accel_fs_cfg_16, duration_ms, daq_buffer_handler, NULL, IIS3_DMA_CHUNK_SIZE, DAQ_SKIP_MS);
+        cfg, duration_ms, daq_buffer_handler, NULL, IIS3_DMA_CHUNK_SIZE, DAQ_SKIP_MS);
 }
 
 /**
@@ -165,6 +298,10 @@ esp_err_t start_patrolling_work()
     }
 
     daq_capture_reset();
+#if IMU == 1
+    s_capture_state.decimation_factor = IIS3DWB_PATROL_DECIMATION;
+    patrol_preprocess_init(IIS3DWB_HW_ODR_HZ);
+#endif
     esp_err_t ret = ESP_OK;
 
 #if IMU == 1
@@ -219,6 +356,9 @@ esp_err_t start_diagnosing_work()
         return ESP_ERR_INVALID_STATE;
     }
     daq_capture_reset();
+#if IMU == 1
+    s_capture_state.decimation_factor = 1U;
+#endif
     esp_err_t ret = ESP_OK;
 #if IMU == 1
     ret = data_acquire_by_iis3dwb(TASK_MODE_DIAGNOSIS);
@@ -295,7 +435,6 @@ void config_iis3dwb(daq_worker_param_t *param)
 {
     if (param->task_mode == TASK_MODE_PATROLING)
     {
-
         if (patrol_config.actual_odr > 0.0f)
         {
             // LOG_INFO("Patrol config already initialized");
@@ -306,6 +445,11 @@ void config_iis3dwb(daq_worker_param_t *param)
             PATROL_FIXED_ODR_HZ,
             PATROL_FIXED_FFT_POINTS,
             PATROL_MAX_FREQ_HZ);
+        if (patrol_config.actual_odr > 0.0f)
+        {
+            patrol_config.actual_odr = IIS3DWB_HW_ODR_HZ / (float)IIS3DWB_PATROL_DECIMATION;
+            patrol_config.actual_time = (float)patrol_config.fft_points / patrol_config.actual_odr;
+        }
     }
     else
     {
@@ -319,6 +463,11 @@ void config_iis3dwb(daq_worker_param_t *param)
             DIAGNOSIS_FIXED_ODR_HZ,
             DIAGNOSIS_FIXED_FFT_POINTS,
             DIAGNOSIS_MIN_FREQ_HZ);
+        if (diagnosis_config.actual_odr > 0.0f)
+        {
+            diagnosis_config.actual_odr = IIS3DWB_HW_ODR_HZ;
+            diagnosis_config.actual_time = (float)diagnosis_config.fft_points / diagnosis_config.actual_odr;
+        }
     }
 }
 
