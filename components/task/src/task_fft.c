@@ -141,9 +141,559 @@ static const char *position_name(char pos_code)
     }
 }
 
+static const char *axis_name(uint8_t axis)
+{
+    switch (axis)
+    {
+        case 0: return "X";
+        case 1: return "Y";
+        case 2: return "Z";
+        default: return "?";
+    }
+}
+
 static inline bool near_float(float value, float target, float tolerance)
 {
     return fabsf(value - target) <= tolerance;
+}
+
+typedef struct
+{
+    float freq_hz;
+    float amplitude;
+} band_peak_t;
+
+typedef struct
+{
+    float freq_hz;
+    float amp_x;
+    float amp_y;
+    float amp_z;
+    uint8_t dominant_axis;
+} band_candidate_peak_t;
+
+typedef struct
+{
+    float min_hz;
+    float max_hz;
+    float distance_weight_hz;
+} hint_search_stage_t;
+
+static void compute_signal_stats(
+    const float *data,
+    uint32_t n,
+    float *out_mean,
+    float *out_rms,
+    float *out_min,
+    float *out_max)
+{
+    if (!data || n == 0U)
+    {
+        return;
+    }
+
+    float sum = 0.0f;
+    float sum_sq = 0.0f;
+    float min_v = data[0];
+    float max_v = data[0];
+
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        const float v = data[i];
+        sum += v;
+        sum_sq += v * v;
+        if (v < min_v)
+        {
+            min_v = v;
+        }
+        if (v > max_v)
+        {
+            max_v = v;
+        }
+    }
+
+    if (out_mean)
+    {
+        *out_mean = sum / (float)n;
+    }
+    if (out_rms)
+    {
+        *out_rms = sqrtf(sum_sq / (float)n);
+    }
+    if (out_min)
+    {
+        *out_min = min_v;
+    }
+    if (out_max)
+    {
+        *out_max = max_v;
+    }
+}
+
+static void remove_dc_inplace(float *data, uint32_t n)
+{
+    if (!data || n == 0U)
+    {
+        return;
+    }
+
+    float mean = 0.0f;
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        mean += data[i];
+    }
+    mean /= (float)n;
+
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        data[i] -= mean;
+    }
+}
+
+static band_peak_t find_band_peak(
+    const float *mag,
+    uint32_t mag_len,
+    float sample_rate,
+    uint32_t fft_len,
+    float min_hz,
+    float max_hz)
+{
+    band_peak_t result = {0};
+    if (!mag || mag_len == 0U || sample_rate <= 0.0f || fft_len == 0U || max_hz < min_hz)
+    {
+        return result;
+    }
+
+    const float bin_hz = sample_rate / (float)fft_len;
+    uint32_t min_bin = (uint32_t)floorf(min_hz / bin_hz);
+    uint32_t max_bin = (uint32_t)ceilf(max_hz / bin_hz);
+
+    if (min_bin < 1U)
+    {
+        min_bin = 1U;
+    }
+    if (max_bin >= mag_len)
+    {
+        max_bin = mag_len - 1U;
+    }
+    if (min_bin > max_bin)
+    {
+        return result;
+    }
+
+    uint32_t best_bin = min_bin;
+    float best_amp = mag[min_bin];
+    for (uint32_t i = min_bin + 1U; i <= max_bin; ++i)
+    {
+        if (mag[i] > best_amp)
+        {
+            best_amp = mag[i];
+            best_bin = i;
+        }
+    }
+
+    result.freq_hz = (float)best_bin * bin_hz;
+    result.amplitude = best_amp;
+    return result;
+}
+
+static float parabolic_refine_peak_hz(
+    const float *mag,
+    uint32_t mag_len,
+    uint32_t bin_idx,
+    float bin_hz)
+{
+    if (!mag || mag_len < 3U || bin_idx == 0U || (bin_idx + 1U) >= mag_len || bin_hz <= 0.0f)
+    {
+        return (float)bin_idx * bin_hz;
+    }
+
+    const float y1 = mag[bin_idx - 1U];
+    const float y2 = mag[bin_idx];
+    const float y3 = mag[bin_idx + 1U];
+    const float denom = (y1 - 2.0f * y2 + y3);
+    if (fabsf(denom) < 1e-12f)
+    {
+        return (float)bin_idx * bin_hz;
+    }
+
+    float delta = 0.5f * (y1 - y3) / denom;
+    if (delta > 0.5f)
+    {
+        delta = 0.5f;
+    }
+    else if (delta < -0.5f)
+    {
+        delta = -0.5f;
+    }
+
+    return ((float)bin_idx + delta) * bin_hz;
+}
+
+static bool find_band_candidate_peak(
+    const float *x_data,
+    const float *y_data,
+    const float *z_data,
+    uint32_t n,
+    float sample_rate,
+    float min_hz,
+    float max_hz,
+    float target_hz,
+    float distance_weight_hz,
+    band_candidate_peak_t *out_peak)
+{
+    if (!x_data || !y_data || !z_data || !out_peak || n < 4U || sample_rate <= 0.0f || max_hz < min_hz)
+    {
+        return false;
+    }
+
+    float *scratch = (float *)heap_caps_malloc(n * sizeof(float), MALLOC_CAP_SPIRAM);
+    float *mag_x = (float *)heap_caps_malloc((n / 2U) * sizeof(float), MALLOC_CAP_SPIRAM);
+    float *mag_y = (float *)heap_caps_malloc((n / 2U) * sizeof(float), MALLOC_CAP_SPIRAM);
+    float *mag_z = (float *)heap_caps_malloc((n / 2U) * sizeof(float), MALLOC_CAP_SPIRAM);
+    if (!scratch || !mag_x || !mag_y || !mag_z)
+    {
+        if (scratch) heap_caps_free(scratch);
+        if (mag_x) heap_caps_free(mag_x);
+        if (mag_y) heap_caps_free(mag_y);
+        if (mag_z) heap_caps_free(mag_z);
+        return false;
+    }
+
+    memcpy(scratch, x_data, n * sizeof(float));
+    remove_dc_inplace(scratch, n);
+    if (algo_fft_calculate(scratch, mag_x, n) != ESP_OK)
+    {
+        heap_caps_free(scratch);
+        heap_caps_free(mag_x);
+        heap_caps_free(mag_y);
+        heap_caps_free(mag_z);
+        return false;
+    }
+
+    memcpy(scratch, y_data, n * sizeof(float));
+    remove_dc_inplace(scratch, n);
+    if (algo_fft_calculate(scratch, mag_y, n) != ESP_OK)
+    {
+        heap_caps_free(scratch);
+        heap_caps_free(mag_x);
+        heap_caps_free(mag_y);
+        heap_caps_free(mag_z);
+        return false;
+    }
+
+    memcpy(scratch, z_data, n * sizeof(float));
+    remove_dc_inplace(scratch, n);
+    if (algo_fft_calculate(scratch, mag_z, n) != ESP_OK)
+    {
+        heap_caps_free(scratch);
+        heap_caps_free(mag_x);
+        heap_caps_free(mag_y);
+        heap_caps_free(mag_z);
+        return false;
+    }
+
+    const float bin_hz = sample_rate / (float)n;
+    uint32_t min_bin = (uint32_t)floorf(min_hz / bin_hz);
+    uint32_t max_bin = (uint32_t)ceilf(max_hz / bin_hz);
+    if (min_bin < 1U)
+    {
+        min_bin = 1U;
+    }
+    if (max_bin >= (n / 2U))
+    {
+        max_bin = (n / 2U) - 1U;
+    }
+    if (min_bin > max_bin)
+    {
+        heap_caps_free(scratch);
+        heap_caps_free(mag_x);
+        heap_caps_free(mag_y);
+        heap_caps_free(mag_z);
+        return false;
+    }
+
+    uint32_t best_bin = 0U;
+    float best_score = 0.0f;
+    for (uint32_t i = min_bin; i <= max_bin; ++i)
+    {
+        if (i == 0U || i + 1U >= (n / 2U))
+        {
+            continue;
+        }
+
+        float score = mag_x[i];
+        if (mag_y[i] > score)
+        {
+            score = mag_y[i];
+        }
+        if (mag_z[i] > score)
+        {
+            score = mag_z[i];
+        }
+
+        float prev_score = mag_x[i - 1U];
+        if (mag_y[i - 1U] > prev_score)
+        {
+            prev_score = mag_y[i - 1U];
+        }
+        if (mag_z[i - 1U] > prev_score)
+        {
+            prev_score = mag_z[i - 1U];
+        }
+
+        float next_score = mag_x[i + 1U];
+        if (mag_y[i + 1U] > next_score)
+        {
+            next_score = mag_y[i + 1U];
+        }
+        if (mag_z[i + 1U] > next_score)
+        {
+            next_score = mag_z[i + 1U];
+        }
+
+        if (score < prev_score || score < next_score)
+        {
+            continue;
+        }
+
+        float weighted_score = score;
+        if (target_hz > 0.0f && distance_weight_hz > 0.0f)
+        {
+            weighted_score /= (1.0f + fabsf(((float)i * bin_hz) - target_hz) / distance_weight_hz);
+        }
+
+        if (weighted_score > best_score)
+        {
+            best_score = weighted_score;
+            best_bin = i;
+        }
+    }
+
+    if (best_score <= 0.0f || best_bin == 0U)
+    {
+        heap_caps_free(scratch);
+        heap_caps_free(mag_x);
+        heap_caps_free(mag_y);
+        heap_caps_free(mag_z);
+        return false;
+    }
+
+    out_peak->freq_hz = (float)best_bin * bin_hz;
+    out_peak->amp_x = mag_x[best_bin];
+    out_peak->amp_y = mag_y[best_bin];
+    out_peak->amp_z = mag_z[best_bin];
+    out_peak->dominant_axis = 0;
+    float dominant = out_peak->amp_x;
+    if (out_peak->amp_y > dominant)
+    {
+        dominant = out_peak->amp_y;
+        out_peak->dominant_axis = 1;
+    }
+    if (out_peak->amp_z > dominant)
+    {
+        out_peak->dominant_axis = 2;
+    }
+
+    const float *dominant_mag = mag_x;
+    if (out_peak->dominant_axis == 1U)
+    {
+        dominant_mag = mag_y;
+    }
+    else if (out_peak->dominant_axis == 2U)
+    {
+        dominant_mag = mag_z;
+    }
+    out_peak->freq_hz = parabolic_refine_peak_hz(dominant_mag, n / 2U, best_bin, bin_hz);
+    if (out_peak->freq_hz < min_hz)
+    {
+        out_peak->freq_hz = min_hz;
+    }
+    else if (out_peak->freq_hz > max_hz)
+    {
+        out_peak->freq_hz = max_hz;
+    }
+
+    heap_caps_free(scratch);
+    heap_caps_free(mag_x);
+    heap_caps_free(mag_y);
+    heap_caps_free(mag_z);
+    return true;
+}
+
+static void inject_hint_band_peak(
+    patrol_fft_report_t *report,
+    const float *x_data,
+    const float *y_data,
+    const float *z_data,
+    uint32_t n,
+    float sample_rate,
+    int32_t rpm_hint)
+{
+    if (!report || !x_data || !y_data || !z_data || n < 4U || sample_rate <= 0.0f || rpm_hint <= 0)
+    {
+        return;
+    }
+
+    const float hint_hz = (float)rpm_hint / 60.0f;
+    const float search_min = hint_hz * RPM_HINT_MIN_FACTOR;
+    const float search_max = hint_hz * RPM_HINT_MAX_FACTOR;
+
+    for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
+    {
+        if (peak_score(&report->peaks[i]) <= 0.0f)
+        {
+            continue;
+        }
+        if (report->peaks[i].freq_hz >= search_min && report->peaks[i].freq_hz <= search_max)
+        {
+            return;
+        }
+    }
+
+    const hint_search_stage_t stages[] = {
+        {.min_hz = fmaxf(hint_hz - 2.0f, 0.5f), .max_hz = hint_hz + 2.0f, .distance_weight_hz = 0.75f},
+        {.min_hz = fmaxf(hint_hz * 0.90f, 0.5f), .max_hz = hint_hz * 1.10f, .distance_weight_hz = 1.5f},
+        {.min_hz = search_min, .max_hz = search_max, .distance_weight_hz = 3.0f},
+    };
+
+    band_candidate_peak_t candidate = {0};
+    bool found_candidate = false;
+    int used_stage = -1;
+    for (int i = 0; i < (int)(sizeof(stages) / sizeof(stages[0])); ++i)
+    {
+        if (find_band_candidate_peak(
+                x_data,
+                y_data,
+                z_data,
+                n,
+                sample_rate,
+                stages[i].min_hz,
+                stages[i].max_hz,
+                hint_hz,
+                stages[i].distance_weight_hz,
+                &candidate))
+        {
+            found_candidate = true;
+            used_stage = i;
+            break;
+        }
+    }
+    if (!found_candidate)
+    {
+        return;
+    }
+
+    int replace_idx = 0;
+    float weakest_score = peak_score(&report->peaks[0]);
+    for (int i = 1; i < PATROL_MAX_PEAKS; ++i)
+    {
+        const float score = peak_score(&report->peaks[i]);
+        if (score < weakest_score)
+        {
+            weakest_score = score;
+            replace_idx = i;
+        }
+    }
+
+    report->peaks[replace_idx].freq_hz = candidate.freq_hz;
+    report->peaks[replace_idx].amp_x = candidate.amp_x;
+    report->peaks[replace_idx].amp_y = candidate.amp_y;
+    report->peaks[replace_idx].amp_z = candidate.amp_z;
+    report->peaks[replace_idx].dominant_axis = candidate.dominant_axis;
+
+    LOG_INFOF("Injected hint-band peak[%d]: %.2fHz, amp[X=%.4f,Y=%.4f,Z=%.4f], stage=%d",
+              replace_idx,
+              candidate.freq_hz,
+              candidate.amp_x,
+              candidate.amp_y,
+              candidate.amp_z,
+              used_stage);
+}
+
+static void log_patrol_source_debug(
+    const float *x_data,
+    const float *y_data,
+    const float *z_data,
+    uint32_t n,
+    float sample_rate,
+    int32_t rpm_hint)
+{
+    if (!x_data || !y_data || !z_data || n < 4U || sample_rate <= 0.0f || rpm_hint <= 0)
+    {
+        return;
+    }
+
+    float *scratch = (float *)heap_caps_malloc(n * sizeof(float), MALLOC_CAP_SPIRAM);
+    float *mag = (float *)heap_caps_malloc((n / 2U) * sizeof(float), MALLOC_CAP_SPIRAM);
+    if (!scratch || !mag)
+    {
+        if (scratch) heap_caps_free(scratch);
+        if (mag) heap_caps_free(mag);
+        LOG_WARN("FFT debug skipped: insufficient memory");
+        return;
+    }
+
+    const float *axes[3] = {x_data, y_data, z_data};
+    const char axis_names[3] = {'X', 'Y', 'Z'};
+    const float hint_hz = (float)rpm_hint / 60.0f;
+    const float search_min = hint_hz * RPM_HINT_MIN_FACTOR;
+    const float search_max = hint_hz * RPM_HINT_MAX_FACTOR;
+    const float low_min = 0.5f;
+    const float low_max = 20.0f;
+    const float narrow_min = fmaxf(hint_hz - 2.0f, 0.5f);
+    const float narrow_max = hint_hz + 2.0f;
+    const float bin_hz = sample_rate / (float)n;
+    const uint32_t hint_bin = (uint32_t)lroundf(hint_hz / bin_hz);
+
+    LOG_INFOF("FFT source debug: sr=%.2fHz, n=%lu, hint=%ldrpm(%.2fHz), search=[%.2f, %.2f]Hz",
+              sample_rate, (unsigned long)n, (long)rpm_hint, hint_hz, search_min, search_max);
+
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        float mean = 0.0f;
+        float rms = 0.0f;
+        float min_v = 0.0f;
+        float max_v = 0.0f;
+        compute_signal_stats(axes[axis], n, &mean, &rms, &min_v, &max_v);
+
+        memcpy(scratch, axes[axis], n * sizeof(float));
+        remove_dc_inplace(scratch, n);
+
+        const esp_err_t err = algo_fft_calculate(scratch, mag, n);
+        if (err != ESP_OK)
+        {
+            LOG_WARNF("FFT source debug axis %c skipped: %d", axis_names[axis], err);
+            continue;
+        }
+
+        const band_peak_t low_peak = find_band_peak(mag, n / 2U, sample_rate, n, low_min, low_max);
+        const band_peak_t hint_peak = find_band_peak(mag, n / 2U, sample_rate, n, search_min, search_max);
+        const band_peak_t narrow_peak = find_band_peak(mag, n / 2U, sample_rate, n, narrow_min, narrow_max);
+        const float hint_amp = (hint_bin < (n / 2U)) ? mag[hint_bin] : 0.0f;
+
+        LOG_INFOF("FFT source axis %c: mean=%.4fg, rms=%.4fg, pp=%.4fg, low[%.1f-%.1fHz]=%.2fHz/%.4f, hint[%.1f-%.1fHz]=%.2fHz/%.4f, near1x[%.1f-%.1fHz]=%.2fHz/%.4f, bin@1x=%.4f",
+                  axis_names[axis],
+                  mean,
+                  rms,
+                  max_v - min_v,
+                  low_min,
+                  low_max,
+                  low_peak.freq_hz,
+                  low_peak.amplitude,
+                  search_min,
+                  search_max,
+                  hint_peak.freq_hz,
+                  hint_peak.amplitude,
+                  narrow_min,
+                  narrow_max,
+                  narrow_peak.freq_hz,
+                  narrow_peak.amplitude,
+                  hint_amp);
+    }
+
+    heap_caps_free(scratch);
+    heap_caps_free(mag);
 }
 
 static float candidate_rotational_score(
@@ -243,27 +793,6 @@ static bool estimate_rotational_freq_hz(
         {
             best_score = score;
             best_idx = i;
-        }
-    }
-
-    if (best_idx < 0 && rpm_hint > 0)
-    {
-        float nearest_delta = 1e9f;
-        for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
-        {
-            const patrol_peak_t *p = &report->peaks[i];
-            const float score = peak_score(p);
-            if (score <= 0.0f)
-            {
-                continue;
-            }
-
-            const float delta = fabsf(p->freq_hz - hint_hz);
-            if (delta < nearest_delta)
-            {
-                nearest_delta = delta;
-                best_idx = i;
-            }
         }
     }
 
@@ -511,12 +1040,72 @@ static void classify_patrol_fault(patrol_fft_report_t *report)
         }
     }
 
-    LOG_INFOF("Patrol RPM estimate: hint=%ld, est=%.1f rpm, 1x=%d, 2x=%d, 3x=%d",
+    const patrol_peak_t *peak_1x = (analysis.peak_1x_idx >= 0) ? &report->peaks[analysis.peak_1x_idx] : NULL;
+    const patrol_peak_t *peak_2x = (analysis.peak_2x_idx >= 0) ? &report->peaks[analysis.peak_2x_idx] : NULL;
+    const patrol_peak_t *peak_3x = (analysis.peak_3x_idx >= 0) ? &report->peaks[analysis.peak_3x_idx] : NULL;
+
+    LOG_INFOF("Patrol 1X lock: hint=%ldrpm(%.2fHz), lock=%.2fHz/%.1frpm, idx[1x=%d,2x=%d,3x=%d]",
               (long)g_user_config.rpm,
+              (float)g_user_config.rpm / 60.0f,
+              analysis.refined_hz,
               analysis.refined_hz * 60.0f,
               analysis.peak_1x_idx,
               analysis.peak_2x_idx,
               analysis.peak_3x_idx);
+
+    if (peak_1x)
+    {
+        const char pos_code = position_code_for_axis(&g_user_config.pos, peak_1x->dominant_axis);
+        LOG_INFOF("Patrol order 1X: %.2fHz, dom=%s(%s), amp[X=%.4f,Y=%.4f,Z=%.4f], radial=%.4f, axial=%.4f",
+                  peak_1x->freq_hz,
+                  axis_name(peak_1x->dominant_axis),
+                  position_name(pos_code),
+                  peak_1x->amp_x,
+                  peak_1x->amp_y,
+                  peak_1x->amp_z,
+                  radial_amp(peak_1x, &g_user_config.pos),
+                  axial_amp(peak_1x, &g_user_config.pos));
+    }
+    else
+    {
+        LOG_INFO("Patrol order 1X: not found");
+    }
+
+    if (peak_2x)
+    {
+        const char pos_code = position_code_for_axis(&g_user_config.pos, peak_2x->dominant_axis);
+        LOG_INFOF("Patrol order 2X: %.2fHz, dom=%s(%s), amp[X=%.4f,Y=%.4f,Z=%.4f], radial=%.4f, axial=%.4f",
+                  peak_2x->freq_hz,
+                  axis_name(peak_2x->dominant_axis),
+                  position_name(pos_code),
+                  peak_2x->amp_x,
+                  peak_2x->amp_y,
+                  peak_2x->amp_z,
+                  radial_amp(peak_2x, &g_user_config.pos),
+                  axial_amp(peak_2x, &g_user_config.pos));
+    }
+    else
+    {
+        LOG_INFO("Patrol order 2X: not found");
+    }
+
+    if (peak_3x)
+    {
+        const char pos_code = position_code_for_axis(&g_user_config.pos, peak_3x->dominant_axis);
+        LOG_INFOF("Patrol order 3X: %.2fHz, dom=%s(%s), amp[X=%.4f,Y=%.4f,Z=%.4f], radial=%.4f, axial=%.4f",
+                  peak_3x->freq_hz,
+                  axis_name(peak_3x->dominant_axis),
+                  position_name(pos_code),
+                  peak_3x->amp_x,
+                  peak_3x->amp_y,
+                  peak_3x->amp_z,
+                  radial_amp(peak_3x, &g_user_config.pos),
+                  axial_amp(peak_3x, &g_user_config.pos));
+    }
+    else
+    {
+        LOG_INFO("Patrol order 3X: not found");
+    }
 
     if (has_1x && !has_2x && one_x_radial_amp > one_x_axial_amp * 2.0f)
     {
@@ -651,20 +1240,61 @@ static void fft_task_entry(void *arg)
             const float *x_ptr = job.raw_data;
             const float *y_ptr = job.raw_data + MAX_DAQ_SAMPLES;
             const float *z_ptr = job.raw_data + MAX_DAQ_SAMPLES * 2;
+            const float *fft_x_ptr = x_ptr;
+            const float *fft_y_ptr = y_ptr;
+            const float *fft_z_ptr = z_ptr;
+            float *demean_buf = NULL;
 
             LOG_INFO("Performing 3-axis FFT analysis...");
+            if (job.task_mode == TASK_MODE_PATROLING)
+            {
+                log_patrol_source_debug(x_ptr, y_ptr, z_ptr, n, job.sample_rate, g_user_config.rpm);
+
+                demean_buf = (float *)heap_caps_malloc(3U * n * sizeof(float), MALLOC_CAP_SPIRAM);
+                if (demean_buf)
+                {
+                    fft_x_ptr = demean_buf;
+                    fft_y_ptr = demean_buf + n;
+                    fft_z_ptr = demean_buf + 2U * n;
+
+                    memcpy((void *)fft_x_ptr, x_ptr, n * sizeof(float));
+                    memcpy((void *)fft_y_ptr, y_ptr, n * sizeof(float));
+                    memcpy((void *)fft_z_ptr, z_ptr, n * sizeof(float));
+                    remove_dc_inplace((float *)fft_x_ptr, n);
+                    remove_dc_inplace((float *)fft_y_ptr, n);
+                    remove_dc_inplace((float *)fft_z_ptr, n);
+                }
+                else
+                {
+                    LOG_WARN("Patrol FFT using raw data: failed to allocate de-mean buffer");
+                }
+            }
 
             esp_err_t err = algo_fft_calculate_peaks(
-                x_ptr,
-                y_ptr,
-                z_ptr,
+                fft_x_ptr,
+                fft_y_ptr,
+                fft_z_ptr,
                 n,
                 job.sample_rate,
                 &s_patrol_fft_report);
             if (err != ESP_OK)
             {
+                if (demean_buf)
+                {
+                    heap_caps_free(demean_buf);
+                }
                 LOG_ERRORF("FFT peak analysis failed: %d", err);
                 continue;
+            }
+
+            if (job.task_mode == TASK_MODE_PATROLING)
+            {
+                inject_hint_band_peak(&s_patrol_fft_report, x_ptr, y_ptr, z_ptr, n, job.sample_rate, g_user_config.rpm);
+            }
+
+            if (demean_buf)
+            {
+                heap_caps_free(demean_buf);
             }
 
             send_patrol_fft_report(&job);
