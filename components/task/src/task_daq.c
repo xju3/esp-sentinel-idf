@@ -262,6 +262,16 @@ esp_err_t start_task_daq(void)
         &patrol_task_handle,
         TASK_MEM_CAPS);
 
+
+       BaseType_t result = xTaskCreateWithCaps(
+        generic_task_handler,
+        "patrol_task",
+        4096,
+        &patrol_ctx,
+        2,
+        &patrol_task_handle,
+        TASK_MEM_CAPS);
+
     if (result != pdPASS)
     {
         LOG_ERROR("Failed to create patrol task");

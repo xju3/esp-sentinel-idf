@@ -17,6 +17,7 @@
 #define RMS_QUEUE_LEN 5
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #define FFT_ENABLE_RMS_THRESHOLD_MM_S 0.10f
+#define RMS_DEBUG_ANALYSIS_THRESHOLD_MM_S 1.00f
 
 QueueHandle_t g_rms_job_queue = NULL;
 
@@ -84,6 +85,70 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
     return send_protobuf_message(1, &msg_rms_report.base);
 }
 
+static void log_axis_rms_debug(const char *axis_name, const axis_rms_debug_t *debug)
+{
+    if (!axis_name || !debug)
+    {
+        return;
+    }
+
+    LOG_INFOF("RMS cause axis %s: total=%.4f mm/s, halves[first=%.4f,second=%.4f], band_est[10-30=%.4f,30-80=%.4f,80-200=%.4f,200-500=%.4f,500-1000=%.4f]",
+              axis_name,
+              debug->total_rms,
+              debug->first_half_rms,
+              debug->second_half_rms,
+              debug->rms_10_30_hz,
+              debug->rms_30_80_hz,
+              debug->rms_80_200_hz,
+              debug->rms_200_500_hz,
+              debug->rms_500_1000_hz);
+}
+
+static void log_patrol_rms_debug_if_needed(const vib_job_t *job,
+                                           const vib_3axis_features_t *features,
+                                           const float *x_ptr,
+                                           const float *y_ptr,
+                                           const float *z_ptr)
+{
+    if (!job || !features || !x_ptr || !y_ptr || !z_ptr)
+    {
+        return;
+    }
+
+    if (job->task_mode != TASK_MODE_PATROLING)
+    {
+        return;
+    }
+
+    float max_rms = features->x_axis.rms;
+    if (features->y_axis.rms > max_rms)
+    {
+        max_rms = features->y_axis.rms;
+    }
+    if (features->z_axis.rms > max_rms)
+    {
+        max_rms = features->z_axis.rms;
+    }
+    if (max_rms < RMS_DEBUG_ANALYSIS_THRESHOLD_MM_S)
+    {
+        return;
+    }
+
+    vib_3axis_rms_debug_t debug = {0};
+    if (algo_rms_calculate_debug(x_ptr, y_ptr, z_ptr, job->length, job->sample_rate, &debug) != ESP_OK)
+    {
+        LOG_WARN("Failed to calculate patrol RMS debug bands");
+        return;
+    }
+
+    LOG_INFOF("Patrol RMS cause debug enabled: max_rms=%.4f mm/s, threshold=%.4f mm/s",
+              max_rms,
+              RMS_DEBUG_ANALYSIS_THRESHOLD_MM_S);
+    log_axis_rms_debug("X", &debug.x_axis);
+    log_axis_rms_debug("Y", &debug.y_axis);
+    log_axis_rms_debug("Z", &debug.z_axis);
+}
+
 /**
  * @brief RMS 任务入口：对三轴振动数据计算 RMS/PEAK/CREST/IMPULSE 等特征并上报
  *
@@ -123,6 +188,7 @@ static void rms_task_entry(void *arg)
                        features.x_axis.rms,
                        features.y_axis.rms,
                        features.z_axis.rms, job.sample_rate);
+            log_patrol_rms_debug_if_needed(&job, &features, x_ptr, y_ptr, z_ptr);
 
             // 4. 根据 ISO 标准判断振动状态
             float max_v = (features.x_axis.rms > features.y_axis.rms) ? features.x_axis.rms : features.y_axis.rms;

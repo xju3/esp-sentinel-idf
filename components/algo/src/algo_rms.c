@@ -38,7 +38,160 @@ static const char *TAG = "ALGO_RMS";
 #define MAX_RMS_PROCESS_POINTS 8192
 // 定义静态暂存区，强制 16 字节对齐以满足 SIMD 指令要求
 EXT_RAM_BSS_ATTR static float s_scratch_buf[MAX_RMS_PROCESS_POINTS] __attribute__((aligned(16)));
+EXT_RAM_BSS_ATTR static float s_band_buf[MAX_RMS_PROCESS_POINTS] __attribute__((aligned(16)));
 // static SemaphoreHandle_t s_rms_mutex = NULL;
+
+typedef struct
+{
+    float min_hz;
+    float max_hz;
+    float *out_rms;
+} rms_band_spec_t;
+
+static float normalized_cutoff(float cutoff_hz, float sample_rate)
+{
+    if (sample_rate <= 0.0f || cutoff_hz <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    float norm = cutoff_hz / sample_rate;
+    if (norm < 0.0001f)
+    {
+        norm = 0.0001f;
+    }
+    if (norm > 0.49f)
+    {
+        norm = 0.49f;
+    }
+    return norm;
+}
+
+static void apply_hpf_inplace(float *buf, uint32_t length, float sample_rate, float cutoff_hz)
+{
+    if (!buf || length == 0U || cutoff_hz <= 0.0f)
+    {
+        return;
+    }
+
+    float coeffs[5];
+    float state[2] = {0};
+    dsps_biquad_gen_hpf_f32(coeffs, normalized_cutoff(cutoff_hz, sample_rate), BIQUAD_Q);
+    dsps_biquad_f32(buf, buf, length, coeffs, state);
+}
+
+static void apply_lpf_inplace(float *buf, uint32_t length, float sample_rate, float cutoff_hz)
+{
+    if (!buf || length == 0U || cutoff_hz <= 0.0f)
+    {
+        return;
+    }
+
+    float coeffs[5];
+    float state[2] = {0};
+    dsps_biquad_gen_lpf_f32(coeffs, normalized_cutoff(cutoff_hz, sample_rate), BIQUAD_Q);
+    dsps_biquad_f32(buf, buf, length, coeffs, state);
+}
+
+static esp_err_t prepare_velocity_trace(const float *input,
+                                        uint32_t length,
+                                        float sample_rate,
+                                        float *buf,
+                                        const float **out_feat_ptr,
+                                        uint32_t *out_feat_len)
+{
+    if (!input || !buf || !out_feat_ptr || !out_feat_len || length == 0U || sample_rate <= 0.0f)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (length > MAX_RMS_PROCESS_POINTS)
+    {
+        ESP_LOGE(TAG, "Input length %lu exceeds static buffer size %d", length, MAX_RMS_PROCESS_POINTS);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    float mean_g = 0.0f;
+    for (uint32_t i = 0; i < length; i++)
+    {
+        mean_g += input[i];
+    }
+    mean_g /= (float)length;
+    for (uint32_t i = 0; i < length; i++)
+    {
+        buf[i] = (input[i] - mean_g) * G_TO_MM_S2;
+    }
+
+    apply_hpf_inplace(buf, length, sample_rate, HPF_CUTOFF_HZ);
+    apply_lpf_inplace(buf, length, sample_rate, LPF_CUTOFF_HZ);
+
+    float velocity = 0.0f;
+    float prev_acc = 0.0f;
+    const float dt = 1.0f / sample_rate;
+    const float half_dt = 0.5f * dt;
+
+    for (uint32_t i = 0; i < length; i++)
+    {
+        const float curr_acc = buf[i];
+        velocity += (prev_acc + curr_acc) * half_dt;
+        buf[i] = velocity;
+        prev_acc = curr_acc;
+    }
+
+    apply_hpf_inplace(buf, length, sample_rate, HPF_CUTOFF_HZ);
+
+    uint32_t skip = (uint32_t)(sample_rate * ((float)STEADY_SKIP_MS / 1000.0f));
+    if (skip >= length)
+    {
+        skip = 0U;
+    }
+
+    *out_feat_ptr = buf + skip;
+    *out_feat_len = length - skip;
+    return (*out_feat_len > 0U) ? ESP_OK : ESP_ERR_INVALID_SIZE;
+}
+
+static void fill_axis_debug(const float *input, uint32_t length, float sample_rate, axis_rms_debug_t *out_debug)
+{
+    if (!input || !out_debug)
+    {
+        return;
+    }
+
+    memset(out_debug, 0, sizeof(*out_debug));
+
+    const float *feat_ptr = NULL;
+    uint32_t feat_len = 0U;
+    if (prepare_velocity_trace(input, length, sample_rate, s_scratch_buf, &feat_ptr, &feat_len) != ESP_OK)
+    {
+        return;
+    }
+
+    dsps_rms_f32(feat_ptr, feat_len, &out_debug->total_rms);
+
+    const uint32_t half_len = feat_len / 2U;
+    if (half_len > 0U)
+    {
+        dsps_rms_f32(feat_ptr, half_len, &out_debug->first_half_rms);
+        dsps_rms_f32(feat_ptr + half_len, feat_len - half_len, &out_debug->second_half_rms);
+    }
+
+    rms_band_spec_t bands[] = {
+        {10.0f, 30.0f, &out_debug->rms_10_30_hz},
+        {30.0f, 80.0f, &out_debug->rms_30_80_hz},
+        {80.0f, 200.0f, &out_debug->rms_80_200_hz},
+        {200.0f, 500.0f, &out_debug->rms_200_500_hz},
+        {500.0f, 1000.0f, &out_debug->rms_500_1000_hz},
+    };
+
+    for (uint32_t i = 0; i < (sizeof(bands) / sizeof(bands[0])); ++i)
+    {
+        memcpy(s_band_buf, feat_ptr, feat_len * sizeof(float));
+        apply_hpf_inplace(s_band_buf, feat_len, sample_rate, bands[i].min_hz);
+        apply_lpf_inplace(s_band_buf, feat_len, sample_rate, bands[i].max_hz);
+        dsps_rms_f32(s_band_buf, feat_len, bands[i].out_rms);
+    }
+}
 
 /**
  * @brief 处理单轴数据的内部辅助函数，计算完整的轴特征
@@ -47,76 +200,12 @@ static axis_features_t process_axis(const float *input, uint32_t length, float s
 {
     axis_features_t result = {0};
     
-    if (!input || length == 0)
+    if (!input || length == 0U)
         return result;
-    if (length > MAX_RMS_PROCESS_POINTS)
-    {
-        ESP_LOGE(TAG, "Input length %lu exceeds static buffer size %d", length, MAX_RMS_PROCESS_POINTS);
-        return result;
-    }
 
-    // 1. 使用静态暂存区 (无需申请)
-    float *buf = s_scratch_buf;
-
-    // 2. 去均值 + 单位转换与拷贝 (g -> mm/s^2)
-    // 先去掉 DC (重力) 分量，避免每个窗口 HPF 产生较大瞬态
-    float mean_g = 0.0f;
-    for (int i = 0; i < length; i++)
-    {
-        mean_g += input[i];
-    }
-    mean_g /= (float)length;
-    for (int i = 0; i < length; i++)
-    {
-        buf[i] = (input[i] - mean_g) * G_TO_MM_S2;
-    }
-
-    // 3. 第一级高通滤波 (HPF) - 去除重力分量 (DC)
-    // 生成 2 阶 IIR Biquad 系数
-    float coeffs_hpf[5];
-    float w_hpf[2] = {0}; // 滤波器状态 (延迟线)
-    // ESP-DSP expects normalized frequency (0..0.5) and Q factor
-    float hpf_norm = HPF_CUTOFF_HZ / sample_rate;
-    dsps_biquad_gen_hpf_f32(coeffs_hpf, hpf_norm, BIQUAD_Q);
-    dsps_biquad_f32(buf, buf, length, coeffs_hpf, w_hpf);
-
-    // 4. 低通滤波 (LPF) - 限制带宽到 1kHz
-    float coeffs_lpf[5];
-    float w_lpf[2] = {0};
-    float lpf_norm = LPF_CUTOFF_HZ / sample_rate;
-    dsps_biquad_gen_lpf_f32(coeffs_lpf, lpf_norm, BIQUAD_Q);
-    dsps_biquad_f32(buf, buf, length, coeffs_lpf, w_lpf);
-
-    // 5. 时域积分 (Acceleration mm/s^2 -> Velocity mm/s)
-    // 使用梯形积分公式: v[i] = v[i-1] + (a[i] + a[i-1]) * dt / 2
-    float velocity = 0.0f;
-    float prev_acc = 0.0f; // 假设初始加速度为 0 (经过 HPF 后合理)
-    float dt = 1.0f / sample_rate;
-    float half_dt = 0.5f * dt;
-
-    for (int i = 0; i < length; i++)
-    {
-        float curr_acc = buf[i];
-        // 积分累加
-        velocity += (prev_acc + curr_acc) * half_dt;
-        // 将 buffer 中的加速度替换为速度
-        buf[i] = velocity;
-        prev_acc = curr_acc;
-    }
-
-    // 6. 第二级高通滤波 (HPF) - 去除积分产生的趋势项/漂移
-    // 复用之前的 HPF 系数，但必须重置状态 w_hpf
-    memset(w_hpf, 0, sizeof(w_hpf));
-    dsps_biquad_f32(buf, buf, length, coeffs_hpf, w_hpf);
-
-    // 7. 计算特征参数
-    // 丢弃前一小段以避开滤波瞬态
-    uint32_t skip = (uint32_t)(sample_rate * ((float)STEADY_SKIP_MS / 1000.0f));
-    if (skip >= length)
-        skip = 0;
-    const float *feat_ptr = buf + skip;
-    uint32_t feat_len = length - skip;
-    if (feat_len == 0)
+    const float *feat_ptr = NULL;
+    uint32_t feat_len = 0U;
+    if (prepare_velocity_trace(input, length, sample_rate, s_scratch_buf, &feat_ptr, &feat_len) != ESP_OK)
     {
         return result;
     }
@@ -164,4 +253,34 @@ vib_3axis_features_t algo_rms_calculate(const float *x, const float *y, const fl
         features.z_axis = process_axis(z, length, sample_rate);
 
     return features;
+}
+
+esp_err_t algo_rms_calculate_debug(const float *x,
+                                   const float *y,
+                                   const float *z,
+                                   uint32_t length,
+                                   float sample_rate,
+                                   vib_3axis_rms_debug_t *out_debug)
+{
+    if (!out_debug)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(out_debug, 0, sizeof(*out_debug));
+
+    if (x)
+    {
+        fill_axis_debug(x, length, sample_rate, &out_debug->x_axis);
+    }
+    if (y)
+    {
+        fill_axis_debug(y, length, sample_rate, &out_debug->y_axis);
+    }
+    if (z)
+    {
+        fill_axis_debug(z, length, sample_rate, &out_debug->z_axis);
+    }
+
+    return ESP_OK;
 }

@@ -492,12 +492,11 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     // 2. Lock the system task mutex to ensure exclusive operation during this DAQ work.
     // This will block the state check handler from running concurrently.
     lock_system_task();
-
-    esp_err_t ret;
+    esp_err_t ret = ESP_OK;
 
     if (param == NULL)
     {
-        ret = ESP_ERR_INVALID_ARG;
+        return ESP_ERR_INVALID_ARG;
     }
     else
     {
@@ -509,10 +508,11 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
         config_icm_42688_p(param);
 #endif
 
+
         // 根据任务模式启动相应的工作
         if (param->task_mode == TASK_MODE_PATROLING)
         {
-            // LOG_DEBUG("Starting patrol work...");
+            // LOG_DEBUG("Starting patrol work...")
             ret = start_patrolling_work();
         }
         else if (param->task_mode == TASK_MODE_DIAGNOSIS)
