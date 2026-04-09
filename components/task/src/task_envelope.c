@@ -3,7 +3,9 @@
 #include "algo_envelope.h"
 #include "config_manager.h"
 #include "logger.h"
+#include "task_diag_fusion.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "freertos/idf_additions.h"
 #include <string.h>
 
@@ -12,6 +14,7 @@
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 QueueHandle_t g_envelope_job_queue = NULL;
+EXT_RAM_BSS_ATTR static float s_envelope_work_buf[MAX_DAQ_SAMPLES];
 
 static void log_envelope_report(const char *axis, const envelope_report_t *report)
 {
@@ -35,6 +38,7 @@ static void envelope_task_entry(void *arg)
 {
     vib_job_t job;
     envelope_report_t report;
+    diag_envelope_summary_t summary;
 
     // Initialize algorithm resources (filters, etc.)
     algo_envelope_init();
@@ -44,38 +48,64 @@ static void envelope_task_entry(void *arg)
         if (xQueueReceive(g_envelope_job_queue, &job, portMAX_DELAY))
         {
             LOG_INFOF("Envelope Analysis Start. Len: %lu, SR: %.1f", job.length, job.sample_rate);
+            memset(&summary, 0, sizeof(summary));
+            summary.timestamp = job.timestamp;
+            summary.length = job.length;
+            summary.sample_rate = job.sample_rate;
+
+            if (job.length == 0 || job.length > MAX_DAQ_SAMPLES)
+            {
+                LOG_ERRORF("Invalid envelope length: %lu", job.length);
+                continue;
+            }
+
+            if (job.raw_data == NULL)
+            {
+                LOG_ERROR("Envelope raw_data is NULL");
+                continue;
+            }
 
             // Get bearing configuration
             // bearing_orders_t bearing = g_user_config.bearing;
             bearing_orders_t bearing = {0};
             float rpm = (float)g_user_config.rpm;
 
-            // Pointers to raw data (Planar layout: X | Y | Z)
-            // Note: algo_envelope_execute modifies data in-place.
-            // We cast away const because we are the exclusive consumer of this data in this flow.
-            float *x_ptr = (float *)job.raw_data;
-            float *y_ptr = (float *)job.raw_data + MAX_DAQ_SAMPLES;
-            float *z_ptr = (float *)job.raw_data + MAX_DAQ_SAMPLES * 2;
+            // Pointers to raw data (Planar layout: X | Y | Z). Keep raw_data read-only and
+            // stage each axis into the task-local work buffer for in-place envelope processing.
+            const float *x_ptr = job.raw_data;
+            const float *y_ptr = job.raw_data + MAX_DAQ_SAMPLES;
+            const float *z_ptr = job.raw_data + MAX_DAQ_SAMPLES * 2;
 
             // Process X Axis
             memset(&report, 0, sizeof(report));
-            if (algo_envelope_execute(x_ptr, job.length, job.sample_rate, rpm, &bearing, &report) == ESP_OK)
+            memcpy(s_envelope_work_buf, x_ptr, job.length * sizeof(float));
+            if (algo_envelope_execute(s_envelope_work_buf, job.length, job.sample_rate, rpm, &bearing, &report) == ESP_OK)
             {
+                summary.x_axis = report;
                 log_envelope_report("X", &report);
             }
 
             // Process Y Axis
             memset(&report, 0, sizeof(report));
-            if (algo_envelope_execute(y_ptr, job.length, job.sample_rate, rpm, &bearing, &report) == ESP_OK)
+            memcpy(s_envelope_work_buf, y_ptr, job.length * sizeof(float));
+            if (algo_envelope_execute(s_envelope_work_buf, job.length, job.sample_rate, rpm, &bearing, &report) == ESP_OK)
             {
+                summary.y_axis = report;
                 log_envelope_report("Y", &report);
             }
 
             // Process Z Axis
             memset(&report, 0, sizeof(report));
-            if (algo_envelope_execute(z_ptr, job.length, job.sample_rate, rpm, &bearing, &report) == ESP_OK)
+            memcpy(s_envelope_work_buf, z_ptr, job.length * sizeof(float));
+            if (algo_envelope_execute(s_envelope_work_buf, job.length, job.sample_rate, rpm, &bearing, &report) == ESP_OK)
             {
+                summary.z_axis = report;
                 log_envelope_report("Z", &report);
+            }
+
+            if (diag_fusion_submit_envelope(&summary) != ESP_OK)
+            {
+                LOG_WARN("Failed to submit diagnosis envelope summary");
             }
 
             LOG_INFO("Envelope Analysis Complete");

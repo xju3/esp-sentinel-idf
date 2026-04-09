@@ -1,6 +1,7 @@
 #include "task_kurtosis.h"
 #include "task_stash.h" // for vib_job_t
 #include "algo_kurtosis.h"
+#include "task_diag_fusion.h"
 #include "logger.h"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
@@ -34,15 +35,23 @@ static void kurtosis_task_entry(void *arg)
             LOG_INFOF("Kurtosis Result: X=%.2f, Y=%.2f, Z=%.2f", 
                       result.x, result.y, result.z);
             
-            // 4. Optional: Trigger alerts if kurtosis exceeds threshold
+            // 4. Log diagnostic severity independently from the envelope path.
             float max_kurt = (result.x > result.y) ? result.x : result.y;
             max_kurt = (max_kurt > result.z) ? max_kurt : result.z;
+            diag_kurtosis_summary_t summary = {
+                .timestamp = job.timestamp,
+                .length = job.length,
+                .sample_rate = job.sample_rate,
+                .kurtosis = result,
+                .max_kurtosis = max_kurt,
+                .threshold_exceeded = (max_kurt > KURTOSIS_ALARM_THRESHOLD),
+            };
+            if (diag_fusion_submit_kurtosis(&summary) != ESP_OK)
+            {
+                LOG_WARN("Failed to submit diagnosis kurtosis summary");
+            }
             if (max_kurt > KURTOSIS_ALARM_THRESHOLD) {  
                 LOG_WARNF("High Kurtosis Detected! Max=%.2f", max_kurt);
-                if (g_envelope_job_queue)
-                {
-                    xQueueSend(g_envelope_job_queue, &job, 0);
-                }
             }
         }
     }

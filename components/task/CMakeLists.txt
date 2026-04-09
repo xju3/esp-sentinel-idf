@@ -3,6 +3,7 @@ idf_component_register(
         "src/task_daq.c" 
         "src/task_rms.c" 
         "src/task_fft.c"
+        "src/task_diag_fusion.c"
         "src/task_kurtosis.c"
         "src/task_envelope.c"
         "src/daq_worker.c" 

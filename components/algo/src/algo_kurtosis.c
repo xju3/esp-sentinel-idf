@@ -8,7 +8,7 @@
 
 static const char *TAG = "ALGO_KURT";
 
-#define MAX_PROCESS_POINTS 2048
+#define MAX_PROCESS_POINTS 4096
 
 // Use external RAM for large scratch buffer, aligned for SIMD
 EXT_RAM_BSS_ATTR static float s_kurt_scratch[MAX_PROCESS_POINTS] __attribute__((aligned(16)));

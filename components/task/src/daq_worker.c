@@ -7,7 +7,9 @@
 #include "logger.h"
 #include "esp_err.h"
 #include "task_rms.h"
+#include "task_fft.h"
 #include "task_kurtosis.h"
+#include "task_envelope.h"
 #include <math.h>
 #include <string.h>
 #include "esp_attr.h"
@@ -385,9 +387,17 @@ esp_err_t start_diagnosing_work()
         .length = diagnosis_config.fft_points,
         .sample_rate = diagnosis_config.actual_odr,
         .task_mode = TASK_MODE_DIAGNOSIS};
+    if (g_fft_job_queue)
+    {
+        xQueueSend(g_fft_job_queue, &job, 0);
+    }
     if (g_kurtosis_job_queue)
     {
         xQueueSend(g_kurtosis_job_queue, &job, 0);
+    }
+    if (g_envelope_job_queue)
+    {
+        xQueueSend(g_envelope_job_queue, &job, 0);
     }
     return ESP_OK;
 }

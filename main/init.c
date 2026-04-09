@@ -12,6 +12,7 @@
 #include "task_daq.h"
 #include "task_baseline.h"
 #include "task_fft.h"
+#include "task_diag_fusion.h"
 #include "task_rms.h"
 #include "task_kurtosis.h"
 #include "task_state_machine.h"
@@ -54,6 +55,11 @@ static esp_err_t enable_tasks()
         return ret;
     }
     ret = start_fft_task();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+    ret = start_diag_fusion_task();
     if (ret != ESP_OK)
     {
         return ret;

@@ -3,6 +3,7 @@
 #include "logger.h"
 #include "config_manager.h"
 #include "data_dispatcher.h"
+#include "task_diag_fusion.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
@@ -1235,6 +1236,42 @@ static void send_patrol_fft_report(const vib_job_t *job)
     // xQueueSend(g_msg_dispatcher_queue, &msg, 0);
 }
 
+static void log_diagnosis_fft_report(const vib_job_t *job)
+{
+    if (!job)
+    {
+        return;
+    }
+
+    diag_fft_summary_t summary = {
+        .timestamp = job->timestamp,
+        .length = job->length,
+        .sample_rate = job->sample_rate,
+    };
+    memcpy(summary.peaks, s_patrol_fft_report.peaks, sizeof(summary.peaks));
+    if (diag_fusion_submit_fft(&summary) != ESP_OK)
+    {
+        LOG_WARN("Failed to submit diagnosis FFT summary");
+    }
+
+    for (int i = 0; i < PATROL_MAX_PEAKS; ++i)
+    {
+        const patrol_peak_t *peak = &s_patrol_fft_report.peaks[i];
+        if (peak_score(peak) <= 0.0f)
+        {
+            continue;
+        }
+
+        LOG_INFOF("Diagnosis spectral peak[%d]: %.2fHz, dom=%c, amp[X=%.4f,Y=%.4f,Z=%.4f]",
+                  i,
+                  peak->freq_hz,
+                  "XYZ"[peak->dominant_axis],
+                  peak->amp_x,
+                  peak->amp_y,
+                  peak->amp_z);
+    }
+}
+
 static void fft_task_entry(void *arg)
 {
     vib_job_t job;
@@ -1269,7 +1306,6 @@ static void fft_task_entry(void *arg)
             if (job.task_mode == TASK_MODE_PATROLING)
             {
                 log_patrol_source_debug(x_ptr, y_ptr, z_ptr, n, job.sample_rate, g_user_config.rpm);
-
                 demean_buf = (float *)heap_caps_malloc(3U * n * sizeof(float), MALLOC_CAP_SPIRAM);
                 if (demean_buf)
                 {
@@ -1317,7 +1353,14 @@ static void fft_task_entry(void *arg)
                 heap_caps_free(demean_buf);
             }
 
-            send_patrol_fft_report(&job);
+            if (job.task_mode == TASK_MODE_PATROLING)
+            {
+                send_patrol_fft_report(&job);
+            }
+            else
+            {
+                log_diagnosis_fft_report(&job);
+            }
             LOG_INFO("FFT analysis complete.");
         }
     }
