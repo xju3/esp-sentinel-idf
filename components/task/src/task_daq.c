@@ -262,16 +262,6 @@ esp_err_t start_task_daq(void)
         &patrol_task_handle,
         TASK_MEM_CAPS);
 
-
-       BaseType_t result = xTaskCreateWithCaps(
-        generic_task_handler,
-        "patrol_task",
-        4096,
-        &patrol_ctx,
-        2,
-        &patrol_task_handle,
-        TASK_MEM_CAPS);
-
     if (result != pdPASS)
     {
         LOG_ERROR("Failed to create patrol task");
@@ -308,7 +298,7 @@ esp_err_t start_task_daq(void)
 
     // 初始化诊断定时器（分钟级）
     if (!init_task_timer(&diagnosis_timer_handle, diagnosis_task_handle,
-                         g_user_config.diagnosis, "Diagnosis", 1))
+                         g_user_config.diagnosis, "Diagnosis", 1 ))
     {
         LOG_WARN("Diagnosis timer not started");
     }

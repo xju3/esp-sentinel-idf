@@ -358,6 +358,7 @@ esp_err_t start_diagnosing_work()
         return ESP_ERR_INVALID_STATE;
     }
     daq_capture_reset();
+
 #if IMU == 1
     s_capture_state.decimation_factor = 1U;
 #endif
