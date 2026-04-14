@@ -41,3 +41,4 @@ managed_components/
 *.swo
 *~
 .omx/
+.txt
