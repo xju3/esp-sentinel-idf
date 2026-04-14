@@ -40,3 +40,4 @@ managed_components/
 *.swp
 *.swo
 *~
+.omx/
