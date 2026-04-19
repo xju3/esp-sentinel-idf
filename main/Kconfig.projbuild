@@ -50,4 +50,29 @@ config SENTINEL_BOOT_AP_CONFIG_WINDOW_SEC
       waits this long for configuration submission before continuing into the
       main program automatically.
 
+config SENTINEL_DIRECT_REPORT_PATROL_THRESHOLD_MIN
+    int "Patrol interval threshold for direct normal reporting (minutes)"
+    range 1 1440
+    default 60
+    help
+      When patrol interval is greater than or equal to this value, normal
+      patrol RMS reports bypass batch accumulation and flush immediately.
+
+config SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC
+    int "Timeout for dispatcher flush before OFF sleep (seconds)"
+    range 1 300
+    default 30
+    help
+      Before entering WoM light sleep after low-RMS OFF detection, the device
+      waits up to this many seconds for queued reports to flush successfully.
+
+config SENTINEL_NETWORK_BRINGUP_TIMEOUT_SEC
+    int "Timeout for network and MQTT bring-up before sending (seconds)"
+    range 1 300
+    default 90
+    help
+      When dispatcher needs to send but MQTT is offline, it will bring up WiFi
+      STA or 4G according to user configuration and wait up to this many
+      seconds for MQTT to become ready.
+
 endmenu

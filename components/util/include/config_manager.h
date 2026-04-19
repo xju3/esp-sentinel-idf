@@ -25,6 +25,7 @@ extern "C"
 #define FILE_PATH_HW_CONSUMPTION "/system/c/consumption.json"
 #define FILE_PATH_CONFIG_USER "/user/user_config.json"
 #define FILE_PATH_DEVICE_PROFILE "/user/device_profile.json"
+#define FILE_PATH_DISPATCH_CACHE "/user/dispatch_cache.bin"
 
     typedef struct
     {
@@ -70,7 +71,7 @@ extern "C"
         sensor_position_t pos; // 传感器安装方向配置
         int16_t patrol;        // minutes between patrols (0 to disable), max value 1440 (24h)
         int16_t diagnosis;     // seconds between detections (must be > 0)
-        int16_t report;        // seconds between reports (must be >= detect)
+        int16_t report;        // buffered message count threshold before reporting
         bool is_configured;
     } user_config_t;
 

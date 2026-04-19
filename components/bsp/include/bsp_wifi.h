@@ -31,6 +31,7 @@ esp_err_t scan_wifi(void);
  * @return esp_err_t 返回 ESP_OK 表示连接成功
  */
 esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_communication_channel_established cb);
+esp_err_t wifi_stop_sta(void);
 
 
 /**

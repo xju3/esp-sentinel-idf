@@ -89,7 +89,17 @@ static void maybe_enter_off_sleep_mode(const vib_job_t *job, const vib_3axis_fea
     s_patrol_low_rms_streak = 0;
     LOG_WARN("Machine appears OFF from patrol RMS. Pausing periodic monitoring and entering WoM light sleep.");
 
-    esp_err_t ret = task_daq_pause_periodic();
+    esp_err_t ret = data_dispatcher_flush_all(
+        pdMS_TO_TICKS(CONFIG_SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC * 1000U));
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to flush dispatcher before OFF sleep: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    LOG_INFO("Dispatcher flush completed before OFF sleep.");
+
+    ret = task_daq_pause_periodic();
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Failed to pause periodic DAQ before OFF sleep: %s", esp_err_to_name(ret));
@@ -120,7 +130,6 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
                             float sample_rate,
                             float temperature)
 {
-    (void)mode;
     (void)sample_rate;
 
     MsgRmsReport msg_rms_report = MSG_RMS_REPORT__INIT;
@@ -154,7 +163,8 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
     msg_rms_report.impulse = &impulse;
     msg_rms_report.iso = (int8_t)status;
     msg_rms_report.temperature = temperature;
-    // Send using unified message dispatcher
+
+    (void)mode;
     return send_protobuf_message(1, &msg_rms_report.base);
 }
 

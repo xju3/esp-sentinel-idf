@@ -75,3 +75,27 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_communication_cha
     LOG_INFOF("STA connecting to SSID:%s (APSTA mode)", ssid);
     return ESP_OK;
 }
+
+esp_err_t wifi_stop_sta(void)
+{
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    if (mode == WIFI_MODE_APSTA)
+    {
+        (void)esp_wifi_disconnect();
+        return esp_wifi_set_mode(WIFI_MODE_AP);
+    }
+
+    if (mode == WIFI_MODE_STA)
+    {
+        (void)esp_wifi_disconnect();
+        return esp_wifi_stop();
+    }
+
+    return ESP_OK;
+}

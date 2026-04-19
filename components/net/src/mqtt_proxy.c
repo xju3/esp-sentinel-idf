@@ -8,6 +8,8 @@
 
 // 全局 MQTT 客户端句柄
 esp_mqtt_client_handle_t g_mqtt_client = NULL;
+static mqtt_proxy_event_cb_t s_mqtt_proxy_event_cb = NULL;
+static void *s_mqtt_proxy_event_user_ctx = NULL;
 
 // MQTT 事件处理函数
 static void mqtt_event_handler(void *handler_args,
@@ -20,12 +22,20 @@ static void mqtt_event_handler(void *handler_args,
     {
     case MQTT_EVENT_CONNECTED:
         LOG_INFO("MQTT connected");
+        if (s_mqtt_proxy_event_cb)
+        {
+            s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
+        }
         // 订阅主题（如果需要）
         // esp_mqtt_client_subscribe(g_mqtt_client, "/device/command", 0);
         break;
 
     case MQTT_EVENT_DISCONNECTED:
         LOG_WARN("MQTT disconnected");
+        if (s_mqtt_proxy_event_cb)
+        {
+            s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_DISCONNECTED, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
+        }
         break;
 
     case MQTT_EVENT_SUBSCRIBED:
@@ -37,7 +47,10 @@ static void mqtt_event_handler(void *handler_args,
         break;
 
     case MQTT_EVENT_PUBLISHED:
-        // LOG_DEBUG("MQTT published");
+        if (s_mqtt_proxy_event_cb)
+        {
+            s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_PUBLISHED, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
+        }
         break;
 
     case MQTT_EVENT_DATA:
@@ -48,11 +61,21 @@ static void mqtt_event_handler(void *handler_args,
 
     case MQTT_EVENT_ERROR:
         LOG_ERROR("MQTT error");
+        if (s_mqtt_proxy_event_cb)
+        {
+            s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_ERROR, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
+        }
         break;
 
     default:
         break;
     }
+}
+
+void mqtt_proxy_set_event_callback(mqtt_proxy_event_cb_t cb, void *user_ctx)
+{
+    s_mqtt_proxy_event_cb = cb;
+    s_mqtt_proxy_event_user_ctx = user_ctx;
 }
 
 // 初始化 MQTT 客户端

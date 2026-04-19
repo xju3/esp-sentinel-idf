@@ -28,6 +28,7 @@ extern "C"
 
     // Unified message sending function for protobuf messages
     esp_err_t send_protobuf_message(uint32_t event_type, const ProtobufCMessage *message);
+    esp_err_t data_dispatcher_flush_all(TickType_t timeout_ticks);
 
 #ifdef __cplusplus
 }

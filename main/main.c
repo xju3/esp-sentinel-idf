@@ -20,6 +20,7 @@ void app_main(void)
     init_nvs();
     init_machine_state();
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
+    const bool had_valid_config_on_boot = g_user_config.is_configured;
 
     startup_gate_reset();
     startup_gate_set_waiting_for_config(true);
@@ -40,15 +41,28 @@ void app_main(void)
         }
         else
         {
-            LOG_INFO("Configuration window expired, continuing into main program.");
+            LOG_INFO("Configuration window expired.");
         }
     }
     else
     {
-        LOG_INFO("No AP client connected during boot window, continuing into main program.");
+        LOG_INFO("No AP client connected during boot window.");
     }
 
     startup_gate_set_waiting_for_config(false);
+
+    if (!g_user_config.is_configured)
+    {
+        if (had_valid_config_on_boot)
+        {
+            LOG_WARN("Device configuration became invalid during boot gate, staying in configuration mode.");
+        }
+        else
+        {
+            LOG_INFO("Device is not configured, staying in configuration mode.");
+        }
+        return;
+    }
 
     ESP_ERROR_CHECK(start_local_services());
 }
