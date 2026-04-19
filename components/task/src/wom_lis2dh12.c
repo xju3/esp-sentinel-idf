@@ -22,6 +22,8 @@ static int s_int2_idle_level = -1;
 static gpio_int_type_t s_int1_intr_type = GPIO_INTR_DISABLE;
 static gpio_int_type_t s_int2_intr_type = GPIO_INTR_DISABLE;
 static uint64_t s_int1_suppress_until_us = 0;
+static bool s_listener_started = false;
+static bool s_wom_armed = false;
 
 // Bitmask for pending GPIO events (set in ISR, consumed in task)
 #define WOM_EVT_INT1 (1u << 0)
@@ -71,6 +73,11 @@ static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
     default:
         return 186u;
     }
+}
+
+static gpio_int_type_t wom_gpio_wakeup_type_for_idle(int idle_level)
+{
+    return (idle_level == 0) ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL;
 }
 
 static void wom_int1_clear_and_rearm(bool suppress_log)
@@ -212,6 +219,11 @@ static void wom_listener_task(void *arg)
 // ---------------------------------------------------------------------------
 esp_err_t start_wom_lis2dh12_listener(void)
 {
+    if (s_listener_started)
+    {
+        return ESP_OK;
+    }
+
     BaseType_t task_created =
         xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, &s_wom_task, TASK_MEM_CAPS);
     if (task_created != pdPASS)
@@ -221,13 +233,10 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ESP_FAIL;
     }
 
-    // Configure GPIO inputs for INT1 and INT2
     gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_DISABLE, // Arm after sensor is configured + sources cleared
+        .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << LIS2DH12_PIN_NUM_INT1) | (1ULL << LIS2DH12_PIN_NUM_INT2),
-        // Prefer pull-up: LIS2DH12 INT lines are commonly active-low open-drain on boards,
-        // and pull-down will prevent the line from ever going high.
         .pull_down_en = 0,
         .pull_up_en = 1,
     };
@@ -238,7 +247,6 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ret;
     }
 
-    // Install ISR service; prefer IRAM-safe allocation for stability during flash ops.
     ret = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
     {
@@ -246,8 +254,6 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ret;
     }
 
-    // Add ISR handlers, then immediately keep interrupts disabled until after the sensor
-    // is configured and any boot-time latched sources are cleared.
     ret = gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT1, gpio_isr_handler, (void *)LIS2DH12_PIN_NUM_INT1);
     if (ret != ESP_OK)
     {
@@ -255,6 +261,7 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ret;
     }
     gpio_intr_disable(LIS2DH12_PIN_NUM_INT1);
+
     ret = gpio_isr_handler_add(LIS2DH12_PIN_NUM_INT2, gpio_isr_handler, (void *)LIS2DH12_PIN_NUM_INT2);
     if (ret != ESP_OK)
     {
@@ -264,26 +271,37 @@ esp_err_t start_wom_lis2dh12_listener(void)
     }
     gpio_intr_disable(LIS2DH12_PIN_NUM_INT2);
 
-    // Arm the sensor
+    s_listener_started = true;
+    LOG_DEBUG("WoM listener infrastructure ready.");
+    return ESP_OK;
+}
+
+esp_err_t wom_lis2dh12_enable(void)
+{
+    if (s_wom_armed)
+    {
+        return ESP_OK;
+    }
+
+    esp_err_t ret = start_wom_lis2dh12_listener();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
     ret = drv_lis2dh12_enable_wom(&s_default_wom_cfg);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Failed to enable WoM: %s", esp_err_to_name(ret));
-        gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT1);
-        gpio_isr_handler_remove(LIS2DH12_PIN_NUM_INT2);
         return ret;
     }
 
-    // Clear any pending/boot-time interrupt state before enabling GPIO interrupts.
-    // Reading INTx_SRC clears the corresponding latched interrupt source.
     {
         uint8_t src;
         (void)drv_lis2dh12_read_int1_source(&src);
         (void)drv_lis2dh12_read_int2_source(&src);
     }
 
-    // Detect idle level after configuration + source clear, then select edge accordingly.
-    // This makes the code robust to either active-high (push-pull) or active-low (open-drain) wiring.
     vTaskDelay(pdMS_TO_TICKS(2));
     s_int1_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT1);
     s_int2_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT2);
@@ -294,23 +312,25 @@ esp_err_t start_wom_lis2dh12_listener(void)
                (s_int1_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge",
                (s_int2_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge");
 
-    // Enable GPIO interrupts after the sensor is fully configured.
     ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, s_int1_intr_type);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("gpio_set_intr_type INT1 failed: %s", esp_err_to_name(ret));
+        (void)drv_lis2dh12_disable_wom();
         return ret;
     }
     ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, s_int2_intr_type);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("gpio_set_intr_type INT2 failed: %s", esp_err_to_name(ret));
+        (void)drv_lis2dh12_disable_wom();
         return ret;
     }
+
     gpio_intr_enable(LIS2DH12_PIN_NUM_INT1);
     gpio_intr_enable(LIS2DH12_PIN_NUM_INT2);
+    s_wom_armed = true;
 
-    // Dump final register state for verification
     {
         uint8_t r1, r2, r3, r4, r5, r6, thr1, thr2, dur1, dur2, cfg1, cfg2;
         drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG1, &r1);
@@ -335,7 +355,85 @@ esp_err_t start_wom_lis2dh12_listener(void)
                    cfg2, thr2, thr2 * ths_step_mg, dur2, dur2 * 20u);
     }
 
-    LOG_DEBUG("WoM listener ready.");
+    LOG_INFO("WoM armed");
+    return ESP_OK;
+}
+
+esp_err_t wom_lis2dh12_disable(void)
+{
+    if (!s_listener_started)
+    {
+        return ESP_OK;
+    }
+
+    if (!s_wom_armed)
+    {
+        return ESP_OK;
+    }
+
+    gpio_intr_disable(LIS2DH12_PIN_NUM_INT1);
+    gpio_intr_disable(LIS2DH12_PIN_NUM_INT2);
+    (void)gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_DISABLE);
+    (void)gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_DISABLE);
+    __atomic_store_n(&s_pending_events, 0, __ATOMIC_RELEASE);
+    s_int1_suppress_until_us = 0;
+    s_wom_armed = false;
+
+    esp_err_t ret = drv_lis2dh12_disable_wom();
+    if (ret != ESP_OK)
+    {
+        LOG_WARNF("Failed to disable WoM: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    LOG_INFO("WoM disarmed");
+    return ESP_OK;
+}
+
+esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
+{
+    esp_err_t ret = wom_lis2dh12_enable();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT1, wom_gpio_wakeup_type_for_idle(s_int1_idle_level));
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to enable GPIO wakeup for INT1: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT2, wom_gpio_wakeup_type_for_idle(s_int2_idle_level));
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to enable GPIO wakeup for INT2: %s", esp_err_to_name(ret));
+        (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);
+        return ret;
+    }
+    ret = esp_sleep_enable_gpio_wakeup();
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to enable GPIO wakeup source: %s", esp_err_to_name(ret));
+        (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);
+        (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT2);
+        return ret;
+    }
+
+    LOG_INFO("Entering light sleep, waiting for WoM wakeup");
+    ret = esp_light_sleep_start();
+
+    (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+    (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);
+    (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT2);
+
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Light sleep failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    LOG_INFOF("Woke from light sleep, cause=%d", esp_sleep_get_wakeup_cause());
     return ESP_OK;
 }
 

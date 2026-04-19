@@ -9,16 +9,20 @@ extern "C" {
 #endif
 
 /**
- * @brief Starts the LIS2DH12 Wake-on-Motion listener task.
+ * @brief Starts the LIS2DH12 Wake-on-Motion listener infrastructure.
  *
- * This task initializes the GPIOs for INT1 and INT2 from the LIS2DH12
- * and waits for interrupts, logging a message when one occurs.
+ * This prepares the listener task and GPIO interrupt service, but does not
+ * arm WoM on the sensor until wom_lis2dh12_enable() is called.
  *
  * @return esp_err_t 
  *      - ESP_OK on success
  *      - Other error codes on failure
  */
 esp_err_t start_wom_lis2dh12_listener();
+
+esp_err_t wom_lis2dh12_enable(void);
+esp_err_t wom_lis2dh12_disable(void);
+esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void);
 
 /**
  * @brief Manual check for WoM triggers after sleep wakeup.

@@ -36,6 +36,7 @@ static SemaphoreHandle_t s_daq_mutex = NULL;
 static portMUX_TYPE s_task_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_diagnosis_pending = false;
 static bool s_diagnosis_running = false;
+static bool s_periodic_enabled = true;
 
 // FreeRTOS 软件定时器句柄
 static TimerHandle_t patrol_timer_handle = NULL;
@@ -74,6 +75,28 @@ static void set_diagnosis_running(bool running)
     taskEXIT_CRITICAL(&s_task_state_lock);
 }
 
+bool task_daq_periodic_enabled(void)
+{
+    bool enabled = false;
+
+    taskENTER_CRITICAL(&s_task_state_lock);
+    enabled = s_periodic_enabled;
+    taskEXIT_CRITICAL(&s_task_state_lock);
+
+    return enabled;
+}
+
+static void set_periodic_enabled(bool enabled)
+{
+    taskENTER_CRITICAL(&s_task_state_lock);
+    s_periodic_enabled = enabled;
+    if (!enabled)
+    {
+        s_diagnosis_pending = false;
+    }
+    taskEXIT_CRITICAL(&s_task_state_lock);
+}
+
 /**
  * @brief 定时器回调函数
  *
@@ -82,6 +105,11 @@ static void set_diagnosis_running(bool running)
  */
 static void timer_callback(TimerHandle_t timer_handle)
 {
+    if (!task_daq_periodic_enabled())
+    {
+        return;
+    }
+
     TaskHandle_t target_task = (TaskHandle_t)pvTimerGetTimerID(timer_handle);
     if (target_task != NULL)
     {
@@ -111,6 +139,12 @@ static void generic_task_handler(void *arg)
         // 等待定时器通知
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        if (!task_daq_periodic_enabled())
+        {
+            LOG_INFOF("%s task skipped: periodic monitoring paused", ctx->task_name);
+            continue;
+        }
+
         if (ctx->task_mode == TASK_MODE_PATROLING && diagnosis_active_or_pending())
         {
             LOG_INFO("Patrol task skipped: diagnosis is pending or running");
@@ -127,6 +161,12 @@ static void generic_task_handler(void *arg)
         // 由于 Diagnosis 任务优先级更高，一旦锁释放，它会优先获得锁并立即执行
         if (xSemaphoreTake(s_daq_mutex, portMAX_DELAY) == pdTRUE)
         {
+            if (!task_daq_periodic_enabled())
+            {
+                xSemaphoreGive(s_daq_mutex);
+                continue;
+            }
+
             if (ctx->task_mode == TASK_MODE_PATROLING && diagnosis_active_or_pending())
             {
                 LOG_INFO("Patrol task skipped after lock: diagnosis is pending or running");
@@ -232,6 +272,32 @@ static bool init_task_timer(TimerHandle_t *timer_handle_ptr,
     return true;
 }
 
+static void stop_timer_if_running(TimerHandle_t timer_handle, const char *timer_name)
+{
+    if (timer_handle == NULL)
+    {
+        return;
+    }
+
+    if (xTimerStop(timer_handle, 0) != pdPASS)
+    {
+        LOG_WARNF("Failed to stop %s timer", timer_name);
+    }
+}
+
+static void restart_timer_if_present(TimerHandle_t timer_handle, const char *timer_name)
+{
+    if (timer_handle == NULL)
+    {
+        return;
+    }
+
+    if (xTimerReset(timer_handle, 0) != pdPASS)
+    {
+        LOG_WARNF("Failed to restart %s timer", timer_name);
+    }
+}
+
 esp_err_t start_task_daq(void)
 {
     // 创建互斥锁 (Mutex)
@@ -304,5 +370,58 @@ esp_err_t start_task_daq(void)
 
     LOG_INFO("DAQ tasks started successfully");
 
+    return ESP_OK;
+}
+
+esp_err_t task_daq_pause_periodic(void)
+{
+    set_periodic_enabled(false);
+    stop_timer_if_running(patrol_timer_handle, "Patrol");
+    stop_timer_if_running(diagnosis_timer_handle, "Diagnosis");
+
+    if (s_daq_mutex != NULL && xSemaphoreTake(s_daq_mutex, portMAX_DELAY) == pdTRUE)
+    {
+        xSemaphoreGive(s_daq_mutex);
+    }
+
+    LOG_INFO("Periodic DAQ tasks paused");
+    return ESP_OK;
+}
+
+esp_err_t task_daq_trigger_patrol_now(void)
+{
+    if (patrol_task_handle == NULL)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!task_daq_periodic_enabled())
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (diagnosis_active_or_pending())
+    {
+        LOG_INFO("Immediate patrol skipped: diagnosis is pending or running");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xTaskNotifyGive(patrol_task_handle);
+    return ESP_OK;
+}
+
+esp_err_t task_daq_resume_periodic(bool trigger_patrol_now)
+{
+    set_periodic_enabled(true);
+    restart_timer_if_present(patrol_timer_handle, "Patrol");
+    restart_timer_if_present(diagnosis_timer_handle, "Diagnosis");
+    LOG_INFO("Periodic DAQ tasks resumed");
+
+    if (trigger_patrol_now)
+    {
+        esp_err_t ret = task_daq_trigger_patrol_now();
+        if (ret != ESP_OK)
+        {
+            LOG_WARNF("Immediate patrol trigger failed after resume: %s", esp_err_to_name(ret));
+        }
+    }
     return ESP_OK;
 }

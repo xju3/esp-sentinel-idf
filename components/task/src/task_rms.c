@@ -6,11 +6,15 @@
 #include "config_manager.h"
 #include "data_dispatcher.h"
 #include "task_fft.h"
+#include "task_daq.h"
+#include "wom_lis2dh12.h"
 #include "drv_ds18b20.h"
+#include "machine_state.h"
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
+#include "sdkconfig.h"
 
 // 必须与 daq_worker.c 中的定义保持一致
 #define MAX_DAQ_SAMPLES 8192
@@ -20,12 +24,13 @@
 #define RMS_DEBUG_ANALYSIS_THRESHOLD_MM_S 1.00f
 
 QueueHandle_t g_rms_job_queue = NULL;
+static uint32_t s_patrol_low_rms_streak = 0;
 
-static bool should_run_fft_for_features(const vib_3axis_features_t *features)
+static float max_axis_rms_mm_s(const vib_3axis_features_t *features)
 {
     if (!features)
     {
-        return false;
+        return 0.0f;
     }
 
     float max_rms = features->x_axis.rms;
@@ -37,9 +42,77 @@ static bool should_run_fft_for_features(const vib_3axis_features_t *features)
     {
         max_rms = features->z_axis.rms;
     }
+    return max_rms;
+}
 
+static bool should_run_fft_for_features(const vib_3axis_features_t *features)
+{
+    if (!features)
+    {
+        return false;
+    }
+
+    float max_rms = max_axis_rms_mm_s(features);
     return max_rms >= FFT_ENABLE_RMS_THRESHOLD_MM_S;
 }
+
+#if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
+static void maybe_enter_off_sleep_mode(const vib_job_t *job, const vib_3axis_features_t *features)
+{
+    if (!job || !features || job->task_mode != TASK_MODE_PATROLING)
+    {
+        s_patrol_low_rms_streak = 0;
+        return;
+    }
+
+    const float max_rms = max_axis_rms_mm_s(features);
+    const float off_threshold = (float)CONFIG_SENTINEL_OFF_RMS_THRESHOLD_MM_S;
+
+    if (max_rms >= off_threshold)
+    {
+        s_patrol_low_rms_streak = 0;
+        return;
+    }
+
+    s_patrol_low_rms_streak++;
+    LOG_INFOF("Low patrol RMS detected: max_rms=%.4f mm/s, threshold=%.4f mm/s, streak=%lu/%d",
+              max_rms,
+              off_threshold,
+              (unsigned long)s_patrol_low_rms_streak,
+              CONFIG_SENTINEL_OFF_CONFIRM_COUNT);
+
+    if (s_patrol_low_rms_streak < (uint32_t)CONFIG_SENTINEL_OFF_CONFIRM_COUNT)
+    {
+        return;
+    }
+
+    s_patrol_low_rms_streak = 0;
+    LOG_WARN("Machine appears OFF from patrol RMS. Pausing periodic monitoring and entering WoM light sleep.");
+
+    esp_err_t ret = task_daq_pause_periodic();
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to pause periodic DAQ before OFF sleep: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    set_machine_state(STATE_OFF);
+    ret = wom_lis2dh12_enter_light_sleep_until_wakeup();
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("WoM light sleep failed: %s", esp_err_to_name(ret));
+        (void)wom_lis2dh12_disable();
+        set_machine_state(STATE_TRANSIENT);
+        (void)task_daq_resume_periodic(false);
+        return;
+    }
+
+    wom_lis2dh12_on_wakeup();
+    (void)wom_lis2dh12_disable();
+    set_machine_state(STATE_TRANSIENT);
+    (void)task_daq_resume_periodic(true);
+}
+#endif
 
 static esp_err_t rms_report(vib_3axis_features_t *features,
                             iso_alarm_status_t status,
@@ -239,15 +312,7 @@ static void rms_task_entry(void *arg)
                 }
                 else
                 {
-                    float max_rms = features.x_axis.rms;
-                    if (features.y_axis.rms > max_rms)
-                    {
-                        max_rms = features.y_axis.rms;
-                    }
-                    if (features.z_axis.rms > max_rms)
-                    {
-                        max_rms = features.z_axis.rms;
-                    }
+                    float max_rms = max_axis_rms_mm_s(&features);
 
                     LOG_INFOF("Skipping FFT: vibration energy too low for patrol analysis (max_rms=%.4f mm/s, threshold=%.4f mm/s)",
                               max_rms,
@@ -264,6 +329,10 @@ static void rms_task_entry(void *arg)
             }
             LOG_DEBUGF("Current temperature: %.2f °C", temp);
             rms_report(&features, status, job.task_mode, job.sample_rate, temp);
+
+#if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
+            maybe_enter_off_sleep_mode(&job, &features);
+#endif
         }
     }
 }

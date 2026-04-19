@@ -69,12 +69,6 @@ static esp_err_t enable_tasks()
     // Create the task that will handle state determination logic.
     create_state_check_handler_task();
 
-    ret = start_wom_lis2dh12_listener();
-    if (ret != ESP_OK)
-    {
-        // Avoid reboot loops when LIS2DH12 is absent/miswired.
-        LOG_ERRORF("LIS2DH12 WoM listener disabled: %s", esp_err_to_name(ret));
-    }
     return ESP_OK;
 }
 
