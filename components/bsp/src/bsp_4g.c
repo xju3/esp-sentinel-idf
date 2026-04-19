@@ -25,6 +25,9 @@
 
 #define UART_PORT_NUM UART_NUM_1
 #define BUF_SIZE (1024)
+#define PPP_IP_INFO_TIMEOUT_MS 3000
+#define PPP_IP_INFO_POLL_MS 100
+#define PPP_POST_CONNECT_STABILIZE_MS 500
 
 static const char *TAG = "ppp_4g";
 
@@ -35,6 +38,7 @@ static esp_netif_t *s_ppp_netif = NULL;
 static EventGroupHandle_t s_ppp_event_group = NULL;
 static TaskHandle_t s_ppp_rx_task = NULL;
 static volatile bool s_ppp_rx_task_running = false;
+static bool s_ppp_session_started = false;
 
 #define PPP_GOT_IP_BIT BIT0
 #define PPP_FAILED_BIT BIT1
@@ -218,6 +222,61 @@ static void ppp_uart_rx_task(void *args)
     vTaskDelete(NULL);
 }
 
+static void ppp_reset_event_bits(void)
+{
+    if (s_ppp_event_group != NULL)
+    {
+        xEventGroupClearBits(s_ppp_event_group, PPP_GOT_IP_BIT | PPP_FAILED_BIT);
+    }
+}
+
+static void ppp_stop_session(void)
+{
+    if (s_ppp_netif == NULL || !s_ppp_session_started)
+    {
+        ppp_reset_event_bits();
+        return;
+    }
+
+    esp_netif_action_disconnected(s_ppp_netif, 0, 0, 0);
+    esp_netif_action_stop(s_ppp_netif, 0, 0, 0);
+    s_ppp_session_started = false;
+    ppp_reset_event_bits();
+}
+
+static void ppp_destroy_netif(void)
+{
+    if (s_ppp_netif != NULL)
+    {
+        esp_netif_destroy(s_ppp_netif);
+        s_ppp_netif = NULL;
+    }
+    s_ppp_session_started = false;
+    ppp_reset_event_bits();
+}
+
+static esp_err_t ppp_wait_for_ip_ready(void)
+{
+    esp_netif_ip_info_t ip_info = {0};
+    const TickType_t step_ticks = pdMS_TO_TICKS(PPP_IP_INFO_POLL_MS);
+    const TickType_t timeout_ticks = pdMS_TO_TICKS(PPP_IP_INFO_TIMEOUT_MS);
+    const TickType_t start_ticks = xTaskGetTickCount();
+
+    while ((xTaskGetTickCount() - start_ticks) < timeout_ticks)
+    {
+        if (s_ppp_netif != NULL &&
+            esp_netif_get_ip_info(s_ppp_netif, &ip_info) == ESP_OK &&
+            ip_info.ip.addr != 0U)
+        {
+            return ESP_OK;
+        }
+        vTaskDelay(step_ticks);
+    }
+
+    ESP_LOGW(TAG, "PPP reported connected but IP info did not become ready in time");
+    return ESP_ERR_TIMEOUT;
+}
+
 static esp_err_t ppp_stack_init(void)
 {
     esp_err_t err = esp_netif_init();
@@ -299,8 +358,16 @@ static esp_err_t ppp_start_and_wait_ip(void)
         }
     }
 
-    xEventGroupClearBits(s_ppp_event_group, PPP_GOT_IP_BIT | PPP_FAILED_BIT);
+    if (s_ppp_session_started)
+    {
+        ESP_LOGW(TAG, "PPP session still active, forcing stop before restart");
+        ppp_stop_session();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    ppp_reset_event_bits();
     esp_netif_action_start(s_ppp_netif, 0, 0, 0);
+    s_ppp_session_started = true;
     esp_netif_action_connected(s_ppp_netif, 0, 0, 0);
 
     EventBits_t bits = xEventGroupWaitBits(s_ppp_event_group,
@@ -309,10 +376,19 @@ static esp_err_t ppp_start_and_wait_ip(void)
                                            pdMS_TO_TICKS(60000));
     if (bits & PPP_GOT_IP_BIT)
     {
+        esp_err_t ip_ready_err = ppp_wait_for_ip_ready();
+        if (ip_ready_err != ESP_OK)
+        {
+            ppp_stop_session();
+            return ip_ready_err;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(PPP_POST_CONNECT_STABILIZE_MS));
         return ESP_OK;
     }
 
     ESP_LOGE(TAG, "PPP connect timeout/failed");
+    ppp_stop_session();
     return ESP_FAIL;
 }
 
@@ -568,6 +644,8 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
 
 esp_err_t shutdown_ppp_4g(void)
 {
+    ppp_stop_session();
+
     if (s_ppp_rx_task_running)
     {
         s_ppp_rx_task_running = false;
@@ -583,6 +661,8 @@ esp_err_t shutdown_ppp_4g(void)
 
     // 删除 UART 驱动
     ESP_ERROR_CHECK(uart_driver_delete(UART_PORT_NUM));
+
+    ppp_destroy_netif();
 
     return ESP_OK;
 }

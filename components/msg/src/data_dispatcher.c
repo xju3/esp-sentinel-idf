@@ -366,7 +366,9 @@ static void dispatcher_finish_batch(bool success,
     }
 }
 
-static void dispatcher_handle_transport_failure(size_t pending_count,
+static void dispatcher_handle_transport_failure(bool flush_safe_to_complete,
+                                                size_t pending_count,
+                                                size_t active_count,
                                                 bool *flush_requested,
                                                 bool *immediate_flush_pending,
                                                 bool *mqtt_ready,
@@ -375,8 +377,11 @@ static void dispatcher_handle_transport_failure(size_t pending_count,
                                                 SemaphoreHandle_t *flush_done_sem,
                                                 bool **flush_result_out)
 {
-    LOG_WARNF("Dispatcher transport/session failed, pending=%u", (unsigned)pending_count);
-    dispatcher_finish_batch(false,
+    LOG_WARNF("Dispatcher transport/session failed, pending=%u, active=%u, durable=%s",
+              (unsigned)pending_count,
+              (unsigned)active_count,
+              flush_safe_to_complete ? "yes" : "no");
+    dispatcher_finish_batch(flush_safe_to_complete,
                             flush_requested,
                             immediate_flush_pending,
                             mqtt_ready,
@@ -640,7 +645,9 @@ static void dispatcher_maybe_progress(size_t *pending_count,
             if (err != ESP_OK)
             {
                 LOG_ERRORF("Transport bring-up start failed: %s", esp_err_to_name(err));
-                dispatcher_handle_transport_failure(*pending_count,
+                dispatcher_handle_transport_failure(true,
+                                                    *pending_count,
+                                                    *active_count,
                                                     flush_requested,
                                                     immediate_flush_pending,
                                                     mqtt_ready,
@@ -658,7 +665,9 @@ static void dispatcher_maybe_progress(size_t *pending_count,
                  esp_timer_get_time() > *transport_deadline_us)
         {
             LOG_WARN("Timed out waiting for network/MQTT bring-up");
-            dispatcher_handle_transport_failure(*pending_count,
+            dispatcher_handle_transport_failure(true,
+                                                *pending_count,
+                                                *active_count,
                                                 flush_requested,
                                                 immediate_flush_pending,
                                                 mqtt_ready,
@@ -674,7 +683,9 @@ static void dispatcher_maybe_progress(size_t *pending_count,
     int32_t msg_id = -1;
     if (!dispatcher_publish_one(&(*active_msgs)[0], &msg_id))
     {
-        dispatcher_handle_transport_failure(*pending_count,
+        dispatcher_handle_transport_failure(true,
+                                            *pending_count,
+                                            *active_count,
                                             flush_requested,
                                             immediate_flush_pending,
                                             mqtt_ready,
@@ -806,7 +817,10 @@ static void dispatcher_task(void *arg)
                         LOG_ERRORF("Failed to persist dispatcher failure state: %s", esp_err_to_name(persist_err));
                     }
 
-                    dispatcher_handle_transport_failure(pending_count,
+                    const bool flush_safe_to_complete = (persist_err == ESP_OK);
+                    dispatcher_handle_transport_failure(flush_safe_to_complete,
+                                                        pending_count,
+                                                        active_count,
                                                         &flush_requested,
                                                         &immediate_flush_pending,
                                                         &mqtt_ready,

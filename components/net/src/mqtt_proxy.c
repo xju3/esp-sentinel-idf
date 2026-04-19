@@ -4,6 +4,7 @@
 #include "logger.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <errno.h>
 #include <string.h>
 
 // 全局 MQTT 客户端句柄
@@ -61,6 +62,18 @@ static void mqtt_event_handler(void *handler_args,
 
     case MQTT_EVENT_ERROR:
         LOG_ERROR("MQTT error");
+        if (event && event->error_handle)
+        {
+            esp_mqtt_error_codes_t *err = event->error_handle;
+            LOG_ERRORF("MQTT error detail: type=%d, tls_esp_err=0x%x, tls_stack_err=%d, cert_flags=0x%x, sock_errno=%d (%s), connect_rc=%d",
+                       err->error_type,
+                       (unsigned int)err->esp_tls_last_esp_err,
+                       err->esp_tls_stack_err,
+                       (unsigned int)err->esp_tls_cert_verify_flags,
+                       err->esp_transport_sock_errno,
+                       (err->esp_transport_sock_errno != 0) ? strerror(err->esp_transport_sock_errno) : "n/a",
+                       err->connect_return_code);
+        }
         if (s_mqtt_proxy_event_cb)
         {
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_ERROR, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);

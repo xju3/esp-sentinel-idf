@@ -17,7 +17,6 @@
 #define MAX_DAQ_SAMPLES 8192
 #define RMS_QUEUE_LEN 5
 #define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
-#define FFT_ENABLE_RMS_THRESHOLD_MM_S 0.10f
 #define RMS_DEBUG_ANALYSIS_THRESHOLD_MM_S 1.00f
 
 QueueHandle_t g_rms_job_queue = NULL;
@@ -40,17 +39,6 @@ static float max_axis_rms_mm_s(const vib_3axis_features_t *features)
         max_rms = features->z_axis.rms;
     }
     return max_rms;
-}
-
-static bool should_run_fft_for_features(const vib_3axis_features_t *features)
-{
-    if (!features)
-    {
-        return false;
-    }
-
-    float max_rms = max_axis_rms_mm_s(features);
-    return max_rms >= FFT_ENABLE_RMS_THRESHOLD_MM_S;
 }
 
 #if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
@@ -286,21 +274,9 @@ static void rms_task_entry(void *arg)
 
             if (job.task_mode == TASK_MODE_PATROLING && g_fft_job_queue != NULL)
             {
-                if (request_off_sleep || off_sleep_manager_sleep_requested())
+                if (xQueueSend(g_fft_job_queue, &job, 0) != pdTRUE)
                 {
-                    LOG_INFO("Skipping FFT: OFF sleep requested for patrol pipeline");
-                }
-                else if (should_run_fft_for_features(&features))
-                {
-                    xQueueSend(g_fft_job_queue, &job, 0);
-                }
-                else
-                {
-                    float max_rms = max_axis_rms_mm_s(&features);
-
-                    LOG_INFOF("Skipping FFT: vibration energy too low for patrol analysis (max_rms=%.4f mm/s, threshold=%.4f mm/s)",
-                              max_rms,
-                              FFT_ENABLE_RMS_THRESHOLD_MM_S);
+                    LOG_WARN("Failed to enqueue patrol FFT job");
                 }
             }
 
