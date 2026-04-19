@@ -86,6 +86,27 @@ bool task_daq_periodic_enabled(void)
     return enabled;
 }
 
+bool task_daq_is_idle(void)
+{
+    if (diagnosis_active_or_pending())
+    {
+        return false;
+    }
+
+    if (s_daq_mutex == NULL)
+    {
+        return true;
+    }
+
+    if (xSemaphoreTake(s_daq_mutex, 0) == pdTRUE)
+    {
+        xSemaphoreGive(s_daq_mutex);
+        return true;
+    }
+
+    return false;
+}
+
 static void set_periodic_enabled(bool enabled)
 {
     taskENTER_CRITICAL(&s_task_state_lock);

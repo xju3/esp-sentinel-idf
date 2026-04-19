@@ -54,6 +54,7 @@ esp_err_t drv_iis3dwb_config(const iis3dwb_cfg_t *cfg);
 esp_err_t drv_iis3dwb_start_stream(imu_data_cb_t cb);
 esp_err_t drv_iis3dwb_start_stream_ex(imu_data_cb_ctx_t cb, void *user_ctx);
 esp_err_t drv_iis3dwb_stop_stream(void);
+esp_err_t drv_iis3dwb_enter_standby(void);
 extern iis3dwb_cfg_t iis3dwb_accel_fs_cfg_16;
 extern iis3dwb_cfg_t iis3dwb_accel_fs_cfg_2;
 #ifdef __cplusplus

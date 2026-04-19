@@ -13,6 +13,7 @@ extern "C"
 extern QueueHandle_t g_fft_job_queue;
 
 esp_err_t start_fft_task(void);
+bool task_fft_is_idle(void);
 
 #ifdef __cplusplus
 }

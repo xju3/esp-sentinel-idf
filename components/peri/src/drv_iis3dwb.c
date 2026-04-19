@@ -317,3 +317,30 @@ esp_err_t drv_iis3dwb_stop_stream(void)
     s_data_cb_user_ctx = NULL;
     return ESP_OK;
 }
+
+esp_err_t drv_iis3dwb_enter_standby(void)
+{
+    if (!g_iis3dwb_initialized || !s_spi_handle)
+    {
+        return ESP_OK;
+    }
+
+    esp_err_t ret = drv_iis3dwb_stop_stream();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = iis3dwb_write_reg(IIS3DWB_REG_FIFO_CTRL4, IIS3DWB_FIFO_MODE_BYPASS);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = iis3dwb_write_reg(IIS3DWB_REG_CTRL1_XL, 0x00);
+    if (ret == ESP_OK)
+    {
+        LOG_DEBUG("IIS3DWB entered standby");
+    }
+    return ret;
+}

@@ -19,6 +19,7 @@
 #define PATROL_LOG_LOW_FREQ_MAX_HZ 200.0f
 
 QueueHandle_t g_fft_job_queue = NULL;
+static volatile bool s_fft_task_busy = false;
 static patrol_fft_report_t s_patrol_fft_report;
 
 #define RPM_HINT_MIN_FACTOR       0.70f
@@ -1279,18 +1280,21 @@ static void fft_task_entry(void *arg)
     {
         if (xQueueReceive(g_fft_job_queue, &job, portMAX_DELAY))
         {
+            s_fft_task_busy = true;
             LOG_INFOF("Received job for FFT analysis. Mode: %d, Len: %lu, SR: %.1f",
                       job.task_mode, job.length, job.sample_rate);
             const uint32_t n = job.length;
             if (n < 2 || n > MAX_DAQ_SAMPLES || ((n & (n - 1U)) != 0U))
             {
                 LOG_ERRORF("Invalid FFT length: %lu", n);
+                s_fft_task_busy = false;
                 continue; 
             }
 
             if (job.raw_data == NULL)
             {
                 LOG_ERROR("raw_data is NULL");
+                s_fft_task_busy = false;
                 continue;
             }
 
@@ -1340,6 +1344,7 @@ static void fft_task_entry(void *arg)
                     heap_caps_free(demean_buf);
                 }
                 LOG_ERRORF("FFT peak analysis failed: %d", err);
+                s_fft_task_busy = false;
                 continue;
             }
 
@@ -1362,8 +1367,19 @@ static void fft_task_entry(void *arg)
                 log_diagnosis_fft_report(&job);
             }
             LOG_INFO("FFT analysis complete.");
+            s_fft_task_busy = false;
         }
     }
+}
+
+bool task_fft_is_idle(void)
+{
+    if (g_fft_job_queue == NULL)
+    {
+        return true;
+    }
+
+    return (!s_fft_task_busy) && (uxQueueMessagesWaiting(g_fft_job_queue) == 0);
 }
 
 esp_err_t start_fft_task(void)

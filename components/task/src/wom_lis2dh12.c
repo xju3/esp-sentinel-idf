@@ -1,11 +1,9 @@
 #include "wom_lis2dh12.h"
 #include "drv_lis2dh12.h"
 #include "logger.h"
-#include "task_state_machine.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include "freertos/idf_additions.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -78,6 +76,83 @@ static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs)
 static gpio_int_type_t wom_gpio_wakeup_type_for_idle(int idle_level)
 {
     return (idle_level == 0) ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL;
+}
+
+static void wom_prepare_light_sleep_power_domains(void)
+{
+    // Keep the wake path conservative on ESP32-S3. This costs a small amount
+    // of sleep current but avoids RTCWDT resets caused by aggressive domain
+    // power-down during short GPIO-triggered light-sleep cycles.
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, ESP_PD_OPTION_ON);
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_ON);
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_ON);
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+}
+
+static void wom_restore_light_sleep_power_domains(void)
+{
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_AUTO);
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_VDDSDIO, ESP_PD_OPTION_AUTO);
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_XTAL, ESP_PD_OPTION_AUTO);
+    (void)esp_sleep_pd_config(ESP_PD_DOMAIN_CPU, ESP_PD_OPTION_AUTO);
+}
+
+static void wom_refresh_idle_levels(bool log_levels)
+{
+    s_int1_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT1);
+    s_int2_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT2);
+    s_int1_intr_type = (s_int1_idle_level == 0) ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
+    s_int2_intr_type = (s_int2_idle_level == 0) ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
+
+    if (log_levels)
+    {
+        LOG_DEBUGF("WoM INT idle levels: INT1=%d INT2=%d (intr INT1=%s INT2=%s)",
+                   s_int1_idle_level, s_int2_idle_level,
+                   (s_int1_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge",
+                   (s_int2_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge");
+    }
+}
+
+static void wom_log_register_dump(void)
+{
+    uint8_t r1, r2, r3, r4, r5, r6, thr1, thr2, dur1, dur2, cfg1, cfg2;
+    drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG1, &r1);
+    drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG2, &r2);
+    drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG3, &r3);
+    drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG4, &r4);
+    drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG5, &r5);
+    drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG6, &r6);
+    drv_lis2dh12_read_register(LIS2DH12_REG_INT1_THS, &thr1);
+    drv_lis2dh12_read_register(LIS2DH12_REG_INT2_THS, &thr2);
+    drv_lis2dh12_read_register(LIS2DH12_REG_INT1_DURATION, &dur1);
+    drv_lis2dh12_read_register(LIS2DH12_REG_INT2_DURATION, &dur2);
+    drv_lis2dh12_read_register(LIS2DH12_REG_INT1_CFG, &cfg1);
+    drv_lis2dh12_read_register(LIS2DH12_REG_INT2_CFG, &cfg2);
+    const uint16_t ths_step_mg = lis2dh12_int_ths_step_mg(drv_lis2dh12_get_current_fs());
+
+    LOG_DEBUG("WoM register dump:");
+    LOG_DEBUGF("  CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL4=0x%02X CTRL5=0x%02X CTRL6=0x%02X",
+               r1, r2, r3, r4, r5, r6);
+    LOG_DEBUGF("  INT1: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
+               cfg1, thr1, thr1 * ths_step_mg, dur1, dur1 * 20u);
+    LOG_DEBUGF("  INT2: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
+               cfg2, thr2, thr2 * ths_step_mg, dur2, dur2 * 20u);
+}
+
+static void wom_log_wakeup_sources(void)
+{
+    uint8_t int1_src = 0;
+    uint8_t int2_src = 0;
+
+    if (drv_lis2dh12_read_int1_source(&int1_src) == ESP_OK && (int1_src & 0x40))
+    {
+        LOG_INFOF("WoM wake source INT1: INT1_SRC=0x%02X", int1_src);
+    }
+
+    if (drv_lis2dh12_read_int2_source(&int2_src) == ESP_OK && (int2_src & 0x40))
+    {
+        LOG_INFOF("WoM wake source INT2: INT2_SRC=0x%02X", int2_src);
+    }
 }
 
 static void wom_int1_clear_and_rearm(bool suppress_log)
@@ -206,11 +281,6 @@ static void wom_listener_task(void *arg)
             wom_int1_clear_and_rearm(suppress_int1);
         }
 
-        // TODO: trigger health-check or wakeup sequence here
-        // Any WoM event means the machine's state might have changed. Trigger the state check handler.
-        if (pending) {
-            xSemaphoreGive(g_state_check_semaphore);
-        }
     }
 }
 
@@ -303,14 +373,7 @@ esp_err_t wom_lis2dh12_enable(void)
     }
 
     vTaskDelay(pdMS_TO_TICKS(2));
-    s_int1_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT1);
-    s_int2_idle_level = gpio_get_level(LIS2DH12_PIN_NUM_INT2);
-    s_int1_intr_type = (s_int1_idle_level == 0) ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
-    s_int2_intr_type = (s_int2_idle_level == 0) ? GPIO_INTR_POSEDGE : GPIO_INTR_NEGEDGE;
-    LOG_DEBUGF("WoM INT idle levels: INT1=%d INT2=%d (intr INT1=%s INT2=%s)",
-               s_int1_idle_level, s_int2_idle_level,
-               (s_int1_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge",
-               (s_int2_intr_type == GPIO_INTR_POSEDGE) ? "posedge" : "negedge");
+    wom_refresh_idle_levels(true);
 
     ret = gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, s_int1_intr_type);
     if (ret != ESP_OK)
@@ -331,29 +394,7 @@ esp_err_t wom_lis2dh12_enable(void)
     gpio_intr_enable(LIS2DH12_PIN_NUM_INT2);
     s_wom_armed = true;
 
-    {
-        uint8_t r1, r2, r3, r4, r5, r6, thr1, thr2, dur1, dur2, cfg1, cfg2;
-        drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG1, &r1);
-        drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG2, &r2);
-        drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG3, &r3);
-        drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG4, &r4);
-        drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG5, &r5);
-        drv_lis2dh12_read_register(LIS2DH12_REG_CTRL_REG6, &r6);
-        drv_lis2dh12_read_register(LIS2DH12_REG_INT1_THS, &thr1);
-        drv_lis2dh12_read_register(LIS2DH12_REG_INT2_THS, &thr2);
-        drv_lis2dh12_read_register(LIS2DH12_REG_INT1_DURATION, &dur1);
-        drv_lis2dh12_read_register(LIS2DH12_REG_INT2_DURATION, &dur2);
-        drv_lis2dh12_read_register(LIS2DH12_REG_INT1_CFG, &cfg1);
-        drv_lis2dh12_read_register(LIS2DH12_REG_INT2_CFG, &cfg2);
-        const uint16_t ths_step_mg = lis2dh12_int_ths_step_mg(drv_lis2dh12_get_current_fs());
-        LOG_DEBUG("WoM register dump:");
-        LOG_DEBUGF("  CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL4=0x%02X CTRL5=0x%02X CTRL6=0x%02X",
-                   r1, r2, r3, r4, r5, r6);
-        LOG_DEBUGF("  INT1: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
-                   cfg1, thr1, thr1 * ths_step_mg, dur1, dur1 * 20u);
-        LOG_DEBUGF("  INT2: CFG=0x%02X THS=0x%02X(%umg) DUR=0x%02X(%ums)",
-                   cfg2, thr2, thr2 * ths_step_mg, dur2, dur2 * 20u);
-    }
+    wom_log_register_dump();
 
     LOG_INFO("WoM armed");
     return ESP_OK;
@@ -361,20 +402,18 @@ esp_err_t wom_lis2dh12_enable(void)
 
 esp_err_t wom_lis2dh12_disable(void)
 {
-    if (!s_listener_started)
-    {
-        return ESP_OK;
-    }
-
     if (!s_wom_armed)
     {
         return ESP_OK;
     }
 
-    gpio_intr_disable(LIS2DH12_PIN_NUM_INT1);
-    gpio_intr_disable(LIS2DH12_PIN_NUM_INT2);
-    (void)gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_DISABLE);
-    (void)gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_DISABLE);
+    if (s_listener_started)
+    {
+        gpio_intr_disable(LIS2DH12_PIN_NUM_INT1);
+        gpio_intr_disable(LIS2DH12_PIN_NUM_INT2);
+        (void)gpio_set_intr_type(LIS2DH12_PIN_NUM_INT1, GPIO_INTR_DISABLE);
+        (void)gpio_set_intr_type(LIS2DH12_PIN_NUM_INT2, GPIO_INTR_DISABLE);
+    }
     __atomic_store_n(&s_pending_events, 0, __ATOMIC_RELEASE);
     s_int1_suppress_until_us = 0;
     s_wom_armed = false;
@@ -392,16 +431,41 @@ esp_err_t wom_lis2dh12_disable(void)
 
 esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
 {
-    esp_err_t ret = wom_lis2dh12_enable();
-    if (ret != ESP_OK)
+    if (!s_wom_armed)
     {
-        return ret;
+        esp_err_t ret = drv_lis2dh12_enable_wom(&s_default_wom_cfg);
+        if (ret != ESP_OK)
+        {
+            LOG_ERRORF("Failed to enable WoM for sleep: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        {
+            uint8_t src = 0;
+            (void)drv_lis2dh12_read_int1_source(&src);
+            (void)drv_lis2dh12_read_int2_source(&src);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(2));
+        wom_refresh_idle_levels(true);
+        wom_log_register_dump();
+        s_wom_armed = true;
+        LOG_INFO("WoM armed for sleep wakeup");
     }
+
+    esp_err_t ret = ESP_OK;
+    wom_prepare_light_sleep_power_domains();
 
     ret = gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT1, wom_gpio_wakeup_type_for_idle(s_int1_idle_level));
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Failed to enable GPIO wakeup for INT1: %s", esp_err_to_name(ret));
+        wom_restore_light_sleep_power_domains();
+        if (s_listener_started)
+        {
+            gpio_intr_enable(LIS2DH12_PIN_NUM_INT1);
+            gpio_intr_enable(LIS2DH12_PIN_NUM_INT2);
+        }
         return ret;
     }
     ret = gpio_wakeup_enable(LIS2DH12_PIN_NUM_INT2, wom_gpio_wakeup_type_for_idle(s_int2_idle_level));
@@ -409,6 +473,12 @@ esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
     {
         LOG_ERRORF("Failed to enable GPIO wakeup for INT2: %s", esp_err_to_name(ret));
         (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);
+        wom_restore_light_sleep_power_domains();
+        if (s_listener_started)
+        {
+            gpio_intr_enable(LIS2DH12_PIN_NUM_INT1);
+            gpio_intr_enable(LIS2DH12_PIN_NUM_INT2);
+        }
         return ret;
     }
     ret = esp_sleep_enable_gpio_wakeup();
@@ -417,15 +487,23 @@ esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
         LOG_ERRORF("Failed to enable GPIO wakeup source: %s", esp_err_to_name(ret));
         (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);
         (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT2);
+        wom_restore_light_sleep_power_domains();
+        if (s_listener_started)
+        {
+            gpio_intr_enable(LIS2DH12_PIN_NUM_INT1);
+            gpio_intr_enable(LIS2DH12_PIN_NUM_INT2);
+        }
         return ret;
     }
 
     LOG_INFO("Entering light sleep, waiting for WoM wakeup");
+    vTaskDelay(pdMS_TO_TICKS(1));
     ret = esp_light_sleep_start();
 
     (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);
     (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT2);
+    wom_restore_light_sleep_power_domains();
 
     if (ret != ESP_OK)
     {
@@ -434,6 +512,7 @@ esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
     }
 
     LOG_INFOF("Woke from light sleep, cause=%d", esp_sleep_get_wakeup_cause());
+    wom_log_wakeup_sources();
     return ESP_OK;
 }
 

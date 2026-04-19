@@ -4,12 +4,9 @@
 #include "iso_check.h"
 #include "logger.h"
 #include "config_manager.h"
-#include "data_dispatcher.h"
+#include "off_sleep_manager.h"
 #include "task_fft.h"
-#include "task_daq.h"
-#include "wom_lis2dh12.h"
 #include "drv_ds18b20.h"
-#include "machine_state.h"
 
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -57,12 +54,12 @@ static bool should_run_fft_for_features(const vib_3axis_features_t *features)
 }
 
 #if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
-static void maybe_enter_off_sleep_mode(const vib_job_t *job, const vib_3axis_features_t *features)
+static bool should_request_off_sleep_mode(const vib_job_t *job, const vib_3axis_features_t *features)
 {
     if (!job || !features || job->task_mode != TASK_MODE_PATROLING)
     {
         s_patrol_low_rms_streak = 0;
-        return;
+        return false;
     }
 
     const float max_rms = max_axis_rms_mm_s(features);
@@ -71,7 +68,7 @@ static void maybe_enter_off_sleep_mode(const vib_job_t *job, const vib_3axis_fea
     if (max_rms >= off_threshold)
     {
         s_patrol_low_rms_streak = 0;
-        return;
+        return false;
     }
 
     s_patrol_low_rms_streak++;
@@ -83,44 +80,12 @@ static void maybe_enter_off_sleep_mode(const vib_job_t *job, const vib_3axis_fea
 
     if (s_patrol_low_rms_streak < (uint32_t)CONFIG_SENTINEL_OFF_CONFIRM_COUNT)
     {
-        return;
+        return false;
     }
 
     s_patrol_low_rms_streak = 0;
-    LOG_WARN("Machine appears OFF from patrol RMS. Pausing periodic monitoring and entering WoM light sleep.");
-
-    esp_err_t ret = data_dispatcher_flush_all(
-        pdMS_TO_TICKS(CONFIG_SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC * 1000U));
-    if (ret != ESP_OK)
-    {
-        LOG_ERRORF("Failed to flush dispatcher before OFF sleep: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    LOG_INFO("Dispatcher flush completed before OFF sleep.");
-
-    ret = task_daq_pause_periodic();
-    if (ret != ESP_OK)
-    {
-        LOG_ERRORF("Failed to pause periodic DAQ before OFF sleep: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    set_machine_state(STATE_OFF);
-    ret = wom_lis2dh12_enter_light_sleep_until_wakeup();
-    if (ret != ESP_OK)
-    {
-        LOG_ERRORF("WoM light sleep failed: %s", esp_err_to_name(ret));
-        (void)wom_lis2dh12_disable();
-        set_machine_state(STATE_TRANSIENT);
-        (void)task_daq_resume_periodic(false);
-        return;
-    }
-
-    wom_lis2dh12_on_wakeup();
-    (void)wom_lis2dh12_disable();
-    set_machine_state(STATE_TRANSIENT);
-    (void)task_daq_resume_periodic(true);
+    LOG_WARN("Machine appears OFF from patrol RMS. Requesting WoM light sleep.");
+    return true;
 }
 #endif
 
@@ -314,9 +279,18 @@ static void rms_task_entry(void *arg)
                 break;
             }
 
+            bool request_off_sleep = false;
+#if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
+            request_off_sleep = should_request_off_sleep_mode(&job, &features);
+#endif
+
             if (job.task_mode == TASK_MODE_PATROLING && g_fft_job_queue != NULL)
             {
-                if (should_run_fft_for_features(&features))
+                if (request_off_sleep || off_sleep_manager_sleep_requested())
+                {
+                    LOG_INFO("Skipping FFT: OFF sleep requested for patrol pipeline");
+                }
+                else if (should_run_fft_for_features(&features))
                 {
                     xQueueSend(g_fft_job_queue, &job, 0);
                 }
@@ -341,7 +315,14 @@ static void rms_task_entry(void *arg)
             rms_report(&features, status, job.task_mode, job.sample_rate, temp);
 
 #if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
-            maybe_enter_off_sleep_mode(&job, &features);
+            if (request_off_sleep)
+            {
+                esp_err_t sleep_req_ret = off_sleep_manager_request_sleep();
+                if (sleep_req_ret != ESP_OK)
+                {
+                    LOG_ERRORF("Failed to request OFF sleep: %s", esp_err_to_name(sleep_req_ret));
+                }
+            }
 #endif
         }
     }
@@ -359,8 +340,9 @@ esp_err_t start_rms_task(void)
         }
     }
 
-    // 创建处理任务
-    if (xTaskCreateWithCaps(rms_task_entry, "rms_task", 4096, NULL, 4, NULL, TASK_MEM_CAPS) != pdPASS)
+    // RMS task can enter light sleep through the OFF/WoM path. Keep its stack
+    // in internal RAM so the task can resume safely after wake on ESP32-S3.
+    if (xTaskCreate(rms_task_entry, "rms_task", 4096, NULL, 4, NULL) != pdPASS)
     {
         LOG_ERROR("Failed to create RMS task");
         return ESP_ERR_INVALID_STATE;

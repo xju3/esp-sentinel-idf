@@ -9,7 +9,7 @@ idf_component_register(
         "src/daq_worker.c" 
         "src/task_baseline.c" 
         "src/wom_lis2dh12.c"
-        "src/task_state_machine.c"
+        "src/off_sleep_manager.c"
         "src/task_stash.c"
     INCLUDE_DIRS 
         "include" 

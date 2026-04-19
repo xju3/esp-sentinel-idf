@@ -691,8 +691,16 @@ static void dispatcher_maybe_progress(size_t *pending_count,
 
 static void dispatcher_task(void *arg)
 {
-    dispatcher_queue_item_t item;
-    MsgPayload pending_msgs[DISPATCHER_MAX_PENDING_MSGS] = {0};
+    dispatcher_queue_item_t item = {0};
+    MsgPayload *pending_msgs =
+        calloc(DISPATCHER_MAX_PENDING_MSGS, sizeof(*pending_msgs));
+    if (pending_msgs == NULL)
+    {
+        LOG_ERROR("Failed to allocate dispatcher pending buffer");
+        vTaskDelete(NULL);
+        return;
+    }
+
     size_t pending_count = 0U;
     bool flush_requested = false;
     bool immediate_flush_pending = false;
@@ -711,7 +719,7 @@ static void dispatcher_task(void *arg)
     {
         if (g_msg_dispatcher_queue == NULL)
         {
-            return;
+            break;
         }
 
         if (xQueueReceive(g_msg_dispatcher_queue, &item, pdMS_TO_TICKS(DISPATCHER_RETRY_INTERVAL_MS)) == pdTRUE)
@@ -833,6 +841,14 @@ static void dispatcher_task(void *arg)
                                   &flush_done_sem,
                                   &flush_result_out);
     }
+
+    for (size_t i = 0; i < pending_count; ++i)
+    {
+        free_payload_data(&pending_msgs[i]);
+    }
+    free(pending_msgs);
+    dispatcher_free_persisted_msgs(active_msgs, active_count);
+    vTaskDelete(NULL);
 }
 
 esp_err_t send_protobuf_message(uint32_t event_type, const ProtobufCMessage *message)

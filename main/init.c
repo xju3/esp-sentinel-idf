@@ -14,8 +14,8 @@
 #include "task_diag_fusion.h"
 #include "task_rms.h"
 #include "task_kurtosis.h"
-#include "task_state_machine.h"
 #include "task_envelope.h"
+#include "off_sleep_manager.h"
 #include "wom_lis2dh12.h"
 #include "web_server.h"
 
@@ -66,8 +66,11 @@ static esp_err_t enable_tasks()
         return ret;
     }
 
-    // Create the task that will handle state determination logic.
-    create_state_check_handler_task();
+    ret = start_off_sleep_manager();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
 
     return ESP_OK;
 }

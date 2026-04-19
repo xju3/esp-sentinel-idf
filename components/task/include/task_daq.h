@@ -15,6 +15,7 @@ esp_err_t task_daq_pause_periodic(void);
 esp_err_t task_daq_resume_periodic(bool trigger_patrol_now);
 esp_err_t task_daq_trigger_patrol_now(void);
 bool task_daq_periodic_enabled(void);
+bool task_daq_is_idle(void);
 
 #ifdef __cplusplus
 }
