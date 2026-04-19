@@ -35,6 +35,7 @@ managed_components/
 # 如果你不想把 VS Code 的任何配置传到 Git，可以直接取消下一行的注释
 .vscode/
 .idea/
+.build-verify/
 
 # 忽略其他编辑器的临时文件
 *.swp
