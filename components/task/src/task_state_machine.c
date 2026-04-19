@@ -2,7 +2,7 @@
 #include "freertos/task.h"
 #include "machine_state.h"
 #include "freertos/semphr.h"
-#include "daq_icm_42688_p.h"
+#include "daq_iis3dwb.h"
 #include "algo_welford.h"
 #include "algo_fft.h"
 #include "algo_window.h"
@@ -19,8 +19,7 @@
 SemaphoreHandle_t g_state_check_semaphore;
 
 // --- Configuration Constants for State Machine ---
-// Use a fixed ODR aligned with patrol sampling to avoid oversized FFT windows.
-#define STATE_MACHINE_ODR_HZ 4000.0f    // ODR for state analysis. Must be supported by ICM42688
+#define STATE_MACHINE_ODR_HZ 26667.0f   // IIS3DWB fixed hardware ODR
 #define STATE_MACHINE_WINDOW_SEC 1.0f   // Target analysis window length (seconds)
 #define STATE_MACHINE_MAX_SAMPLES 4096U // Max FFT points for state analysis (power of 2)
 #define STATE_MACHINE_MAX_FREQ_HZ 2000.0f
@@ -152,7 +151,7 @@ static void start_window(StateAnalysisContext_t *ctx)
 static esp_err_t init_state_dsp_config(void)
 {
     DSP_Config_t cfg = IMU_Get_Fixed_DSP_Config(
-        &icm42688_driver,
+        &iis3dwb_driver,
         STATE_MACHINE_ODR_HZ,
         STATE_MACHINE_MAX_SAMPLES,
         STATE_MACHINE_MAX_FREQ_HZ
@@ -336,7 +335,7 @@ static bool check_stability(StateAnalysisContext_t *ctx)
 }
 
 /**
- * @brief DAQ handler called by daq_icm_42688_p_capture with raw data chunks.
+ * @brief DAQ handler called by daq_iis3dwb_capture with raw data chunks.
  */
 static void state_analysis_handler(const imu_raw_data_t *data, size_t count, void *user_ctx)
 {
@@ -416,12 +415,11 @@ static void task_state_check_handler(void *pvParameters)
             init_state_context(&context);
 
             // Configure and start DAQ capture
-            icm_cfg_t capture_cfg = {
-                .fs = ICM_FS_16G,
-                .enable_wom = false};
+            iis3dwb_cfg_t capture_cfg = {
+                .fs = IIS3DWB_FS_16G};
 
             LOG_INFOF("Starting capture for %d seconds to determine stability...", MAX_TRANSITION_DURATION_S);
-            esp_err_t cap_ret = daq_icm_42688_p_capture(
+            esp_err_t cap_ret = daq_iis3dwb_capture(
                 &capture_cfg,
                 MAX_TRANSITION_DURATION_S * 1000,
                 state_analysis_handler,

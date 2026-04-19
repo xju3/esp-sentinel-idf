@@ -7,7 +7,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "esp_timer.h"
@@ -17,9 +16,7 @@
 #include <math.h>
 
 #include "config_manager.h"
-#include "daq_icm_42688_p.h"
 #include "data_dispatcher.h"
-#include "drv_icm_42688_p.h"
 #include "logger.h"
 #include "msg_sentinel.pb-c.h"
 
@@ -27,11 +24,6 @@
 extern "C"
 {
 #endif
-
-#ifndef IMU
-#define IMU 1
-#endif
-
 
 #define LSB_TO_G_2 (2.0f / 32768.0f)
 #define LSB_TO_G_4 (4.0f / 32768.0f)

@@ -2,9 +2,7 @@
 #include "algo_stash.h"
 #include "algo_welford.h"
 #include "config_manager.h"
-#include "drv_icm_42688_p.h"
 #include "drv_iis3dwb.h"
-#include "daq_icm_42688_p.h"
 #include "daq_iis3dwb.h"
 #include "fs_utils.h"
 #include "logger.h"
@@ -198,49 +196,6 @@ static void baseline_chunk_handler(const imu_raw_data_t *data, size_t count, voi
     baseline_sample_count += 1;
 }
 
-static esp_err_t handle_baseline_by_icm42688P(const char *device_id)
-{
-
-    esp_err_t err = ESP_OK;
-
-    // bool existing = load_existing(device_id, &g_baseline);
-    // if (existing)
-    // {
-    //     print_baseline();
-    //     return ESP_OK;
-    // }
-
-    DSP_Config_t baseline_dsp_config = IMU_Calculate_DSP_Config(
-        &icm42688_driver,
-        (float)g_user_config.rpm,
-        10.0f,   // C
-        10.0f,   // H
-        1000.0f, // F_env
-        1.0f     // delta_f_max
-    );
-
-    // 3. 配置传感器
-    icm_cfg_t cfg = {.fs = ICM_FS_2G, .enable_wom = false, .wom_thr_mg = 0};
-    vib_welford_3d_t welford_st;
-    vib_welford_3d_init(&welford_st);
-    baseline_cb_ctx_t cb_ctx = {.welford = &welford_st};
-
-    // 召唤引擎！把配置、时间和自己的处理函数传进去
-    err = daq_icm_42688_p_capture(&cfg,
-                                  baseline_dsp_config.actual_time * 1000.0f,
-                                  baseline_chunk_handler,
-                                  &cb_ctx, 64, 0);
-    if (err == ESP_OK)
-    {
-        err = handle_baseline_data(device_id, &welford_st);
-        if (err != ESP_OK)
-        {
-            LOG_WARN("failed to set baseline");
-        }
-    }
-    return err;
-}
-
 static esp_err_t handle_baseline_by_iis3dwb(const char *device_id)
 {
     esp_err_t err = ESP_OK;
@@ -290,9 +245,5 @@ static esp_err_t handle_baseline_by_iis3dwb(const char *device_id)
 
 esp_err_t set_device_baseline(const char *device_id)
 {
-#if IMU == 1
     return handle_baseline_by_iis3dwb(device_id);
-#else
-    return handle_baseline_by_icm42688P(device_id);
-#endif
 }

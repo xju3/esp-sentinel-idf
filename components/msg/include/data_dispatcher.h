@@ -2,7 +2,6 @@
 #define DATA_DISPATCHER_H
 
 #include "esp_err.h"
-#include "drv_icm_42688_p.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "msg_sentinel.pb-c.h"

@@ -1,6 +1,4 @@
 #include "daq_worker.h"
-#include "drv_icm_42688_p.h"
-#include "daq_icm_42688_p.h"
 #include "drv_iis3dwb.h"
 #include "daq_iis3dwb.h"
 #include "imu_config.h"
@@ -19,13 +17,11 @@ static DSP_Config_t patrol_config = {0};
 static DSP_Config_t diagnosis_config = {0};
 
 // 初始化配置
-void config_icm_42688_p(daq_worker_param_t *param);
 void config_iis3dwb(daq_worker_param_t *param);
 esp_err_t start_patrolling_work();
 esp_err_t start_diagnosing_work();
 
 #define MAX_DAQ_SAMPLES 8192
-#define ICM4_DMA_CHUNK_SIZE 128
 #define IIS3_DMA_CHUNK_SIZE 512
 #define DAQ_SKIP_MS 20U
 #define DAQ_CAPTURE_GUARD_MS 100U
@@ -210,7 +206,6 @@ static float accel_lsb_to_g_for_iis3dwb(iis3dwb_fs_t fs)
     }
 }
 
-// ICM-42688-P 专用处理函数
 static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *ctx)
 {
     (void)ctx;
@@ -232,26 +227,6 @@ static void daq_buffer_handler(const imu_raw_data_t *data, size_t count, void *c
             daq_push_sample_with_decimation(x_g, y_g, z_g);
         }
     }
-}
-esp_err_t data_acquire_by_icm42688p(int8_t task_mode)
-{
-    uint32_t duration_ms = get_capture_duration_ms(&patrol_config);
-    esp_err_t err = ESP_OK;
-    s_accel_lsb_to_g = LSB_TO_G_16;
-    if (task_mode == TASK_MODE_PATROLING)
-    {
-        duration_ms = get_patrol_capture_duration_ms();
-    }
-    else
-    {
-        duration_ms = get_capture_duration_ms(&diagnosis_config);
-    }
-    if (duration_ms == 0)
-        duration_ms = 1200;
-     LOG_DEBUGF("duration(icm42688p): %lu ms, %s ", duration_ms, task_mode == TASK_MODE_PATROLING ? "Patrol" : "Diagnosis");
-    err = daq_icm_42688_p_capture(
-        &icm42688p_accel_fs_cfg_16, duration_ms, daq_buffer_handler, NULL, ICM4_DMA_CHUNK_SIZE, DAQ_SKIP_MS);
-    return err;
 }
 
 esp_err_t data_acquire_by_iis3dwb(int8_t task_mode)
@@ -300,17 +275,11 @@ esp_err_t start_patrolling_work()
     }
 
     daq_capture_reset();
-#if IMU == 1
     s_capture_state.decimation_factor = IIS3DWB_PATROL_DECIMATION;
     patrol_preprocess_init(IIS3DWB_HW_ODR_HZ);
-#endif
     esp_err_t ret = ESP_OK;
 
-#if IMU == 1
     ret = data_acquire_by_iis3dwb(TASK_MODE_PATROLING);
-#else
-    ret = data_acquire_by_icm42688p(TASK_MODE_PATROLING);
-#endif
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Patrol capture failed: %d", ret);
@@ -359,15 +328,9 @@ esp_err_t start_diagnosing_work()
     }
     daq_capture_reset();
 
-#if IMU == 1
     s_capture_state.decimation_factor = 1U;
-#endif
     esp_err_t ret = ESP_OK;
-#if IMU == 1
     ret = data_acquire_by_iis3dwb(TASK_MODE_DIAGNOSIS);
-#else
-    ret = data_acquire_by_icm42688p(TASK_MODE_DIAGNOSIS);
-#endif
 
     if (ret != ESP_OK)
     {
@@ -401,45 +364,6 @@ esp_err_t start_diagnosing_work()
         xQueueSend(g_envelope_job_queue, &job, 0);
     }
     return ESP_OK;
-}
-
-void config_icm_42688_p(daq_worker_param_t *param)
-{
-    if (param->task_mode == TASK_MODE_PATROLING)
-    {
-        if (patrol_config.actual_odr > 0.0f)
-        {
-            // LOG_INFO("Patrol config already initialized");
-            return;
-        }
-
-        patrol_config = IMU_Get_Fixed_DSP_Config(
-            &icm42688_driver,
-            PATROL_FIXED_ODR_HZ,
-            PATROL_FIXED_FFT_POINTS,
-            PATROL_MAX_FREQ_HZ);
-        // LOG_DEBUGF("Patrol fixed config initialized: ODR=%.2f Hz, Time=%.3f s, FFT Points=%u, Fmax=%.1f Hz",
-        //            patrol_config.actual_odr, patrol_config.actual_time,
-        //            patrol_config.fft_points, patrol_config.f_max_interest);
-        return;
-    }
-    else if (param->task_mode == TASK_MODE_DIAGNOSIS)
-    {
-        if (diagnosis_config.actual_odr > 0.0f)
-        {
-            LOG_INFO(" Diagnosis config already initialized");
-            return;
-        }
-
-        diagnosis_config = IMU_Get_Fixed_DSP_Config(
-            &icm42688_driver,
-            DIAGNOSIS_FIXED_ODR_HZ,
-            DIAGNOSIS_FIXED_FFT_POINTS,
-            DIAGNOSIS_MIN_FREQ_HZ);
-        // LOG_DEBUGF("Diagnosis fixed config initialized: ODR=%.2f Hz, Time=%.3f s, FFT Points=%u, Fmax=%.1f Hz",
-        //            diagnosis_config.actual_odr, diagnosis_config.actual_time,
-        //            diagnosis_config.fft_points, diagnosis_config.f_max_interest);
-    }
 }
 
 void config_iis3dwb(daq_worker_param_t *param)
@@ -484,6 +408,11 @@ void config_iis3dwb(daq_worker_param_t *param)
 
 esp_err_t start_daq_worker(daq_worker_param_t *param)
 {
+    if (param == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     // 1. Check if the machine is in a stable state. This is a mandatory precondition.
     // if (get_machine_state() != STATE_STABLE) {
     //     LOG_WARN("Cannot start DAQ worker: machine state is not STABLE.");
@@ -495,37 +424,23 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     lock_system_task();
     esp_err_t ret = ESP_OK;
 
-    if (param == NULL)
+    config_iis3dwb(param);
+
+    // 根据任务模式启动相应的工作
+    if (param->task_mode == TASK_MODE_PATROLING)
     {
-        return ESP_ERR_INVALID_ARG;
+        // LOG_DEBUG("Starting patrol work...")
+        ret = start_patrolling_work();
+    }
+    else if (param->task_mode == TASK_MODE_DIAGNOSIS)
+    {
+        // LOG_DEBUG("Starting diagnosis work...");
+        ret = start_diagnosing_work();
     }
     else
     {
-
-    // using the appropriate imu sensor
-#if IMU == 1
-        config_iis3dwb(param);
-#else
-        config_icm_42688_p(param);
-#endif
-
-
-        // 根据任务模式启动相应的工作
-        if (param->task_mode == TASK_MODE_PATROLING)
-        {
-            // LOG_DEBUG("Starting patrol work...")
-            ret = start_patrolling_work();
-        }
-        else if (param->task_mode == TASK_MODE_DIAGNOSIS)
-        {
-            // LOG_DEBUG("Starting diagnosis work...");
-            ret = start_diagnosing_work();
-        }
-        else
-        {
-            LOG_ERROR("Invalid task mode");
-            ret = ESP_ERR_INVALID_ARG;
-        }
+        LOG_ERROR("Invalid task mode");
+        ret = ESP_ERR_INVALID_ARG;
     }
 
     // 3. Unlock the mutex now that the blocking DAQ work is complete.

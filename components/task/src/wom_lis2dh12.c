@@ -1,6 +1,5 @@
 #include "wom_lis2dh12.h"
 #include "drv_lis2dh12.h"
-#include "drv_tmb12a05.h"
 #include "logger.h"
 #include "task_state_machine.h"
 
@@ -22,54 +21,13 @@ static int s_int1_idle_level = -1;
 static int s_int2_idle_level = -1;
 static gpio_int_type_t s_int1_intr_type = GPIO_INTR_DISABLE;
 static gpio_int_type_t s_int2_intr_type = GPIO_INTR_DISABLE;
-// disabled, there is no hardware on production device.
-static bool s_buzzer_ready = false;
-static uint64_t s_last_beep_us = 0;
 static uint64_t s_int1_suppress_until_us = 0;
 
 // Bitmask for pending GPIO events (set in ISR, consumed in task)
 #define WOM_EVT_INT1 (1u << 0)
 #define WOM_EVT_INT2 (1u << 1)
-
-// Buzzer patterns for WoM events
-#define WOM_BEEP_INT1_COUNT 1u
-#define WOM_BEEP_INT2_COUNT 3u
-// TMB12A05 is an active buzzer (rated 5V, works at 3~7V). If it's powered from
-// 3.3V or directly driven by a GPIO, SPL can be noticeably lower; use a longer
-// beep to make events perceptible.
-#define WOM_BEEP_DURATION_MS 250u
-#define WOM_BEEP_INTERVAL_MS 120u
-#define WOM_BEEP_MIN_GAP_INT1_MS 250u
-#define WOM_BEEP_MIN_GAP_INT2_MS 50u
-#define WOM_INT2_BEEP_SEQ_MS (WOM_BEEP_INT2_COUNT * WOM_BEEP_DURATION_MS + (WOM_BEEP_INT2_COUNT - 1u) * WOM_BEEP_INTERVAL_MS)
-#define WOM_SUPPRESS_INT1_AFTER_INT2_MS (WOM_INT2_BEEP_SEQ_MS + 100u)
 #define WOM_INT1_COALESCE_MS 30u
-
-static void wom_beep(uint8_t count, uint32_t min_gap_ms)
-{
-    if (!s_buzzer_ready)
-        return;
-
-    // If the buzzer is already in use (by WoM or other modules), ignore this event.
-    // This prevents overlapping beep requests from fighting each other.
-    if (drv_tmb12a05_get_current_mode() != TMB12A05_MODE_OFF)
-        return;
-
-    const uint64_t now = esp_timer_get_time();
-    const uint32_t seq_ms =
-        (count == 0) ? 0u : (count * WOM_BEEP_DURATION_MS + (count - 1u) * WOM_BEEP_INTERVAL_MS);
-    const uint32_t effective_gap_ms = (min_gap_ms > seq_ms) ? min_gap_ms : seq_ms;
-    const uint64_t min_gap_us = (uint64_t)effective_gap_ms * 1000u;
-    if (s_last_beep_us != 0 && (now - s_last_beep_us) < min_gap_us)
-        return;
-
-    s_last_beep_us = now;
-    esp_err_t ret = drv_tmb12a05_beep_multiple(count, WOM_BEEP_DURATION_MS, WOM_BEEP_INTERVAL_MS);
-    if (ret != ESP_OK)
-    {
-        LOG_ERRORF("Buzzer beep failed: %s", esp_err_to_name(ret));
-    }
-}
+#define WOM_SUPPRESS_INT1_AFTER_INT2_US 1000000u
 
 // ---------------------------------------------------------------------------
 // Default WoM thresholds
@@ -221,7 +179,7 @@ static void wom_listener_task(void *arg)
             {
                 int2_fired = true;
                 const uint64_t now = esp_timer_get_time();
-                s_int1_suppress_until_us = now + (uint64_t)WOM_SUPPRESS_INT1_AFTER_INT2_MS * 1000u;
+                s_int1_suppress_until_us = now + WOM_SUPPRESS_INT1_AFTER_INT2_US;
 
                 LOG_WARNF("WoM INT2: posture deviation (thr=%d mg) INT2_SRC=0x%02X",
                           s_default_wom_cfg.threshold_mg_int2, int_src);
@@ -254,30 +212,11 @@ static void wom_listener_task(void *arg)
 // ---------------------------------------------------------------------------
 esp_err_t start_wom_lis2dh12_listener(void)
 {
-    // Best-effort init: WoM can still work without a buzzer.
-    // {
-    //     esp_err_t ret = drv_tmb12a05_init();
-    //     if (ret != ESP_OK)
-    //     {
-    //         LOG_ERRORF("Buzzer init failed (continuing without beep): %s", esp_err_to_name(ret));
-    //         s_buzzer_ready = false;
-    //     }
-    //     else
-    //     {
-    //         s_buzzer_ready = true;
-    //     }
-    // }
-
     BaseType_t task_created =
         xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, &s_wom_task, TASK_MEM_CAPS);
     if (task_created != pdPASS)
     {
         LOG_ERRORF("Failed to create WoM listener task");
-        // if (s_buzzer_ready)
-        // {
-        //     (void)drv_tmb12a05_deinit();
-        //     s_buzzer_ready = false;
-        // }
         s_wom_task = NULL;
         return ESP_FAIL;
     }

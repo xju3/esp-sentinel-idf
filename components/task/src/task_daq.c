@@ -1,6 +1,5 @@
 #include "task_daq.h"
 #include "config_manager.h"
-#include "drv_icm_42688_p.h"
 #include "daq_worker.h"
 #include "logger.h"
 #include "machine_state.h"

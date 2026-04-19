@@ -2,7 +2,6 @@
 #include "bsp_4g.h"
 #include "bsp_wifi.h"
 #include "config_manager.h"
-#include "drv_icm_42688_p.h"
 #include "drv_lis2dh12.h"
 #include "drv_ds18b20.h"
 #include "drv_iis3dwb.h"
@@ -27,19 +26,11 @@
 #include "sdkconfig.h"
 #include <string.h>
 
-#ifndef IMU
-#define IMU 1
-#endif
-
 static void init_drivers()
 {
     drv_ds18b20_init();
     drv_lis2dh12_init();
-#if IMU == 1
     drv_iis3dwb_init();
-#else
-    drv_icm42688_init();
-#endif
 }
 
 static esp_err_t enable_tasks()
