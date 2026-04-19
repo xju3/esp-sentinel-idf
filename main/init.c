@@ -74,36 +74,13 @@ static esp_err_t enable_tasks()
 
 static void network_channel_established_handler(void)
 {
-    init_drivers();
     esp_err_t err = init_mqtt_client();
     if (err != ESP_OK)
     {
         LOG_ERROR("MQTT proxy initialization failed.");
         return;
     }
-
-    err = data_dispatcher_start();
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Data dispatcher initialization failed.");
-        return;
-    }
-
-    err = set_device_baseline(g_user_config.device_id);
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Set device baseline failed.");
-        return;
-    }
-
-    err = enable_tasks();
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Tasks initialization failed.");
-        return;
-    }
-
-
+    LOG_INFO("Network services ready.");
 }
 
 esp_err_t init_nvs()
@@ -151,6 +128,42 @@ esp_err_t establish_communication_channel()
         }
     }
     return err;
+}
+
+esp_err_t start_local_services()
+{
+    esp_err_t err = ESP_OK;
+
+    init_drivers();
+
+    err = data_dispatcher_start();
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("Data dispatcher initialization failed.");
+        return err;
+    }
+
+    err = set_device_baseline(g_user_config.device_id);
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("Set device baseline failed.");
+        return err;
+    }
+
+    err = enable_tasks();
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("Tasks initialization failed.");
+        return err;
+    }
+
+    LOG_INFO("Local services ready without network.");
+    return ESP_OK;
+}
+
+esp_err_t start_network_services()
+{
+    return establish_communication_channel();
 }
 
 void enable_config_service()

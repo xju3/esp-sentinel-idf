@@ -24,5 +24,6 @@ void app_main(void)
         enable_config_service();
         return;
     }
-    ESP_ERROR_CHECK(establish_communication_channel());
+
+    ESP_ERROR_CHECK(start_local_services());
 }
