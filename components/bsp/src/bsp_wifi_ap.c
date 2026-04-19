@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "logger.h"
+#include "startup_gate.h"
 
 // 声明 captive DNS 函数（在 captive_dns.c 中定义）
 void captive_dns_start(void);
@@ -51,6 +52,17 @@ static void wifi_event_handler_internal(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE)
     {
         s_scan_done = true;
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED)
+    {
+        wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
+        LOG_INFOF("AP client connected, aid=%d", event ? event->aid : -1);
+        startup_gate_mark_ap_client_connected();
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED)
+    {
+        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
+        LOG_INFOF("AP client disconnected, aid=%d", event ? event->aid : -1);
     }
 }
 

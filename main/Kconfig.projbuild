@@ -33,4 +33,21 @@ config SENTINEL_OFF_CONFIRM_COUNT
       Number of consecutive patrol RMS windows below threshold required before
       periodic tasks are paused and the device enters WoM light sleep.
 
+config SENTINEL_BOOT_AP_CONNECT_WINDOW_SEC
+    int "Boot AP connect window (seconds)"
+    range 1 300
+    default 10
+    help
+      Time window after boot during which the device waits for a client to
+      connect to the configuration AP before continuing into the main program.
+
+config SENTINEL_BOOT_AP_CONFIG_WINDOW_SEC
+    int "Boot AP configuration window after client connect (seconds)"
+    range 1 600
+    default 60
+    help
+      If a client connects to the configuration AP during boot, the device
+      waits this long for configuration submission before continuing into the
+      main program automatically.
+
 endmenu

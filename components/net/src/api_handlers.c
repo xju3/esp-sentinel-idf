@@ -14,7 +14,16 @@
 #include "bsp_wifi.h"
 #include "fs_utils.h"
 #include "logger.h"
+#include "startup_gate.h"
 #include "web_server.h"
+
+static void restart_task(void *arg)
+{
+    LOG_INFO("restarting...");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    vTaskDelete(NULL);
+}
 
 static esp_err_t send_json_string(httpd_req_t *req, const char *json)
 {
@@ -64,14 +73,6 @@ esp_err_t api_get_config_handler(httpd_req_t *req)
     return ret;
 }
 
-static void restart_task(void *arg)
-{
-    LOG_INFO("restarting...");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    vTaskDelete(NULL);
-}
-
 esp_err_t api_save_config_handler(httpd_req_t *req)
 {
     int total = req->content_len;
@@ -110,7 +111,15 @@ esp_err_t api_save_config_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, "{\"status\":\"success\"}", HTTPD_RESP_USE_STRLEN);
 
-    xTaskCreate(restart_task, "restart_task", 4096, NULL, 5, NULL);
+    if (startup_gate_is_waiting_for_config())
+    {
+        startup_gate_mark_config_completed();
+    }
+    else
+    {
+        LOG_INFO("Config saved after boot gate; restarting to apply changes.");
+        xTaskCreate(restart_task, "restart_task", 4096, NULL, 5, NULL);
+    }
     return ESP_OK;
 }
 
