@@ -1394,7 +1394,10 @@ esp_err_t start_fft_task(void)
         }
     }
 
-    if (xTaskCreateWithCaps(fft_task_entry, "fft_task", 4096 * 2, NULL, 3, NULL, TASK_MEM_CAPS) != pdPASS)
+    // FFT processing resumes on the first patrol cycle after WoM light-sleep.
+    // Keep the task stack in internal RAM so wakeup/context-switch paths do
+    // not depend on PSRAM/cache availability on ESP32-S3.
+    if (xTaskCreate(fft_task_entry, "fft_task", 4096 * 2, NULL, 3, NULL) != pdPASS)
     {
         LOG_ERROR("Failed to create FFT task");
     }

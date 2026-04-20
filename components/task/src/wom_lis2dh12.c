@@ -4,14 +4,11 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/idf_additions.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
-
-#define TASK_MEM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 static TaskHandle_t s_wom_task = NULL;
 static volatile uint32_t s_pending_events = 0;
@@ -294,8 +291,11 @@ esp_err_t start_wom_lis2dh12_listener(void)
         return ESP_OK;
     }
 
+    // The WoM listener participates directly in the light-sleep wake path.
+    // Its stack must stay in internal RAM to avoid PSRAM/cache hazards during
+    // GPIO wake handling on ESP32-S3.
     BaseType_t task_created =
-        xTaskCreateWithCaps(wom_listener_task, "wom_listener", 4096, NULL, 10, &s_wom_task, TASK_MEM_CAPS);
+        xTaskCreate(wom_listener_task, "wom_listener", 4096, NULL, 10, &s_wom_task);
     if (task_created != pdPASS)
     {
         LOG_ERRORF("Failed to create WoM listener task");
