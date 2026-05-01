@@ -19,6 +19,11 @@ void captive_dns_stop(void);
 
 // 静态变量跟踪事件循环是否已初始化
 static bool s_event_loop_initialized = false;
+static bool s_wifi_initialized = false;
+static bool s_wifi_started = false;
+static bool s_ap_netif_created = false;
+static bool s_sta_netif_created = false;
+static bool s_wifi_common_handler_registered = false;
 
 
 // AP 参数定义
@@ -77,38 +82,69 @@ void wifi_event_handler(void *arg, esp_event_base_t event_base,
 esp_err_t wifi_common_init(bool create_ap, bool create_sta)
 {
     // 1. 初始化底层 TCP/IP 堆栈
-    ESP_ERROR_CHECK(esp_netif_init());
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        return err;
+    }
     
     // 只在第一次调用时创建默认事件循环
-    if (!s_event_loop_initialized) {
-        ESP_ERROR_CHECK(esp_event_loop_create_default());
+    if (!s_event_loop_initialized)
+    {
+        err = esp_event_loop_create_default();
+        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+        {
+            return err;
+        }
         s_event_loop_initialized = true;
     }
     
-    if (create_ap) {
+    if (create_ap && !s_ap_netif_created)
+    {
         esp_netif_create_default_wifi_ap();
+        s_ap_netif_created = true;
     }
-    if (create_sta) {
+    if (create_sta && !s_sta_netif_created)
+    {
         esp_netif_create_default_wifi_sta();
+        s_sta_netif_created = true;
     }
     
     // 注册 WiFi 事件处理，包括扫描完成事件
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+    if (!s_wifi_common_handler_registered)
+    {
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+        s_wifi_common_handler_registered = true;
+    }
 
     // 2. 初始化 Wi-Fi 驱动
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    return esp_wifi_init(&cfg);
+    if (!s_wifi_initialized)
+    {
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        err = esp_wifi_init(&cfg);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+        s_wifi_initialized = true;
+    }
+
+    return ESP_OK;
+}
+
+bool wifi_common_is_started(void)
+{
+    return s_wifi_started;
+}
+
+void wifi_common_mark_started(bool started)
+{
+    s_wifi_started = started;
 }
 
 void wifi_init_softap(void)
 {
-    // 恢复默认状态.
-    esp_wifi_stop();
-    esp_wifi_deinit();
-    
-    // xTaskDelayUntil(10, 100);
-
     // 使用公共初始化函数
     ESP_ERROR_CHECK(wifi_common_init(true, true));
 
@@ -142,13 +178,49 @@ void wifi_init_softap(void)
     // 4. 启动 Wi-Fi
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    if (!wifi_common_is_started())
+    {
+        ESP_ERROR_CHECK(esp_wifi_start());
+        wifi_common_mark_started(true);
+    }
 
     LOG_INFOF("SoftAP 启动成功! SSID:%s password:%s",
               (const char *)wifi_config.ap.ssid, SENTINEL_WIFI_PASS);
 
     // 启动 Captive Portal DNS 服务
     captive_dns_start();
+}
+
+esp_err_t wifi_stop_softap(void)
+{
+    captive_dns_stop();
+
+    wifi_mode_t mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA || mode == WIFI_MODE_STA)
+    {
+        (void)esp_wifi_disconnect();
+
+        err = esp_wifi_stop();
+        if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED)
+        {
+            return err;
+        }
+        wifi_common_mark_started(false);
+
+        err = esp_wifi_set_mode(WIFI_MODE_NULL);
+        if (err != ESP_OK)
+        {
+            return err;
+        }
+    }
+
+    return ESP_OK;
 }
 
 

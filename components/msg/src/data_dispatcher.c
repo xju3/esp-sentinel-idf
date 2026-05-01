@@ -297,11 +297,16 @@ static esp_err_t dispatcher_request_transport(void)
         LOG_INFO("Dispatcher bringing up 4G transport before send");
         return init_ppp_4g(dispatcher_network_channel_established);
     }
+    if (g_user_config.network == 2)
+    {
+        LOG_INFO("Dispatcher bringing up WiFi STA transport before send");
+        return wifi_init_sta(g_user_config.wifi.ssid,
+                             g_user_config.wifi.pass,
+                             dispatcher_network_channel_established);
+    }
 
-    LOG_INFO("Dispatcher bringing up WiFi STA transport before send");
-    return wifi_init_sta(g_user_config.wifi.ssid,
-                         g_user_config.wifi.pass,
-                         dispatcher_network_channel_established);
+    LOG_ERRORF("Unsupported network mode for dispatcher transport: %d", g_user_config.network);
+    return ESP_ERR_INVALID_STATE;
 }
 
 static void dispatcher_shutdown_transport(void)
@@ -312,7 +317,7 @@ static void dispatcher_shutdown_transport(void)
     {
         (void)shutdown_ppp_4g();
     }
-    else
+    else if (g_user_config.network == 2)
     {
         (void)wifi_stop_sta();
     }

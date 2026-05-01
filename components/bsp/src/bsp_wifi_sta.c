@@ -9,6 +9,7 @@
 
 // STA 连接成功回调（仅 STA 使用）
 static cb_communication_channel_established s_wifi_connected_cb = NULL;
+static bool s_sta_handlers_registered = false;
 
 // 内部事件处理函数，处理STA连接成功事件和IP获取事件
 static void wifi_sta_event_handler(void *arg, esp_event_base_t event_base,
@@ -46,11 +47,15 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_communication_cha
     ESP_ERROR_CHECK(wifi_common_init(false, true));
 
     // 注册STA连接成功和IP获取事件处理器
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &wifi_sta_event_handler, NULL, NULL));
+    if (!s_sta_handlers_registered)
+    {
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(
+            WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, &wifi_sta_event_handler, NULL, NULL));
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_sta_event_handler, NULL, NULL));
+        s_sta_handlers_registered = true;
+    }
 
     wifi_config_t wifi_config = {0};
     strlcpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
@@ -61,18 +66,34 @@ esp_err_t wifi_init_sta(const char *ssid, const char *pass, cb_communication_cha
 
     // 使用 APSTA 模式，这样设备可以同时作为 AP（用于配置界面）和 STA（连接外部 WiFi）
     // 并且可以扫描热点
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    wifi_mode_t current_mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&current_mode);
+    if (err != ESP_OK)
+    {
+        current_mode = WIFI_MODE_NULL;
+    }
 
-    esp_err_t err = esp_wifi_connect();
+    wifi_mode_t target_mode = (current_mode == WIFI_MODE_AP || current_mode == WIFI_MODE_APSTA)
+                                  ? WIFI_MODE_APSTA
+                                  : WIFI_MODE_STA;
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(target_mode));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    if (!wifi_common_is_started())
+    {
+        ESP_ERROR_CHECK(esp_wifi_start());
+        wifi_common_mark_started(true);
+    }
+
+    err = esp_wifi_connect();
     if (err != ESP_OK)
     {
         LOG_ERRORF("esp_wifi_connect failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    LOG_INFOF("STA connecting to SSID:%s (APSTA mode)", ssid);
+    LOG_INFOF("STA connecting to SSID:%s (mode=%s)", ssid,
+              target_mode == WIFI_MODE_APSTA ? "APSTA" : "STA");
     return ESP_OK;
 }
 
@@ -94,7 +115,12 @@ esp_err_t wifi_stop_sta(void)
     if (mode == WIFI_MODE_STA)
     {
         (void)esp_wifi_disconnect();
-        return esp_wifi_stop();
+        esp_err_t stop_err = esp_wifi_stop();
+        if (stop_err == ESP_OK)
+        {
+            wifi_common_mark_started(false);
+        }
+        return stop_err;
     }
 
     return ESP_OK;

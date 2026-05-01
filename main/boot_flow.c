@@ -74,6 +74,7 @@ esp_err_t boot_flow_prepare(bool *ready_to_start_local_services)
         return ESP_OK;
     }
 
+    ESP_ERROR_CHECK(disable_config_service());
     *ready_to_start_local_services = true;
     return ESP_OK;
 }

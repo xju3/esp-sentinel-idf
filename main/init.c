@@ -19,6 +19,7 @@
 #include "web_server.h"
 
 #include "esp_err.h"
+#include "driver/temperature_sensor.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -30,6 +31,61 @@ static void init_drivers()
     drv_t1820b_init();
     drv_lis2dh12_init();
     drv_iis3dwb_init();
+}
+
+esp_err_t log_soc_temperature_once(void)
+{
+    temperature_sensor_handle_t temp_sensor = NULL;
+    temperature_sensor_config_t temp_sensor_config =
+        TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
+
+    esp_err_t err = temperature_sensor_install(&temp_sensor_config, &temp_sensor);
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("Failed to install ESP32 temperature sensor: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = temperature_sensor_enable(temp_sensor);
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("Failed to enable ESP32 temperature sensor: %s", esp_err_to_name(err));
+        temperature_sensor_uninstall(temp_sensor);
+        return err;
+    }
+
+    float temperature_c = 0.0f;
+    err = temperature_sensor_get_celsius(temp_sensor, &temperature_c);
+    if (err == ESP_OK)
+    {
+        LOG_INFOF("ESP32-S3 startup die temperature: %.2f C", temperature_c);
+    }
+    else
+    {
+        LOG_WARNF("Failed to read ESP32 temperature sensor: %s", esp_err_to_name(err));
+    }
+
+    esp_err_t disable_err = temperature_sensor_disable(temp_sensor);
+    if (disable_err != ESP_OK)
+    {
+        LOG_WARNF("Failed to disable ESP32 temperature sensor: %s", esp_err_to_name(disable_err));
+        if (err == ESP_OK)
+        {
+            err = disable_err;
+        }
+    }
+
+    esp_err_t uninstall_err = temperature_sensor_uninstall(temp_sensor);
+    if (uninstall_err != ESP_OK)
+    {
+        LOG_WARNF("Failed to uninstall ESP32 temperature sensor: %s", esp_err_to_name(uninstall_err));
+        if (err == ESP_OK)
+        {
+            err = uninstall_err;
+        }
+    }
+
+    return err;
 }
 
 static esp_err_t enable_tasks()
@@ -165,4 +221,19 @@ void enable_config_service()
     {
         return;
     }
+}
+
+esp_err_t disable_config_service(void)
+{
+    web_server_stop();
+
+    esp_err_t err = wifi_stop_softap();
+    if (err != ESP_OK)
+    {
+        LOG_WARNF("Failed to stop config Wi-Fi AP: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    LOG_INFO("Configuration service stopped.");
+    return ESP_OK;
 }

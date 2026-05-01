@@ -16,6 +16,7 @@ extern "C" {
  * 默认 IP 通常为 192.168.4.1
  */
 void wifi_init_softap(void);
+esp_err_t wifi_stop_softap(void);
 
 
 /**
@@ -62,6 +63,8 @@ void wifi_event_handler(void *arg, esp_event_base_t event_base,
  * * @return esp_err_t 返回 ESP_OK 表示初始化成功
  */
 esp_err_t wifi_common_init(bool create_ap, bool create_sta);
+bool wifi_common_is_started(void);
+void wifi_common_mark_started(bool started);
 
 #ifdef __cplusplus
 }
