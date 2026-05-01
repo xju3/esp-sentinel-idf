@@ -3,7 +3,7 @@
 #include "bsp_wifi.h"
 #include "config_manager.h"
 #include "drv_lis2dh12.h"
-#include "drv_ds18b20.h"
+#include "drv_t1820b.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
 #include "mqtt_proxy.h"
@@ -27,7 +27,7 @@
 
 static void init_drivers()
 {
-    drv_ds18b20_init();
+    drv_t1820b_init();
     drv_lis2dh12_init();
     drv_iis3dwb_init();
 }
