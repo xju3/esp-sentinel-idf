@@ -1,4 +1,6 @@
 #include "bsp_4g.h"
+#include "bsp_board.h"
+#include "bsp_power.h"
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -17,11 +19,14 @@
 
 #define PPP_VERBOSE 0 // 设为 1 可开启调试日志
 
-// ============== 引脚定义 ==============
-#define PIN_TX GPIO_NUM_18  // ESP32-S3 TX -> 转接板 TX
-#define PIN_RX GPIO_NUM_17  // ESP32-S3 RX -> 转接板 RX
-#define PIN_PEN GPIO_NUM_14 // ESP32-S3 GPIO13 -> 转接板 PEN (Power Enable)
-#define PIN_PWK GPIO_NUM_13 // ESP32-S3 GPIO14 -> 转接板 PWK (PWRKEY)
+// ============== Board pin aliases ==============
+#define MODEM_UART_RX_PIN      BOARD_GPIO_4G_UART_RX
+#define MODEM_UART_TX_PIN      BOARD_GPIO_4G_UART_TX
+#define MODEM_PWR_EN_PIN       BOARD_GPIO_4G_PWR_EN
+#define MODEM_PWRKEY_PIN       BOARD_GPIO_4G_PWRKEY
+#define MODEM_STATUS_PIN       BOARD_GPIO_4G_STATUS
+#define MODEM_NET_STATUS_PIN   BOARD_GPIO_4G_NET_STATUS
+#define MODEM_RESET_N_PIN      BOARD_GPIO_4G_RESET_N
 
 #define UART_PORT_NUM UART_NUM_1
 #define BUF_SIZE (1024)
@@ -66,20 +71,13 @@ static void uart_drain_with_log(void)
     uart_flush_input(UART_PORT_NUM);
 }
 
-// 电源使能
-static void ppp_4g_power_enable(void)
-{
-    gpio_set_level(PIN_PEN, 1);
-    vTaskDelay(pdMS_TO_TICKS(500));
-}
-
 // 开机操作
 static void ppp_4g_power_on(void)
 {
-    gpio_set_level(PIN_PWK, 0);
+    gpio_set_level(MODEM_PWRKEY_PIN, 0);
     vTaskDelay(pdMS_TO_TICKS(1500));
 
-    gpio_set_level(PIN_PWK, 1);
+    gpio_set_level(MODEM_PWRKEY_PIN, 1);
 
     // 稳定场景下缩短开机等待
     vTaskDelay(pdMS_TO_TICKS(1200));
@@ -242,6 +240,27 @@ static void ppp_stop_session(void)
     esp_netif_action_stop(s_ppp_netif, 0, 0, 0);
     s_ppp_session_started = false;
     ppp_reset_event_bits();
+}
+
+static void ppp_cleanup_failed_init(bool uart_driver_installed, bool power_enabled)
+{
+    ppp_stop_session();
+
+    if (s_ppp_rx_task_running)
+    {
+        s_ppp_rx_task_running = false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (uart_driver_installed)
+    {
+        (void)uart_driver_delete(UART_PORT_NUM);
+    }
+
+    if (power_enabled)
+    {
+        (void)bsp_power_4g_disable();
+    }
 }
 
 static void ppp_destroy_netif(void)
@@ -417,6 +436,8 @@ static esp_err_t detect_baudrate(uint32_t *detected_baud)
 esp_err_t init_ppp_4g(cb_communication_channel_established cb)
 {
     esp_err_t err = ppp_stack_init();
+    bool uart_driver_installed = false;
+    bool power_enabled = false;
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "========================================");
@@ -428,23 +449,49 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
     // ============== GPIO 配置 ==============
     // 配置 PWK 引脚
     gpio_config_t pwk_conf = {
-        .pin_bit_mask = (1ULL << PIN_PWK),
+        .pin_bit_mask = (1ULL << MODEM_PWRKEY_PIN),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&pwk_conf);
-    gpio_set_level(PIN_PWK, 1); // PWK 初始状态为高
+    gpio_set_level(MODEM_PWRKEY_PIN, 1); // PWRKEY 初始状态为高
 
-    // 配置 PEN 引脚
-    gpio_config_t pen_conf = {
-        .pin_bit_mask = (1ULL << PIN_PEN),
+    // 配置 4G 主电源使能引脚
+    gpio_config_t pwr_en_conf = {
+        .pin_bit_mask = (1ULL << MODEM_PWR_EN_PIN),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&pen_conf);
-    gpio_set_level(PIN_PEN, 0); // PEN 初始状态为低
+    gpio_config(&pwr_en_conf);
+    gpio_set_level(MODEM_PWR_EN_PIN, 0); // 4G 主电源默认关闭
+
+    // 板级占位：这些引脚在本阶段只收口定义，不改变现有 4G 时序逻辑。
+    gpio_config_t modem_gpio_placeholder_conf = {
+        .pin_bit_mask = (1ULL << MODEM_RESET_N_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE};
+    gpio_config(&modem_gpio_placeholder_conf);
+    gpio_set_level(MODEM_RESET_N_PIN, 1);
+
+    gpio_config_t modem_status_conf = {
+        .pin_bit_mask = (1ULL << MODEM_STATUS_PIN) | (1ULL << MODEM_NET_STATUS_PIN),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE};
+    gpio_config(&modem_status_conf);
+
+    err = bsp_power_prepare_4g_energy();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to prepare 4G power path: %s", esp_err_to_name(err));
+        return err;
+    }
+    power_enabled = true;
 
     // ============== UART 配置 ==============
     uart_config_t uart_config = {
@@ -457,13 +504,11 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
     };
 
     ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0));
+    uart_driver_installed = true;
     ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, PIN_TX, PIN_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, MODEM_UART_TX_PIN, MODEM_UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     char response_buffer[512];
-
-    // ============== Stage 1: 使能电源 ==============
-    ppp_4g_power_enable();
 
     // ============== Stage 2: 检查模组是否已开机 ==============
     bool module_on = false;
@@ -493,7 +538,8 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "========================================");
         ESP_LOGE(TAG, "  ✗ Initialization Failed!");
         ESP_LOGE(TAG, "========================================");
-        return ESP_FAIL;
+        err = ESP_FAIL;
+        goto cleanup;
     }
 
     // ============== Stage 4: AT 同步 ==============
@@ -514,7 +560,8 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "========================================");
         ESP_LOGE(TAG, "  ✗ Initialization Failed!");
         ESP_LOGE(TAG, "========================================");
-        return ESP_FAIL;
+        err = ESP_FAIL;
+        goto cleanup;
     }
 
     // ============== Stage 5: 关闭回显 ==============
@@ -548,7 +595,8 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "========================================");
         ESP_LOGE(TAG, "  ✗ Initialization Failed!");
         ESP_LOGE(TAG, "========================================");
-        return ESP_FAIL;
+        err = ESP_FAIL;
+        goto cleanup;
     }
 
     // 读取 SIM 卡 ICCID
@@ -621,7 +669,8 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "========================================");
         ESP_LOGE(TAG, "  ✗ Initialization Failed!");
         ESP_LOGE(TAG, "========================================");
-        return ESP_FAIL;
+        err = ESP_FAIL;
+        goto cleanup;
     }
 
     // ============== Stage 8: 启动 PPP 拨号 ==============
@@ -631,7 +680,7 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "========================================");
         ESP_LOGE(TAG, "  ✗ Initialization Failed!");
         ESP_LOGE(TAG, "========================================");
-        return err;
+        goto cleanup;
     }
 
     if (cb)
@@ -640,6 +689,10 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
     }
 
     return ESP_OK;
+
+cleanup:
+    ppp_cleanup_failed_init(uart_driver_installed, power_enabled);
+    return err;
 }
 
 esp_err_t shutdown_ppp_4g(void)
@@ -657,7 +710,7 @@ esp_err_t shutdown_ppp_4g(void)
     send_at_command("AT+CPOF", "OK", response_buffer, sizeof(response_buffer), 5000);
 
     // 关闭电源使能
-    gpio_set_level(PIN_PEN, 0);
+    (void)bsp_power_4g_disable();
 
     // 删除 UART 驱动
     ESP_ERROR_CHECK(uart_driver_delete(UART_PORT_NUM));

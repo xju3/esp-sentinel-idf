@@ -3,7 +3,7 @@
 #include "bsp_wifi.h"
 #include "config_manager.h"
 #include "drv_lis2dh12.h"
-#include "drv_ds18b20.h"
+#include "drv_t1820b.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
 #include "mqtt_proxy.h"
@@ -28,9 +28,9 @@
 
 static void init_drivers()
 {
-    drv_ds18b20_init();
+    drv_t1820b_init();
     drv_lis2dh12_init();
-    drv_iis3dwb_init();
+    // drv_iis3dwb_init();
 }
 
 static esp_err_t enable_tasks()
@@ -104,39 +104,39 @@ esp_err_t init_nvs()
 esp_err_t establish_communication_channel()
 {
     esp_err_t err = ESP_OK;
-    if (g_user_config.network == 1)
-    {
-        LOG_INFO("Initializing 4G Module...");
-        err = init_ppp_4g(network_channel_established_handler);
-        if (err == ESP_OK) // Ensure ppp_4g_init returns esp_err_t
-        {
-            LOG_DEBUG("communication channel established by 4G.");
-        }
-        else
-        {
-            LOG_ERROR("4G Module initialization failed.");
-        }
-    }
-    else
-    {
-        LOG_DEBUGF("ssid: %s, pass: %s", g_user_config.wifi.ssid, g_user_config.wifi.pass);
-        err = wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, network_channel_established_handler);
-        if (err == ESP_OK)
-        {
-            LOG_DEBUG("communication channel established by WIFI.");
-        }
-        else
-        {
-            LOG_WARN("communication channel failed.");
-        }
-    }
+    // if (g_user_config.network == 1)
+    // {
+    //     LOG_INFO("Initializing 4G Module...");
+    //     err = init_ppp_4g(network_channel_established_handler);
+    //     if (err == ESP_OK) // Ensure ppp_4g_init returns esp_err_t
+    //     {
+    //         LOG_DEBUG("communication channel established by 4G.");
+    //     }
+    //     else
+    //     {
+    //         LOG_ERROR("4G Module initialization failed.");
+    //     }
+    // }
+    // else
+    // {
+    //     LOG_DEBUGF("ssid: %s, pass: %s", g_user_config.wifi.ssid, g_user_config.wifi.pass);
+    //     err = wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, network_channel_established_handler);
+    //     if (err == ESP_OK)
+    //     {
+    //         LOG_DEBUG("communication channel established by WIFI.");
+    //     }
+    //     else
+    //     {
+    //         LOG_WARN("communication channel failed.");
+    //     }
+    // }
     return err;
 }
 
 esp_err_t start_local_services()
 {
     esp_err_t err = ESP_OK;
-
+    LOG_DEBUG("Initializing local services...");
     init_drivers();
 
     err = data_dispatcher_start();

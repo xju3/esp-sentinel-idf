@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "bsp_board.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "imu_config.h"
@@ -11,18 +12,19 @@
 extern "C" {
 #endif
 
-// 业务层用来接收数据的 回调合同
-// #define IIS3DWB_PIN_NUM_INT1   GPIO_NUM_8
-// #define IIS3DWB_PIN_NUM_INT2   GPIO_NUM_3
-#define IIS3DWB_PIN_NUM_CS     GPIO_NUM_4
-#define IIS3DWB_PIN_NUM_SCL    GPIO_NUM_5
-#define IIS3DWB_PIN_NUM_SDA    GPIO_NUM_6
-#define IIS3DWB_PIN_NUM_SDO    GPIO_NUM_7
+// 业务层用来接收数据的回调合同
+#define IIS3DWB_PIN_NUM_INT1   BOARD_GPIO_IIS3DWB_INT1
+#define IIS3DWB_PIN_NUM_INT2   BOARD_GPIO_IIS3DWB_INT2
+#define IIS3DWB_PIN_NUM_SCL    BOARD_GPIO_IIS3DWB_SCL
+#define IIS3DWB_PIN_NUM_CS     BOARD_GPIO_IIS3DWB_CS
+#define IIS3DWB_PIN_NUM_SDA    BOARD_GPIO_IIS3DWB_MOSI
+#define IIS3DWB_PIN_NUM_SDO    BOARD_GPIO_IIS3DWB_MISO
 
 // Register addresses (for debug/config)
 #define IIS3DWB_REG_WHO_AM_I          0x0F
 #define IIS3DWB_REG_CTRL1_XL          0x10
 #define IIS3DWB_REG_CTRL3_C           0x12
+#define IIS3DWB_REG_CTRL4_C           0x13
 #define IIS3DWB_REG_CTRL6_C           0x15
 #define IIS3DWB_REG_FIFO_CTRL1        0x07
 #define IIS3DWB_REG_FIFO_CTRL2        0x08

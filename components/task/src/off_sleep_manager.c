@@ -1,5 +1,6 @@
 #include "off_sleep_manager.h"
 
+#include "bsp_power.h"
 #include "data_dispatcher.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
@@ -26,6 +27,13 @@ static esp_err_t off_sleep_prepare_capture_path(void)
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Failed to place IIS3DWB into standby before OFF sleep: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = bsp_power_sensor_disable();
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to disable IIS3DWB power rail before OFF sleep: %s", esp_err_to_name(ret));
         return ret;
     }
 

@@ -1,6 +1,7 @@
 #include "task_baseline.h"
 #include "algo_stash.h"
 #include "algo_welford.h"
+#include "bsp_power.h"
 #include "config_manager.h"
 #include "drv_iis3dwb.h"
 #include "daq_iis3dwb.h"
@@ -218,6 +219,8 @@ static esp_err_t handle_baseline_by_iis3dwb(const char *device_id)
     if (baseline_dsp_config.actual_time <= 0.0f || baseline_dsp_config.actual_odr <= 0.0f)
     {
         LOG_WARN("iis3dwb dsp config failed");
+        (void)drv_iis3dwb_enter_standby();
+        (void)bsp_power_sensor_disable();
         return ESP_FAIL;
     }
 
