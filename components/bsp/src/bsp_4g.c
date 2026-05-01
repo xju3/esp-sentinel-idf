@@ -11,6 +11,7 @@
 #include "esp_netif.h"
 #include "esp_netif_defaults.h"
 #include "esp_netif_ppp.h"
+#include "supercap_manager.h"
 #include <sys/param.h>
 #include <stdbool.h>
 #include "freertos/event_groups.h"
@@ -423,6 +424,14 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "  ✗ Initialization Failed!");
         ESP_LOGE(TAG, "========================================");
         return err;
+    }
+
+    bool supercap_ready = false;
+    err = supercap_prepare_for_4g(true, &supercap_ready);
+    if (err != ESP_OK || !supercap_ready)
+    {
+        ESP_LOGE(TAG, "4G power preflight failed: %s", esp_err_to_name(err));
+        return (err != ESP_OK) ? err : ESP_ERR_INVALID_STATE;
     }
 
     // ============== GPIO 配置 ==============
