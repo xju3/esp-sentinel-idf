@@ -17,6 +17,7 @@
 #include <string.h>
 
 QueueHandle_t g_msg_dispatcher_queue = NULL;
+static volatile bool s_dispatcher_busy = false;
 
 extern esp_mqtt_client_handle_t g_mqtt_client;
 
@@ -54,6 +55,11 @@ static void dispatcher_enqueue_internal_event(dispatcher_item_type_t type, int32
 static bool is_mqtt_connected(void)
 {
     return g_mqtt_client != NULL;
+}
+
+bool data_dispatcher_is_busy(void)
+{
+    return s_dispatcher_busy;
 }
 
 static uint16_t dispatcher_batch_target(void)
@@ -731,6 +737,7 @@ static void dispatcher_task(void *arg)
     bool *flush_result_out = NULL;
 
     LOG_INFO("Data dispatcher started. Ready to batch MsgPayload messages for MQTT");
+    s_dispatcher_busy = false;
     while (1)
     {
         if (g_msg_dispatcher_queue == NULL)
@@ -859,8 +866,14 @@ static void dispatcher_task(void *arg)
                                   &active_count,
                                   &flush_done_sem,
                                   &flush_result_out);
+
+        s_dispatcher_busy = (flush_requested ||
+                             transport_requested ||
+                             send_in_progress ||
+                             active_count > 0U);
     }
 
+    s_dispatcher_busy = false;
     for (size_t i = 0; i < pending_count; ++i)
     {
         free_payload_data(&pending_msgs[i]);
@@ -945,6 +958,24 @@ esp_err_t data_dispatcher_flush_all(TickType_t timeout_ticks)
     {
         LOG_WARN("Dispatcher flush completed with pending messages remaining");
         return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t data_dispatcher_wait_idle(TickType_t timeout_ticks)
+{
+    const TickType_t start = xTaskGetTickCount();
+    const TickType_t wait_step = pdMS_TO_TICKS(20U);
+
+    while (data_dispatcher_is_busy())
+    {
+        if ((xTaskGetTickCount() - start) >= timeout_ticks)
+        {
+            LOG_WARN("Timed out waiting for dispatcher to become idle");
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(wait_step);
     }
 
     return ESP_OK;

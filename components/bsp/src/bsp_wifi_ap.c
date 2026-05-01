@@ -193,6 +193,7 @@ void wifi_init_softap(void)
 
 esp_err_t wifi_stop_softap(void)
 {
+    LOG_INFO("Stopping captive DNS...");
     captive_dns_stop();
 
     wifi_mode_t mode = WIFI_MODE_NULL;
@@ -205,21 +206,16 @@ esp_err_t wifi_stop_softap(void)
     if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA || mode == WIFI_MODE_STA)
     {
         (void)esp_wifi_disconnect();
-
-        err = esp_wifi_stop();
-        if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED)
-        {
-            return err;
-        }
-        wifi_common_mark_started(false);
-
+        LOG_INFOF("Switching Wi-Fi mode to NULL from mode=%d", (int)mode);
         err = esp_wifi_set_mode(WIFI_MODE_NULL);
         if (err != ESP_OK)
         {
             return err;
         }
+        wifi_common_mark_started(false);
     }
 
+    LOG_INFO("SoftAP stopped.");
     return ESP_OK;
 }
 

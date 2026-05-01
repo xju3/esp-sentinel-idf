@@ -12,11 +12,11 @@ static void log_unconfigured_boot_state(bool had_valid_config_on_boot)
 {
     if (had_valid_config_on_boot)
     {
-        LOG_WARN("Device configuration became invalid during boot gate, staying in configuration mode.");
+        LOG_WARN("Device configuration became invalid during boot gate, continuing with local services only.");
     }
     else
     {
-        LOG_INFO("Device is not configured, staying in configuration mode.");
+        LOG_INFO("Device is not configured, boot window closed, continuing with local services only.");
     }
 }
 
@@ -71,7 +71,6 @@ esp_err_t boot_flow_prepare(bool *ready_to_start_local_services)
     if (!g_user_config.is_configured)
     {
         log_unconfigured_boot_state(had_valid_config_on_boot);
-        return ESP_OK;
     }
 
     ESP_ERROR_CHECK(disable_config_service());

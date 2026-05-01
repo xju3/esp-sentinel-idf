@@ -5,10 +5,12 @@
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "logger.h"
+#include <errno.h>
 
 static const char *TAG = "captive_dns";
 static int s_dns_socket = -1;
 static TaskHandle_t s_dns_task_handle = NULL;
+static volatile bool s_dns_stop_requested = false;
 
 typedef struct __attribute__((packed)) {
     uint16_t id;
@@ -34,6 +36,12 @@ static void dns_server_task(void *pvParameters)
         return;
     }
 
+    struct timeval recv_timeout = {
+        .tv_sec = 0,
+        .tv_usec = 500000,
+    };
+    setsockopt(s_dns_socket, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
+
     int err = bind(s_dns_socket, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
     if (err < 0) {
         ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
@@ -48,10 +56,16 @@ static void dns_server_task(void *pvParameters)
     struct sockaddr_in source_addr;
     socklen_t socklen = sizeof(source_addr);
 
-    while (1) {
+    while (!s_dns_stop_requested) {
         int len = recvfrom(s_dns_socket, rx_buffer, sizeof(rx_buffer), 0, (struct sockaddr *)&source_addr, &socklen);
 
         if (len < 0) {
+            if (s_dns_stop_requested) {
+                break;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
             ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
             break;
         }
@@ -127,6 +141,7 @@ void captive_dns_start(void)
         LOG_WARN("DNS server already running");
         return;
     }
+    s_dns_stop_requested = false;
     LOG_DEBUG("starting dns server...");
     xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &s_dns_task_handle);
 }
@@ -134,12 +149,14 @@ void captive_dns_start(void)
 void captive_dns_stop(void)
 {
     if (s_dns_task_handle) {
-        if (s_dns_socket != -1) {
-            shutdown(s_dns_socket, 0);
-            close(s_dns_socket);
-            s_dns_socket = -1;
+        s_dns_stop_requested = true;
+
+        for (int i = 0; i < 20 && s_dns_task_handle != NULL; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
-        vTaskDelete(s_dns_task_handle);
-        s_dns_task_handle = NULL;
+
+        if (s_dns_task_handle != NULL) {
+            LOG_WARN("Timed out waiting for captive DNS task to stop");
+        }
     }
 }

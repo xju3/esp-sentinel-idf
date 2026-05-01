@@ -191,13 +191,17 @@ esp_err_t establish_communication_channel()
 esp_err_t start_local_services()
 {
     esp_err_t err = ESP_OK;
+    LOG_INFO("Starting local services...");
+    LOG_INFO("Initializing local drivers...");
     init_drivers();
+    LOG_INFO("Starting data dispatcher...");
     err = data_dispatcher_start();
     if (err != ESP_OK)
     {
         LOG_ERROR("Data dispatcher initialization failed.");
         return err;
     }
+    LOG_INFO("Starting local tasks...");
     err = enable_tasks();
     if (err != ESP_OK)
     {
@@ -225,7 +229,9 @@ void enable_config_service()
 
 esp_err_t disable_config_service(void)
 {
+    LOG_INFO("Stopping configuration web server...");
     web_server_stop();
+    LOG_INFO("Stopping configuration Wi-Fi AP...");
 
     esp_err_t err = wifi_stop_softap();
     if (err != ESP_OK)

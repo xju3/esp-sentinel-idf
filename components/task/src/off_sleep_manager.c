@@ -68,15 +68,15 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
         goto rollback;
     }
 
-    ret = data_dispatcher_flush_all(
+    ret = data_dispatcher_wait_idle(
         pdMS_TO_TICKS(CONFIG_SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC * 1000U));
     if (ret != ESP_OK)
     {
-        LOG_ERRORF("Failed to flush dispatcher before OFF sleep: %s", esp_err_to_name(ret));
+        LOG_ERRORF("Failed to wait for dispatcher idle before OFF sleep: %s", esp_err_to_name(ret));
         goto rollback;
     }
 
-    LOG_INFO("Dispatcher flush completed before OFF sleep.");
+    LOG_INFO("Dispatcher idle before OFF sleep. Pending reports retained for later batch send.");
 
     ret = off_sleep_prepare_capture_path();
     if (ret != ESP_OK)
