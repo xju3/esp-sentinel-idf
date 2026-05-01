@@ -66,6 +66,7 @@ extern "C"
         int8_t network;
         char host[LEN_MAX_HOST]; // server name or IP for data reporting
         int16_t battery;
+        float threshold;    // vibration threshold, persisted with one decimal place
         bool ble;
         iso_config_t iso;
         sensor_position_t pos; // 传感器安装方向配置
@@ -88,6 +89,9 @@ extern "C"
 
     // Save user config struct as JSON to user partition.
     esp_err_t config_manager_save_user(const user_config_t *cfg);
+
+    // Build JSON from the merged config struct. Caller owns returned buffer.
+    char *config_manager_create_json(const user_config_t *cfg);
 
     // Log the default JSON config (used when user config is missing or invalid).
     esp_err_t config_manager_log_default_json(void);

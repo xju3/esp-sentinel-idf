@@ -38,34 +38,18 @@ static esp_err_t send_json_string(httpd_req_t *req, const char *json)
 esp_err_t api_get_config_handler(httpd_req_t *req)
 {
     LOG_DEBUG("load user configuration.");
-    if (config_manager_init() != ESP_OK)
+    user_config_t cfg = {0};
+    if (config_manager_load(&cfg) != ESP_OK)
     {
-        LOG_ERROR("config_manager_init failed.");
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "init failed");
+        LOG_ERROR("config_manager_load failed.");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "load failed");
     }
 
-    const char *path = NULL;
-    if (fsu_is_user_mounted() && fsu_file_exists(FILE_PATH_CONFIG_USER))
-    {
-        path = FILE_PATH_CONFIG_USER;
-    }
-    else if (fsu_is_storage_mounted() && fsu_file_exists(FILE_PATH_CONFIG_DEFAULT))
-    {
-        path = FILE_PATH_CONFIG_DEFAULT;
-    }
-
-    if (!path)
-    {
-        LOG_ERROR("No config file found");
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no config");
-    }
-
-    size_t len = 0;
-    char *json = fsu_read_file_alloc(path, &len);
+    char *json = config_manager_create_json(&cfg);
     if (!json)
     {
-        LOG_ERRORF("Failed to read %s", path);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "read failed");
+        LOG_ERROR("Failed to build merged config json");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "json build failed");
     }
 
     esp_err_t ret = send_json_string(req, json);

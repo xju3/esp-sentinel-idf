@@ -7,7 +7,6 @@ idf_component_register(
         "src/task_kurtosis.c"
         "src/task_envelope.c"
         "src/daq_worker.c" 
-        "src/task_baseline.c" 
         "src/wom_lis2dh12.c"
         "src/off_sleep_manager.c"
         "src/task_stash.c"

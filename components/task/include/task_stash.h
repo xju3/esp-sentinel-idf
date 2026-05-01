@@ -38,19 +38,6 @@ extern "C"
 
     typedef struct
     {
-        float val;    // baseline mean（例如：静态零偏均值）
-        float offset; // baseline offset（例如：环境噪声RMS偏置）
-    } vib_axis_baseline_t;
-
-    typedef struct
-    {
-        vib_axis_baseline_t x;
-        vib_axis_baseline_t y;
-        vib_axis_baseline_t z;
-    } vib_baseline_t;
-
-    typedef struct
-    {
         float task_id;         // 任务 ID (可用于追踪和日志)
         int32_t timestamp;     // 本次采集首条样本写入时间 (Unix 时间戳)
         uint32_t length;       // 单轴有效数据点数

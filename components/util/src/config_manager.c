@@ -15,6 +15,7 @@
 #define CONFIG_LOG_CHUNK 192
 
 user_config_t g_user_config;
+static bool s_config_json_logged_once = false;
 
 // 安全拷贝字符串，保证结尾有 '\0' 且不溢出。
 static void safe_copy(char *dst, size_t dst_size, const char *src)
@@ -109,6 +110,12 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     if (cJSON_IsNumber(item))
     {
         cfg->rpm = (int32_t)item->valueint;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "threshold");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->threshold = (float)item->valuedouble;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "patrol");
@@ -276,6 +283,19 @@ static esp_err_t log_config_json(const char *path, const char *label)
     return ESP_OK;
 }
 
+static void log_config_json_once(const char *path, const char *label)
+{
+    if (s_config_json_logged_once)
+    {
+        return;
+    }
+
+    if (log_config_json(path, label) == ESP_OK)
+    {
+        s_config_json_logged_once = true;
+    }
+}
+
 // 打印默认配置文件内容，便于调试查看实际默认值。
 esp_err_t config_manager_log_default_json(void)
 {
@@ -313,20 +333,20 @@ esp_err_t config_manager_load(user_config_t *out_cfg)
         if (err != ESP_OK)
         {
             LOG_WARN("User config parse failed; using defaults");
-            (void)config_manager_log_default_json();
+            log_config_json_once(FILE_PATH_CONFIG_DEFAULT, "Default");
             out_cfg->is_configured = false;
             g_user_config = *out_cfg;
             return ESP_OK;
         }
         // 仅在用户配置解析成功时打印当前用户配置
-        (void)log_config_json(FILE_PATH_CONFIG_USER, "User");
+        log_config_json_once(FILE_PATH_CONFIG_USER, "User");
         g_user_config = *out_cfg;
         return ESP_OK; // 用户配置成功覆盖
     }
 
     // 没有用户配置，保持默认值并标记未配置
     LOG_INFO("User config not found; using defaults");
-    (void)config_manager_log_default_json();
+    log_config_json_once(FILE_PATH_CONFIG_DEFAULT, "Default");
     out_cfg->is_configured = false;
     g_user_config = *out_cfg;
     return ESP_OK;
@@ -358,17 +378,17 @@ esp_err_t config_manager_save_user_json(const char *json)
 }
 
 // 将结构体转 JSON 后写入用户分区。
-esp_err_t config_manager_save_user(const user_config_t *cfg)
+char *config_manager_create_json(const user_config_t *cfg)
 {
     if (!cfg)
     {
-        return ESP_ERR_INVALID_ARG;
+        return NULL;
     }
 
     cJSON *root = cJSON_CreateObject();
     if (!root)
     {
-        return ESP_ERR_NO_MEM;
+        return NULL;
     }
 
     cJSON_AddStringToObject(root, "deviceId", cfg->device_id);
@@ -382,6 +402,9 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddNumberToObject(root, "report", cfg->report);
     cJSON_AddNumberToObject(root, "battery", cfg->battery);
     cJSON_AddNumberToObject(root, "rpm", cfg->rpm);
+    char threshold_str[16];
+    snprintf(threshold_str, sizeof(threshold_str), "%.1f", (double)cfg->threshold);
+    cJSON_AddRawToObject(root, "threshold", threshold_str);
     cJSON_AddNumberToObject(root, "network", cfg->network);
     cJSON_AddBoolToObject(root, "ble", cfg->ble);
     cJSON_AddBoolToObject(root, "configured", cfg->is_configured);
@@ -408,7 +431,18 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+    return json_str;
+}
 
+// 将结构体转 JSON 后写入用户分区。
+esp_err_t config_manager_save_user(const user_config_t *cfg)
+{
+    if (!cfg)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char *json_str = config_manager_create_json(cfg);
     if (!json_str)
     {
         return ESP_ERR_NO_MEM;

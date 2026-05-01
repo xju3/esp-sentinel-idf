@@ -9,7 +9,6 @@
 #include "mqtt_proxy.h"
 #include "data_dispatcher.h"
 #include "task_daq.h"
-#include "task_baseline.h"
 #include "task_fft.h"
 #include "task_diag_fusion.h"
 #include "task_rms.h"
@@ -136,30 +135,19 @@ esp_err_t establish_communication_channel()
 esp_err_t start_local_services()
 {
     esp_err_t err = ESP_OK;
-
     init_drivers();
-
     err = data_dispatcher_start();
     if (err != ESP_OK)
     {
         LOG_ERROR("Data dispatcher initialization failed.");
         return err;
     }
-
-    err = set_device_baseline(g_user_config.device_id);
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Set device baseline failed.");
-        return err;
-    }
-
     err = enable_tasks();
     if (err != ESP_OK)
     {
         LOG_ERROR("Tasks initialization failed.");
         return err;
     }
-
     LOG_INFO("Local services ready without network.");
     return ESP_OK;
 }
