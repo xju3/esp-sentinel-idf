@@ -11,13 +11,19 @@
 extern "C" {
 #endif
 
-// 业务层用来接收数据的 回调合同
-// #define IIS3DWB_PIN_NUM_INT1   GPIO_NUM_8
-// #define IIS3DWB_PIN_NUM_INT2   GPIO_NUM_3
-#define IIS3DWB_PIN_NUM_CS     GPIO_NUM_4
-#define IIS3DWB_PIN_NUM_SCL    GPIO_NUM_5
-#define IIS3DWB_PIN_NUM_SDA    GPIO_NUM_6
-#define IIS3DWB_PIN_NUM_SDO    GPIO_NUM_7
+// Board-level IIS3DWB routing
+#define IIS3DWB_PIN_NUM_MISO   GPIO_NUM_4
+#define IIS3DWB_PIN_NUM_MOSI   GPIO_NUM_5
+#define IIS3DWB_PIN_NUM_SCLK   GPIO_NUM_6
+#define IIS3DWB_PIN_NUM_CS     GPIO_NUM_7
+#define IIS3DWB_PIN_NUM_PWR    GPIO_NUM_42
+#define IIS3DWB_PIN_NUM_INT1   GPIO_NUM_15
+#define IIS3DWB_PIN_NUM_INT2   GPIO_NUM_38
+
+// Backward-compatible aliases for legacy naming in this component.
+#define IIS3DWB_PIN_NUM_SCL    IIS3DWB_PIN_NUM_SCLK
+#define IIS3DWB_PIN_NUM_SDA    IIS3DWB_PIN_NUM_MOSI
+#define IIS3DWB_PIN_NUM_SDO    IIS3DWB_PIN_NUM_MISO
 
 // Register addresses (for debug/config)
 #define IIS3DWB_REG_WHO_AM_I          0x0F

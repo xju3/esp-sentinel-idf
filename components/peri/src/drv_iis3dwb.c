@@ -11,11 +11,17 @@
 #define IIS3DWB_SPI_HOST SPI2_HOST
 
 #define IIS3DWB_ODR_HZ 26667.0f
+#define IIS3DWB_SPI_BRINGUP_HZ (200 * 1000)
+#define IIS3DWB_SPI_RUNTIME_HZ (10 * 1000 * 1000)
 #define IIS3DWB_FIFO_BDR_XL_26667 0x0A
 #define IIS3DWB_FIFO_MODE_BYPASS 0x00
 #define IIS3DWB_FIFO_MODE_CONTINUOUS 0x06
 #define IIS3DWB_CTRL1_XL_ENABLE 0x05
 #define IIS3DWB_CTRL3_C_BDU_IF_INC 0x44
+#define IIS3DWB_POWER_ASSERT_MS 10
+#define IIS3DWB_BOOT_STABLE_MS 20
+#define IIS3DWB_WHO_AM_I_READ_COUNT 3
+#define IIS3DWB_WHO_AM_I_MIN_MATCHES 2
 
 #define IIS3DWB_FIFO_SAMPLE_BYTES 7
 
@@ -47,9 +53,17 @@ iis3dwb_cfg_t iis3dwb_accel_fs_cfg_2 = {
     .fs = IIS3DWB_FS_2G,
 };
 
+static esp_err_t iis3dwb_power_on_and_lock_spi_mode(void);
+static esp_err_t iis3dwb_init_spi_bus(void);
+static esp_err_t iis3dwb_configure_spi_device(int clock_hz);
+static void iis3dwb_remove_spi_device(void);
+static esp_err_t iis3dwb_check_who_am_i(void);
+static esp_err_t iis3dwb_alloc_dma_buffers(void);
+static void iis3dwb_free_dma_buffers(void);
+
 static esp_err_t iis3dwb_write_reg(uint8_t reg, uint8_t data)
 {
-    if (!s_spi_mutex)
+    if (!s_spi_mutex || !s_spi_handle)
         return ESP_FAIL;
     spi_transaction_t t = {.length = 8, .cmd = reg & 0x7F, .tx_buffer = &data};
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
@@ -60,7 +74,7 @@ static esp_err_t iis3dwb_write_reg(uint8_t reg, uint8_t data)
 
 static esp_err_t iis3dwb_read_reg(uint8_t reg, uint8_t *data)
 {
-    if (!s_spi_mutex)
+    if (!s_spi_mutex || !s_spi_handle || !data)
         return ESP_FAIL;
     spi_transaction_t t = {.length = 8, .cmd = reg | 0x80, .rx_buffer = data};
     xSemaphoreTake(s_spi_mutex, portMAX_DELAY);
@@ -108,20 +122,78 @@ SensorDriver_t iis3dwb_driver = {
     .config_hardware_odr = IIS3DWB_Config_ODR_Callback,
 };
 
-esp_err_t drv_iis3dwb_init(void)
+static esp_err_t iis3dwb_power_on_and_lock_spi_mode(void)
 {
-    if (g_iis3dwb_initialized)
-        return ESP_OK;
+    esp_err_t ret = ESP_OK;
+    gpio_config_t io_cfg = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << IIS3DWB_PIN_NUM_MISO),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
 
-    if (s_spi_mutex == NULL)
-        s_spi_mutex = xSemaphoreCreateMutex();
-    if (!s_spi_mutex)
-        return ESP_ERR_NO_MEM;
+    ret = gpio_config(&io_cfg);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to set IIS3DWB MISO as output before power-on: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
+    ret = gpio_set_level(IIS3DWB_PIN_NUM_MISO, 0);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to pull IIS3DWB MISO low before power-on: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    io_cfg.pin_bit_mask = (1ULL << IIS3DWB_PIN_NUM_PWR);
+    ret = gpio_config(&io_cfg);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to configure IIS3DWB power GPIO: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = gpio_set_level(IIS3DWB_PIN_NUM_PWR, 0);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to assert IIS3DWB power GPIO: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    /*
+     * IIS3DWB multiplexes SA0/SDO with MISO. Holding GPIO4 low while power
+     * comes up forces the device to latch SPI mode instead of floating into
+     * an unstable interface state.
+     */
+    vTaskDelay(pdMS_TO_TICKS(IIS3DWB_POWER_ASSERT_MS));
+
+    gpio_config_t release_cfg = {
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << IIS3DWB_PIN_NUM_MISO),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+
+    ret = gpio_config(&release_cfg);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to release IIS3DWB MISO after power-on: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(IIS3DWB_BOOT_STABLE_MS));
+    return ESP_OK;
+}
+
+static esp_err_t iis3dwb_init_spi_bus(void)
+{
     spi_bus_config_t buscfg = {
-        .miso_io_num = IIS3DWB_PIN_NUM_SDO,
-        .mosi_io_num = IIS3DWB_PIN_NUM_SDA,
-        .sclk_io_num = IIS3DWB_PIN_NUM_SCL,
+        .miso_io_num = IIS3DWB_PIN_NUM_MISO,
+        .mosi_io_num = IIS3DWB_PIN_NUM_MOSI,
+        .sclk_io_num = IIS3DWB_PIN_NUM_SCLK,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
         .max_transfer_sz = 4092,
@@ -132,40 +204,193 @@ esp_err_t drv_iis3dwb_init(void)
         LOG_ERRORF("drv_iis3dwb_init: spi_bus_initialize failed: %s", esp_err_to_name(ret));
         return ret;
     }
+    return ESP_OK;
+}
+
+static void iis3dwb_remove_spi_device(void)
+{
+    if (!s_spi_handle)
+    {
+        return;
+    }
+
+    esp_err_t ret = spi_bus_remove_device(s_spi_handle);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to remove IIS3DWB SPI device: %s", esp_err_to_name(ret));
+    }
+    s_spi_handle = NULL;
+}
+
+static esp_err_t iis3dwb_configure_spi_device(int clock_hz)
+{
+    iis3dwb_remove_spi_device();
 
     spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = 10 * 1000 * 1000,
-        .mode = 3,
+        .clock_speed_hz = clock_hz,
+        .mode = 0,
         .spics_io_num = IIS3DWB_PIN_NUM_CS,
         .queue_size = 7,
         .command_bits = 8,
     };
-    ret = spi_bus_add_device(IIS3DWB_SPI_HOST, &devcfg, &s_spi_handle);
+
+    esp_err_t ret = spi_bus_add_device(IIS3DWB_SPI_HOST, &devcfg, &s_spi_handle);
     if (ret != ESP_OK)
-        return ret;
+    {
+        LOG_ERRORF("Failed to add IIS3DWB SPI device at %d Hz: %s", clock_hz, esp_err_to_name(ret));
+        s_spi_handle = NULL;
+    }
+    return ret;
+}
 
-    s_dma_ping_raw = (uint8_t *)heap_caps_aligned_alloc(32, DMA_RAW_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_dma_pong_raw = (uint8_t *)heap_caps_aligned_alloc(32, DMA_RAW_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_dma_ping_raw || !s_dma_pong_raw)
-        return ESP_ERR_NO_MEM;
-
-    s_conv_ping = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * DMA_CHUNK_SAMPLES,
-                                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_conv_pong = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * DMA_CHUNK_SAMPLES,
-                                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!s_conv_ping || !s_conv_pong)
-        return ESP_ERR_NO_MEM;
-
+static esp_err_t iis3dwb_check_who_am_i(void)
+{
     uint8_t who_am_i = 0;
-    iis3dwb_read_reg(IIS3DWB_REG_WHO_AM_I, &who_am_i);
-    LOG_DEBUGF("IIS3DWB WHO_AM_I: 0x%02x", who_am_i);
-    if (who_am_i != IIS3DWB_WHO_AM_I_VAL)
-        return ESP_ERR_NOT_FOUND;
+    uint8_t last_value = 0;
+    esp_err_t last_ret = ESP_OK;
+    int match_count = 0;
 
-    iis3dwb_write_reg(IIS3DWB_REG_CTRL3_C, IIS3DWB_CTRL3_C_BDU_IF_INC);
+    for (int i = 0; i < IIS3DWB_WHO_AM_I_READ_COUNT; i++)
+    {
+        last_ret = iis3dwb_read_reg(IIS3DWB_REG_WHO_AM_I, &who_am_i);
+        if (last_ret == ESP_OK)
+        {
+            last_value = who_am_i;
+            if (who_am_i == IIS3DWB_WHO_AM_I_VAL)
+            {
+                match_count++;
+            }
+        }
+        LOG_DEBUGF("IIS3DWB WHO_AM_I[%d]: ret=%s value=0x%02x",
+                   i + 1,
+                   esp_err_to_name(last_ret),
+                   who_am_i);
+    }
+
+    if (match_count >= IIS3DWB_WHO_AM_I_MIN_MATCHES)
+    {
+        return ESP_OK;
+    }
+
+    LOG_ERRORF("IIS3DWB WHO_AM_I check failed: %d/%d reads matched 0x%02x, last=0x%02x",
+               match_count,
+               IIS3DWB_WHO_AM_I_READ_COUNT,
+               IIS3DWB_WHO_AM_I_VAL,
+               last_value);
+    if (last_ret != ESP_OK)
+    {
+        return last_ret;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
+static esp_err_t iis3dwb_alloc_dma_buffers(void)
+{
+    if (!s_dma_ping_raw)
+    {
+        s_dma_ping_raw = (uint8_t *)heap_caps_aligned_alloc(32, DMA_RAW_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!s_dma_pong_raw)
+    {
+        s_dma_pong_raw = (uint8_t *)heap_caps_aligned_alloc(32, DMA_RAW_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!s_dma_ping_raw || !s_dma_pong_raw)
+    {
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (!s_conv_ping)
+    {
+        s_conv_ping = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * DMA_CHUNK_SAMPLES,
+                                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!s_conv_pong)
+    {
+        s_conv_pong = (imu_raw_data_t *)heap_caps_malloc(sizeof(imu_raw_data_t) * DMA_CHUNK_SAMPLES,
+                                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!s_conv_ping || !s_conv_pong)
+    {
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}
+
+static void iis3dwb_free_dma_buffers(void)
+{
+    free(s_dma_ping_raw);
+    free(s_dma_pong_raw);
+    free(s_conv_ping);
+    free(s_conv_pong);
+    s_dma_ping_raw = NULL;
+    s_dma_pong_raw = NULL;
+    s_conv_ping = NULL;
+    s_conv_pong = NULL;
+}
+
+esp_err_t drv_iis3dwb_init(void)
+{
+    esp_err_t ret = ESP_OK;
+
+    if (g_iis3dwb_initialized)
+        return ESP_OK;
+
+    if (s_spi_mutex == NULL)
+        s_spi_mutex = xSemaphoreCreateMutex();
+    if (!s_spi_mutex)
+        return ESP_ERR_NO_MEM;
+
+    ret = iis3dwb_power_on_and_lock_spi_mode();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = iis3dwb_init_spi_bus();
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = iis3dwb_configure_spi_device(IIS3DWB_SPI_BRINGUP_HZ);
+    if (ret != ESP_OK)
+    {
+        return ret;
+    }
+
+    ret = iis3dwb_check_who_am_i();
+    if (ret != ESP_OK)
+    {
+        goto fail;
+    }
+
+    // Keep the identity check conservative, then restore throughput for FIFO streaming.
+    ret = iis3dwb_configure_spi_device(IIS3DWB_SPI_RUNTIME_HZ);
+    if (ret != ESP_OK)
+    {
+        goto fail;
+    }
+
+    ret = iis3dwb_alloc_dma_buffers();
+    if (ret != ESP_OK)
+    {
+        goto fail;
+    }
+
+    ret = iis3dwb_write_reg(IIS3DWB_REG_CTRL3_C, IIS3DWB_CTRL3_C_BDU_IF_INC);
+    if (ret != ESP_OK)
+    {
+        goto fail;
+    }
 
     g_iis3dwb_initialized = true;
     return ESP_OK;
+
+fail:
+    iis3dwb_remove_spi_device();
+    iis3dwb_free_dma_buffers();
+    return ret;
 }
 
 esp_err_t drv_iis3dwb_config(const iis3dwb_cfg_t *cfg)
