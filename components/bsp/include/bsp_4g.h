@@ -5,6 +5,8 @@
 #include "esp_event.h"
 #include "bsp_network.h"
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +18,7 @@ extern "C" {
 
 esp_err_t init_ppp_4g(cb_communication_channel_established cb);
 esp_err_t shutdown_ppp_4g(void);
+int32_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len, int qos, bool retain);
 
 #ifdef __cplusplus
 }

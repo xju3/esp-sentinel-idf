@@ -75,4 +75,12 @@ config SENTINEL_NETWORK_BRINGUP_TIMEOUT_SEC
       STA or 4G according to user configuration and wait up to this many
       seconds for MQTT to become ready.
 
+config SENTINEL_4G_SKIP_PRECHARGE
+    bool "Skip supercap precharge before enabling 4G"
+    default n
+    help
+      When enabled, the firmware will not ramp the charge-control path before
+      enabling the 4G module. Use this only for diagnostics when you want to
+      verify whether EC800Z can register and transmit without precharge.
+
 endmenu

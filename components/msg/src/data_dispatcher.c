@@ -19,11 +19,10 @@
 QueueHandle_t g_msg_dispatcher_queue = NULL;
 static volatile bool s_dispatcher_busy = false;
 
-extern esp_mqtt_client_handle_t g_mqtt_client;
-
 #define DISPATCHER_QUEUE_LEN 20
 #define DISPATCHER_MAX_PENDING_MSGS 64
 #define DISPATCHER_RETRY_INTERVAL_MS 5000
+#define DISPATCHER_TASK_STACK_SIZE 8192
 #define EVENT_TYPE_RMS_REPORT 1U
 
 typedef enum
@@ -54,7 +53,7 @@ static void dispatcher_enqueue_internal_event(dispatcher_item_type_t type, int32
 
 static bool is_mqtt_connected(void)
 {
-    return g_mqtt_client != NULL;
+    return mqtt_proxy_is_ready();
 }
 
 bool data_dispatcher_is_busy(void)
@@ -251,6 +250,12 @@ static esp_err_t dispatcher_load_cache(dispatcher_persisted_msg_t **out_msgs, si
 
 static void dispatcher_network_channel_established(void)
 {
+    if (g_user_config.network == 1)
+    {
+        LOG_INFO("4G transport ready for dispatcher: PDP IP acquired and MQTT connected");
+        return;
+    }
+
     esp_err_t err = init_mqtt_client();
     if (err != ESP_OK)
     {
@@ -317,6 +322,7 @@ static esp_err_t dispatcher_request_transport(void)
 
 static void dispatcher_shutdown_transport(void)
 {
+    LOG_INFOF("Dispatcher shutting down transport for network mode=%d", g_user_config.network);
     (void)mqtt_client_stop();
 
     if (g_user_config.network == 1)
@@ -372,6 +378,8 @@ static void dispatcher_finish_batch(bool success,
     }
     if (transport_requested && *transport_requested)
     {
+        LOG_INFOF("Dispatcher batch complete, success=%s, shutting down transport",
+                  success ? "true" : "false");
         dispatcher_shutdown_transport();
         *transport_requested = false;
     }
@@ -409,12 +417,7 @@ static bool dispatcher_publish_one(const dispatcher_persisted_msg_t *msg, int32_
         return false;
     }
 
-    int msg_id = esp_mqtt_client_publish(g_mqtt_client,
-                                         "sentinel",
-                                         (const char *)msg->data,
-                                         msg->len,
-                                         1,
-                                         0);
+    int msg_id = mqtt_proxy_publish("sentinel", msg->data, msg->len, 1, 0);
     if (msg_id == -1)
     {
         LOG_WARN("MQTT publish request failed");
@@ -996,7 +999,7 @@ esp_err_t data_dispatcher_start(void)
 
     mqtt_proxy_set_event_callback(dispatcher_mqtt_event_handler, NULL);
 
-    xTaskCreate(dispatcher_task, "data_dispatcher", 4096, NULL, 5, NULL);
+    xTaskCreate(dispatcher_task, "data_dispatcher", DISPATCHER_TASK_STACK_SIZE, NULL, 5, NULL);
     LOG_INFO("Data dispatcher task created");
     return ESP_OK;
 }

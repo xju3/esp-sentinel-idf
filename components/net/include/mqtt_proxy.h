@@ -5,6 +5,7 @@
 #include "esp_event.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +38,12 @@ extern esp_mqtt_client_handle_t g_mqtt_client;
 esp_err_t init_mqtt_client(void);
 esp_err_t mqtt_client_stop(void);
 void mqtt_proxy_set_event_callback(mqtt_proxy_event_cb_t cb, void *user_ctx);
+bool mqtt_proxy_is_ready(void);
+int32_t mqtt_proxy_publish(const char *topic, const void *data, size_t len, int qos, int retain);
+void mqtt_proxy_notify_ready(void);
+void mqtt_proxy_notify_published(int32_t msg_id);
+void mqtt_proxy_notify_disconnected(void);
+void mqtt_proxy_notify_error(void);
 
 #ifdef __cplusplus
 }

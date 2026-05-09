@@ -60,7 +60,8 @@ static esp_err_t supercap_prepare_for_4g_internal(bool *ready)
         if (!reading.charge_allowed)
         {
             charge_control_stop();
-            return ESP_ERR_INVALID_STATE;
+            *ready = reading.module_supply_ready;
+            return ESP_OK;
         }
 
         if (elapsed_ms == BOARD_CHARGE_MAX_HOLD_MS)
@@ -73,7 +74,8 @@ static esp_err_t supercap_prepare_for_4g_internal(bool *ready)
     }
 
     charge_control_stop();
-    return ESP_ERR_TIMEOUT;
+    *ready = reading.module_supply_ready;
+    return ESP_OK;
 }
 
 esp_err_t supercap_prepare_for_4g(bool need_4g, bool *ready)

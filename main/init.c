@@ -132,6 +132,12 @@ static esp_err_t enable_tasks()
 
 static void network_channel_established_handler(void)
 {
+    if (g_user_config.network == 1)
+    {
+        LOG_INFO("4G network services ready: PDP IP acquired and MQTT connected.");
+        return;
+    }
+
     esp_err_t err = init_mqtt_client();
     if (err != ESP_OK)
     {
