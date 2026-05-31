@@ -75,16 +75,6 @@ static esp_err_t enable_tasks()
     return ESP_OK;
 }
 
-static void network_channel_established_handler(void)
-{
-    esp_err_t err = init_mqtt_client();
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("MQTT proxy initialization failed.");
-        return;
-    }
-    LOG_INFO("Network services ready.");
-}
 
 esp_err_t init_nvs()
 {

@@ -1,6 +1,5 @@
 #include "bsp_4g.h"
 #include "bsp_board.h"
-#include "bsp_power.h"
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -75,12 +74,10 @@ static void uart_drain_with_log(void)
 static void ppp_4g_power_on(void)
 {
     gpio_set_level(MODEM_PWRKEY_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    vTaskDelay(pdMS_TO_TICKS(1200));
 
     gpio_set_level(MODEM_PWRKEY_PIN, 1);
-
-    // 稳定场景下缩短开机等待
-    vTaskDelay(pdMS_TO_TICKS(1200));
+    vTaskDelay(pdMS_TO_TICKS(100));
 }
 
 // 发送 AT 命令
@@ -259,7 +256,7 @@ static void ppp_cleanup_failed_init(bool uart_driver_installed, bool power_enabl
 
     if (power_enabled)
     {
-        (void)bsp_power_4g_disable();
+        gpio_set_level(MODEM_PWR_EN_PIN, 0);
     }
 }
 
@@ -358,8 +355,7 @@ static esp_err_t ppp_start_and_wait_ip(void)
 {
     char response_buffer[256];
 
-    send_at_command("AT+CGATT=1", "OK", response_buffer, sizeof(response_buffer), 5000);
-
+    // 精简：通常驻网成功后自动附着，略过 AT+CGATT=1 节省时间
     if (send_at_command("ATD*99***1#", "CONNECT", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to enter PPP data mode");
@@ -408,28 +404,6 @@ static esp_err_t ppp_start_and_wait_ip(void)
 
     ESP_LOGE(TAG, "PPP connect timeout/failed");
     ppp_stop_session();
-    return ESP_FAIL;
-}
-
-// 尝试不同波特率
-static esp_err_t detect_baudrate(uint32_t *detected_baud)
-{
-    const uint32_t target_baud = 115200;
-    char response_buffer[256];
-
-    uart_set_baudrate(UART_PORT_NUM, target_baud);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    for (int retry = 0; retry < 2; retry++)
-    {
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK)
-        {
-            *detected_baud = target_baud;
-            return ESP_OK;
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
-
-    ESP_LOGE(TAG, "✗ No response at %d baud", target_baud);
     return ESP_FAIL;
 }
 
@@ -485,12 +459,9 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         .intr_type = GPIO_INTR_DISABLE};
     gpio_config(&modem_status_conf);
 
-    err = bsp_power_prepare_4g_energy();
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to prepare 4G power path: %s", esp_err_to_name(err));
-        return err;
-    }
+    // 直接打开 4G 主供电
+    gpio_set_level(MODEM_PWR_EN_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(100)); // 等待电源稳定
     power_enabled = true;
 
     // ============== UART 配置 ==============
@@ -510,165 +481,101 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
 
     char response_buffer[512];
 
-    // ============== Stage 2: 检查模组是否已开机 ==============
-    bool module_on = false;
-    uint32_t current_baud = 115200;
+    // ============== Stage 2: 硬件状态引脚加速开机判定 ==============
+    bool module_on = (gpio_get_level(MODEM_STATUS_PIN) == 1);
 
-    // 先尝试当前波特率
-    for (int i = 0; i < 3; i++)
+    if (!module_on)
     {
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 500) == ESP_OK)
+        if (PPP_VERBOSE) ESP_LOGI(TAG, "STATUS pin low, powering on module...");
+        ppp_4g_power_on();
+        
+        // 使用 STATUS 引脚判断是否开机，最长等待 3 秒
+        for (int i = 0; i < 30; i++)
         {
-            module_on = true;
-            break;
+            if (gpio_get_level(MODEM_STATUS_PIN) == 1)
+            {
+                module_on = true;
+                if (PPP_VERBOSE) ESP_LOGI(TAG, "STATUS pin high, module powered on.");
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
-        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     if (!module_on)
     {
-        ppp_4g_power_on();
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        uart_drain_with_log();
+        ESP_LOGW(TAG, "STATUS pin still low, fallback to AT test...");
     }
 
-    // ============== Stage 3: 波特率检测 ==============
-    if (detect_baudrate(&current_baud) != ESP_OK)
+    // 快速 AT 同步，只要有回应就说明串口通了
+    bool at_sync = false;
+    for (int i = 0; i < 15; i++)
     {
-        ESP_LOGE(TAG, "========================================");
-        ESP_LOGE(TAG, "  ✗ Initialization Failed!");
-        ESP_LOGE(TAG, "========================================");
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-
-    // ============== Stage 4: AT 同步 ==============
-    int sync_retries = 2;
-    while (sync_retries-- > 0)
-    {
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
+        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 300) == ESP_OK)
         {
+            at_sync = true;
             break;
         }
-        ESP_LOGW(TAG, "  Retry %d/2...", 2 - sync_retries);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    if (sync_retries <= 0)
+    if (!at_sync)
     {
         ESP_LOGE(TAG, "✗ AT sync failed");
-        ESP_LOGE(TAG, "========================================");
-        ESP_LOGE(TAG, "  ✗ Initialization Failed!");
-        ESP_LOGE(TAG, "========================================");
         err = ESP_FAIL;
         goto cleanup;
     }
 
-    // ============== Stage 5: 关闭回显 ==============
-    if (send_at_command("ATE0", "OK", response_buffer, sizeof(response_buffer), 2000) != ESP_OK)
-    {
-        ESP_LOGW(TAG, "✗ Failed to disable echo, continuing anyway");
-    }
+    // ============== Stage 3: 精简配置与状态检查 ==============
+    // 关闭回显 (缩短超时)
+    send_at_command("ATE0", "OK", response_buffer, sizeof(response_buffer), 500);
 
-    // ============== Stage 6: 检查 SIM 卡 ==============
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    int sim_retries = 2;
-    while (sim_retries-- > 0)
+    // 检查 SIM 卡，轮询等待，缩短单次延时，最多等3秒
+    bool sim_ready = false;
+    for (int i = 0; i < 15; i++)
     {
-        if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer,
-                            sizeof(response_buffer), 3000) == ESP_OK)
+        if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer, sizeof(response_buffer), 300) == ESP_OK)
         {
+            sim_ready = true;
             break;
         }
-        ESP_LOGW(TAG, "  SIM not ready, retry %d/2...", 2 - sim_retries);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
-    if (sim_retries <= 0)
+    if (!sim_ready)
     {
-        ESP_LOGE(TAG, "✗ SIM Card not detected or not ready");
-        ESP_LOGE(TAG, "  Please check:");
-        ESP_LOGE(TAG, "  1. SIM card is properly inserted");
-        ESP_LOGE(TAG, "  2. SIM card is activated and has credit");
-        ESP_LOGE(TAG, "  3. SIM card supports 4G/LTE");
-        ESP_LOGE(TAG, "========================================");
-        ESP_LOGE(TAG, "  ✗ Initialization Failed!");
-        ESP_LOGE(TAG, "========================================");
+        ESP_LOGE(TAG, "✗ SIM Card not ready");
         err = ESP_FAIL;
         goto cleanup;
     }
 
-    // 读取 SIM 卡 ICCID
-    if (send_at_command("AT+CCID", "+CCID:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-    {
-        char *iccid_start = strstr(response_buffer, "+CCID:");
-        if (iccid_start != NULL)
-        {
-            iccid_start += 7;
-            char *newline = strstr(iccid_start, "\r");
-            if (newline)
-                *newline = '\0';
-        }
-    }
+    // 快速下发必要配置 (忽略错误，以防因为基带忙导致全流程失败)
+    send_at_command("AT+CREG=1", "OK", response_buffer, sizeof(response_buffer), 500);
+    send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 500);
 
-    // ============== Stage 7: 检查网络状态 ==============
-    if (send_at_command("AT+COPS?", "+COPS:", response_buffer, sizeof(response_buffer), 3000) == ESP_OK)
-    {
-        char *start = strstr(response_buffer, "\"");
-        if (start != NULL)
-        {
-            start++;
-            char *end = strstr(start, "\"");
-            if (end != NULL)
-            {
-                *end = '\0';
-            }
-        }
-    }
-
-    send_at_command("AT+CREG=1", "OK", response_buffer, sizeof(response_buffer), 2000);
-    send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 3000);
-
-    int reg_retries = 20; // 最多等待 20 秒
+    // 检查网络注册状态，快速轮询 (每次间隔500ms，总计约10秒)
     bool registered_success = false;
-    while (reg_retries-- > 0)
+    for (int i = 0; i < 20; i++)
     {
-        if (send_at_command("AT+CREG?", "+CREG:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
+        if (send_at_command("AT+CREG?", "+CREG:", response_buffer, sizeof(response_buffer), 500) == ESP_OK)
         {
             int n = 0, stat = 0;
             char *creg_start = strstr(response_buffer, "+CREG:");
-            if (creg_start != NULL)
+            if (creg_start != NULL && sscanf(creg_start, "+CREG: %d,%d", &n, &stat) == 2)
             {
-                if (sscanf(creg_start, "+CREG: %d,%d", &n, &stat) == 2)
+                if (stat == 1 || stat == 5)
                 {
-                    if (stat == 1 || stat == 5)
-                    {
-                        registered_success = true;
-                        break;
-                    }
+                    registered_success = true;
+                    break;
                 }
             }
         }
-
-        if (reg_retries > 0)
-        {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     if (!registered_success)
     {
         ESP_LOGW(TAG, "✗ Network registration timeout");
-        ESP_LOGW(TAG, "  Note: Module may still work for some operations");
-        if (send_at_command("AT+CEER", "+CEER:", response_buffer, sizeof(response_buffer), 2000) == ESP_OK)
-        {
-            ESP_LOGW(TAG, "  Last error: %s", response_buffer);
-        }
-
-        ESP_LOGE(TAG, "========================================");
-        ESP_LOGE(TAG, "  ✗ Initialization Failed!");
-        ESP_LOGE(TAG, "========================================");
         err = ESP_FAIL;
         goto cleanup;
     }
@@ -710,7 +617,7 @@ esp_err_t shutdown_ppp_4g(void)
     send_at_command("AT+CPOF", "OK", response_buffer, sizeof(response_buffer), 5000);
 
     // 关闭电源使能
-    (void)bsp_power_4g_disable();
+    gpio_set_level(MODEM_PWR_EN_PIN, 0);
 
     // 删除 UART 驱动
     ESP_ERROR_CHECK(uart_driver_delete(UART_PORT_NUM));

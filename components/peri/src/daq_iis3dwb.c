@@ -1,5 +1,6 @@
+#include "driver/gpio.h"
+#include "bsp_board.h"
 #include "daq_iis3dwb.h"
-#include "bsp_power.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -12,7 +13,8 @@ static int64_t s_capture_skip_until_us = 0;
 
 static esp_err_t daq_iis3dwb_prepare_sensor_session(void)
 {
-    esp_err_t err = bsp_power_sensor_enable();
+    gpio_set_level(BOARD_GPIO_SENSOR_EN, 0);
+    esp_err_t err = ESP_OK;
     if (err != ESP_OK)
     {
         return err;
@@ -21,7 +23,7 @@ static esp_err_t daq_iis3dwb_prepare_sensor_session(void)
     err = drv_iis3dwb_init();
     if (err != ESP_OK)
     {
-        (void)bsp_power_sensor_disable();
+        gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
         return err;
     }
 
@@ -36,7 +38,7 @@ static void daq_iis3dwb_finish_sensor_session(void)
         ESP_LOGW(TAG, "Failed to place IIS3DWB into standby before power-off");
     }
 
-    err = bsp_power_sensor_disable();
+    gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
     if (err != ESP_OK)
     {
         ESP_LOGW(TAG, "Failed to disable IIS3DWB power rail");

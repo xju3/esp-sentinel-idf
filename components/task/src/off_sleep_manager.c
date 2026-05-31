@@ -1,6 +1,7 @@
+#include "driver/gpio.h"
+#include "bsp_board.h"
 #include "off_sleep_manager.h"
 
-#include "bsp_power.h"
 #include "data_dispatcher.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
@@ -30,7 +31,7 @@ static esp_err_t off_sleep_prepare_capture_path(void)
         return ret;
     }
 
-    ret = bsp_power_sensor_disable();
+    gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Failed to disable IIS3DWB power rail before OFF sleep: %s", esp_err_to_name(ret));

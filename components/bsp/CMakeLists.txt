@@ -1,6 +1,5 @@
 idf_component_register(
     SRCS 
-        "src/bsp_power.c"
         "src/bsp_wifi_ap.c" 
         "src/bsp_wifi_sta.c" 
         "src/captive_dns.c" 
