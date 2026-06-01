@@ -17,7 +17,6 @@
 #include "off_sleep_manager.h"
 #include "wom_lis2dh12.h"
 
-#include "esp_log.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,7 +26,6 @@
 
 static void init_sensors()
 {
-    ESP_LOGD("INIT", "Initializing sensors...");
     drv_lis2dh12_init();
     drv_iis3dwb_init();
     drv_t1820b_init();

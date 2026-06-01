@@ -56,7 +56,7 @@ extern "C"
 
     typedef struct
     {
-        char device_id[LEN_MAX_DEVICE_ID];
+        char sn[LEN_MAX_DEVICE_ID];
         char device_name[LEN_MAX_DEVICE_NAME];
         char device_type[LEN_MAX_DEVICE_TYPE]; // defined in iso standards.
         int8_t motor_type;                     // 1. fixed speed motor, 2. variable frequency device, 3. servo

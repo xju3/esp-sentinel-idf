@@ -37,7 +37,7 @@ static void mqtt_event_handler(void *handler_args,
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
         char sub_topic[64];
-        snprintf(sub_topic, sizeof(sub_topic), "sentinel/down/%u", (unsigned)SN);
+        snprintf(sub_topic, sizeof(sub_topic), "sentinel/config/%u", (unsigned)SN);
         int sub_msg_id = esp_mqtt_client_subscribe(g_mqtt_client, sub_topic, 1);
         if (sub_msg_id < 0)
         {
