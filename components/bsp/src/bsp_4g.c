@@ -1,5 +1,6 @@
 #include "bsp_4g.h"
 #include "bsp_board.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -12,6 +13,8 @@
 #include "esp_netif.h"
 #include "esp_netif_defaults.h"
 #include "esp_netif_ppp.h"
+#include "esp_timer.h"
+#include <stdlib.h>
 #include <sys/param.h>
 #include <stdbool.h>
 #include "freertos/event_groups.h"
@@ -25,10 +28,24 @@
 #define MODEM_PWRKEY_PIN       BOARD_GPIO_4G_PWRKEY
 #define MODEM_STATUS_PIN       BOARD_GPIO_4G_STATUS
 #define MODEM_NET_STATUS_PIN   BOARD_GPIO_4G_NET_STATUS
-#define MODEM_RESET_N_PIN      BOARD_GPIO_4G_RESET_N
-
 #define UART_PORT_NUM UART_NUM_1
+#define MODEM_UART_BAUD_RATE 115200
+#define MODEM_UART_RX_BUF_SIZE 2048
+#define MODEM_UART_TX_BUF_SIZE 1024
 #define BUF_SIZE (1024)
+#define MODEM_RESP_BUF_SIZE 1024
+#define MODEM_POWER_ENABLE_LEVEL 1
+#define MODEM_POWER_DISABLE_LEVEL 0
+#define MODEM_POWER_SETTLE_MS 100
+#define MODEM_PULSE_PWRKEY_MS 600
+#define MODEM_BOOT_TIMEOUT_MS 15000
+#define MODEM_SIM_TIMEOUT_MS 10000
+#define MODEM_REG_TIMEOUT_MS 60000
+#define MODEM_ATTACH_TIMEOUT_MS 30000
+#define MODEM_PDP_TIMEOUT_MS 30000
+#define MODEM_SHUTDOWN_TIMEOUT_MS 65000
+#define MODEM_REG_POLL_MS 200
+#define MODEM_SYNC_AT_CMD "AT"
 #define PPP_IP_INFO_TIMEOUT_MS 3000
 #define PPP_IP_INFO_POLL_MS 100
 #define PPP_POST_CONNECT_STABILIZE_MS 500
@@ -43,108 +60,674 @@ static EventGroupHandle_t s_ppp_event_group = NULL;
 static TaskHandle_t s_ppp_rx_task = NULL;
 static volatile bool s_ppp_rx_task_running = false;
 static bool s_ppp_session_started = false;
+static bool s_uart_driver_installed = false;
+static bool s_at_ready = false;
 
 #define PPP_GOT_IP_BIT BIT0
 #define PPP_FAILED_BIT BIT1
 
-// 清空 UART 缓冲区并记录
-static void uart_drain_with_log(void)
+typedef enum {
+    PPP_4G_DIAG_OK = 0,
+    PPP_4G_DIAG_POWER_ON_FAILED,
+    PPP_4G_DIAG_AT_NO_RESPONSE,
+    PPP_4G_DIAG_SIM_NOT_READY,
+    PPP_4G_DIAG_NOT_REGISTERED,
+    PPP_4G_DIAG_ATTACH_FAILED,
+    PPP_4G_DIAG_PDP_FAILED,
+    PPP_4G_DIAG_NO_IP,
+    PPP_4G_DIAG_PPP_DIAL_FAILED,
+    PPP_4G_DIAG_PPP_CONNECT_FAILED,
+    PPP_4G_DIAG_IO_ERROR,
+} ppp_4g_diag_code_t;
+
+typedef struct {
+    uint32_t power_on_ms;
+    uint32_t boot_ms;
+    uint32_t sim_ready_ms;
+    uint32_t network_attach_ms;
+    uint32_t pdp_active_ms;
+    uint32_t ppp_ms;
+    uint32_t total_ms;
+} ppp_4g_diag_timing_t;
+
+typedef struct {
+    ppp_4g_diag_code_t code;
+    ppp_4g_diag_timing_t timing;
+    bool sim_ready;
+    bool registered;
+    bool attached;
+    bool pdp_active;
+    bool ppp_connected;
+    char ip_addr[48];
+} ppp_4g_diag_result_t;
+
+static int64_t deadline_after_ms(uint32_t timeout_ms)
 {
-    uint8_t tmp[BUF_SIZE];
-    int total = 0;
-    while (1)
-    {
-        int len = uart_read_bytes(UART_PORT_NUM, tmp, BUF_SIZE, pdMS_TO_TICKS(50));
-        if (len <= 0)
-            break;
-        total += len;
-        if (PPP_VERBOSE)
-        {
-            ESP_LOGD(TAG, "Drained %d bytes:", len);
+    return esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
+}
+
+static bool response_has_token(const char *response, const char *token)
+{
+    return response != NULL && token != NULL && strstr(response, token) != NULL;
+}
+
+static bool modem_response_is_ok(const char *response)
+{
+    return response_has_token(response, "\r\nOK\r\n") ||
+           response_has_token(response, "\nOK\r\n");
+}
+
+static bool modem_response_is_registered(const char *response)
+{
+    return response_has_token(response, "+CEREG: 1") ||
+           response_has_token(response, "+CEREG: 5") ||
+           response_has_token(response, "+CEREG: 0,1") ||
+           response_has_token(response, "+CEREG: 0,5");
+}
+
+static bool modem_response_has_ip(const char *response)
+{
+    return response != NULL &&
+           strstr(response, "+CGPADDR:") != NULL &&
+           strstr(response, "0.0.0.0") == NULL &&
+           strstr(response, "\"\"") == NULL;
+}
+
+static const char *ppp_4g_diag_code_to_str(ppp_4g_diag_code_t code)
+{
+    switch (code) {
+    case PPP_4G_DIAG_OK:
+        return "ok";
+    case PPP_4G_DIAG_POWER_ON_FAILED:
+        return "power_on_failed";
+    case PPP_4G_DIAG_AT_NO_RESPONSE:
+        return "at_no_response";
+    case PPP_4G_DIAG_SIM_NOT_READY:
+        return "sim_not_ready";
+    case PPP_4G_DIAG_NOT_REGISTERED:
+        return "not_registered";
+    case PPP_4G_DIAG_ATTACH_FAILED:
+        return "attach_failed";
+    case PPP_4G_DIAG_PDP_FAILED:
+        return "pdp_failed";
+    case PPP_4G_DIAG_NO_IP:
+        return "no_ip";
+    case PPP_4G_DIAG_PPP_DIAL_FAILED:
+        return "ppp_dial_failed";
+    case PPP_4G_DIAG_PPP_CONNECT_FAILED:
+        return "ppp_connect_failed";
+    case PPP_4G_DIAG_IO_ERROR:
+        return "io_error";
+    default:
+        return "unknown";
+    }
+}
+
+static void ppp_4g_log_result(const ppp_4g_diag_result_t *result)
+{
+    if (result == NULL) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "4G Module Startup Timing Report");
+    ESP_LOGI(TAG, "Result: %s", ppp_4g_diag_code_to_str(result->code));
+    ESP_LOGI(TAG, "---------------------------------------");
+    ESP_LOGI(TAG, "1. Power Enable : %lu ms", (unsigned long)result->timing.power_on_ms);
+    ESP_LOGI(TAG, "2. AT Handshake : %lu ms", (unsigned long)result->timing.boot_ms);
+    ESP_LOGI(TAG, "3. SIM Ready    : %lu ms", (unsigned long)result->timing.sim_ready_ms);
+    ESP_LOGI(TAG, "4. Network Reg  : %lu ms", (unsigned long)result->timing.network_attach_ms);
+    ESP_LOGI(TAG, "5. PDP/IP       : %lu ms  (active=%s ip=%s)",
+             (unsigned long)result->timing.pdp_active_ms,
+             result->pdp_active ? "true" : "false",
+             result->ip_addr[0] != '\0' ? result->ip_addr : "none");
+    ESP_LOGI(TAG, "6. PPP          : %lu ms  (connected=%s)",
+             (unsigned long)result->timing.ppp_ms,
+             result->ppp_connected ? "true" : "false");
+    ESP_LOGI(TAG, "---------------------------------------");
+    ESP_LOGI(TAG, "Total Time      : %lu ms", (unsigned long)result->timing.total_ms);
+    ESP_LOGI(TAG, "---------------------------------------");
+}
+
+static void modem_copy_cgpaddr_ip(const char *response, char *ip_addr, size_t ip_addr_size)
+{
+    if (response == NULL || ip_addr == NULL || ip_addr_size == 0) {
+        return;
+    }
+
+    const char *line = strstr(response, "+CGPADDR:");
+    if (line == NULL) {
+        return;
+    }
+
+    const char *comma = strchr(line, ',');
+    if (comma == NULL) {
+        return;
+    }
+
+    const char *start = comma + 1;
+    while (*start == ' ' || *start == '"') {
+        ++start;
+    }
+
+    size_t len = 0;
+    while (start[len] != '\0' &&
+           start[len] != '"' &&
+           start[len] != '\r' &&
+           start[len] != '\n' &&
+           start[len] != ',') {
+        ++len;
+    }
+
+    if (len == 0 || len >= ip_addr_size) {
+        return;
+    }
+    memcpy(ip_addr, start, len);
+    ip_addr[len] = '\0';
+}
+
+static esp_err_t modem_gpio_init(void)
+{
+    const gpio_config_t power_cfg = {
+        .pin_bit_mask = 1ULL << MODEM_PWR_EN_PIN,
+        .mode = GPIO_MODE_INPUT_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    esp_err_t err = gpio_config(&power_cfg);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const gpio_config_t pwrkey_cfg = {
+        .pin_bit_mask = (1ULL << MODEM_PWRKEY_PIN),
+        .mode = GPIO_MODE_INPUT_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    err = gpio_config(&pwrkey_cfg);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const gpio_config_t input_cfg = {
+        .pin_bit_mask = (1ULL << MODEM_STATUS_PIN) | (1ULL << MODEM_NET_STATUS_PIN),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    err = gpio_config(&input_cfg);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    (void)gpio_set_level(MODEM_PWRKEY_PIN, 1);
+    return ESP_OK;
+}
+
+static esp_err_t modem_uart_init(void)
+{
+    if (s_uart_driver_installed) {
+        return ESP_OK;
+    }
+
+    const uart_config_t config = {
+        .baud_rate = MODEM_UART_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    esp_err_t err = uart_driver_install(UART_PORT_NUM,
+                                        MODEM_UART_RX_BUF_SIZE,
+                                        MODEM_UART_TX_BUF_SIZE,
+                                        0,
+                                        NULL,
+                                        0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
+    }
+
+    err = uart_param_config(UART_PORT_NUM, &config);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = uart_set_pin(UART_PORT_NUM,
+                       MODEM_UART_TX_PIN,
+                       MODEM_UART_RX_PIN,
+                       UART_PIN_NO_CHANGE,
+                       UART_PIN_NO_CHANGE);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = uart_flush_input(UART_PORT_NUM);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_uart_driver_installed = true;
+    return ESP_OK;
+}
+
+static void modem_uart_deinit(void)
+{
+    if (s_uart_driver_installed) {
+        (void)uart_driver_delete(UART_PORT_NUM);
+        s_uart_driver_installed = false;
+    }
+}
+
+static esp_err_t modem_power_enable(void)
+{
+    esp_err_t err = gpio_set_level(MODEM_PWR_EN_PIN, MODEM_POWER_ENABLE_LEVEL);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(MODEM_POWER_SETTLE_MS));
+    }
+    return err;
+}
+
+static esp_err_t modem_power_disable(void)
+{
+    return gpio_set_level(MODEM_PWR_EN_PIN, MODEM_POWER_DISABLE_LEVEL);
+}
+
+static int modem_status_level(void)
+{
+    return gpio_get_level(MODEM_STATUS_PIN);
+}
+
+static bool modem_status_is_on(void)
+{
+    return modem_status_level() == 1;
+}
+
+static esp_err_t modem_release_low_active_line(gpio_num_t pin)
+{
+    return gpio_set_level(pin, 1);
+}
+
+static esp_err_t modem_pulse_low_active_line(gpio_num_t pin, uint32_t pulse_ms)
+{
+    esp_err_t err = gpio_set_level(pin, 0);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(pulse_ms));
+    return gpio_set_level(pin, 1);
+}
+
+static esp_err_t modem_wait_for_status_level(int expected_level, uint32_t timeout_ms)
+{
+    int64_t deadline = deadline_after_ms(timeout_ms);
+    while (esp_timer_get_time() < deadline) {
+        if (modem_status_level() == expected_level) {
+            return ESP_OK;
         }
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
-    if (PPP_VERBOSE && total > 0)
-    {
-        ESP_LOGD(TAG, "Total drained: %d bytes", total);
-    }
-    uart_flush_input(UART_PORT_NUM);
+    return ESP_ERR_TIMEOUT;
 }
 
-// 开机操作
-static void ppp_4g_power_on(void)
+static esp_err_t modem_read_response(char *response, size_t response_size, uint32_t timeout_ms)
 {
-    // 先断开主电源
-    gpio_set_level(MODEM_PWRKEY_PIN, 1);
-    gpio_set_level(MODEM_PWR_EN_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // 重新使能主电源
-    gpio_set_level(MODEM_PWR_EN_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // 拉低 PWRKEY 进行开机脉冲 (600ms)
-    gpio_set_level(MODEM_PWRKEY_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(600));
-
-    gpio_set_level(MODEM_PWRKEY_PIN, 1);
-}
-
-// 发送 AT 命令
-static esp_err_t send_at_command(const char *command, const char *expected_response,
-                                 char *response_buffer, size_t buffer_size, int timeout_ms)
-{
-    // 清空缓冲区
-    uart_drain_with_log();
-
-    // 发送命令
-    if (PPP_VERBOSE)
-    {
-        ESP_LOGD(TAG, "→ Sending: %s", command);
+    if (response == NULL || response_size == 0) {
+        return ESP_ERR_INVALID_ARG;
     }
-    uart_write_bytes(UART_PORT_NUM, command, strlen(command));
-    uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
 
-    memset(response_buffer, 0, buffer_size);
-    int total_len = 0;
-    int remaining = buffer_size - 1;
+    size_t used = 0;
+    response[0] = '\0';
 
-    int loops = timeout_ms / 100;
-    for (int i = 0; i < loops; i++)
-    {
-        int len = uart_read_bytes(UART_PORT_NUM, (uint8_t *)response_buffer + total_len,
-                                  remaining, pdMS_TO_TICKS(100));
-        if (len > 0)
-        {
-            total_len += len;
-            remaining -= len;
-            response_buffer[total_len] = 0;
-
-            // 打印接收到的数据
-            if (PPP_VERBOSE)
-            {
-                ESP_LOGD(TAG, "← Received %d bytes:", len);
+    int64_t deadline = deadline_after_ms(timeout_ms);
+    while (esp_timer_get_time() < deadline) {
+        uint8_t rx_buf[128];
+        int read_len = uart_read_bytes(UART_PORT_NUM,
+                                       rx_buf,
+                                       sizeof(rx_buf),
+                                       pdMS_TO_TICKS(100));
+        if (read_len > 0) {
+            size_t copy_len = (size_t)read_len;
+            if (used + copy_len >= response_size) {
+                copy_len = response_size - used - 1;
             }
+            memcpy(response + used, rx_buf, copy_len);
+            used += copy_len;
+            response[used] = '\0';
 
-            // 检查是否包含期望的响应
-            if (strstr(response_buffer, expected_response) != NULL)
-            {
-                if (PPP_VERBOSE)
-                {
-                    ESP_LOGD(TAG, "✓ Got expected response: %s", expected_response);
-                    ESP_LOGD(TAG, "  Full response: %s", response_buffer);
-                }
+            if (response_has_token(response, "\r\nOK\r\n") ||
+                response_has_token(response, "\r\nERROR\r\n") ||
+                response_has_token(response, "+CME ERROR:") ||
+                response_has_token(response, "POWERED DOWN")) {
                 return ESP_OK;
             }
         }
-        if (remaining <= 0)
+    }
+
+    return used > 0 ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t modem_read_until_pattern(char *response,
+                                          size_t response_size,
+                                          const char *pattern,
+                                          uint32_t timeout_ms)
+{
+    if (response == NULL || response_size == 0 || pattern == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t used = 0;
+    response[0] = '\0';
+
+    int64_t deadline = deadline_after_ms(timeout_ms);
+    while (esp_timer_get_time() < deadline) {
+        uint8_t rx_buf[128];
+        int read_len = uart_read_bytes(UART_PORT_NUM,
+                                       rx_buf,
+                                       sizeof(rx_buf),
+                                       pdMS_TO_TICKS(100));
+        if (read_len <= 0) {
+            continue;
+        }
+
+        size_t copy_len = (size_t)read_len;
+        if (used + copy_len >= response_size) {
+            copy_len = response_size - used - 1;
+        }
+        memcpy(response + used, rx_buf, copy_len);
+        used += copy_len;
+        response[used] = '\0';
+
+        if (strstr(response, pattern) != NULL) {
+            return ESP_OK;
+        }
+    }
+
+    return used > 0 ? ESP_ERR_NOT_FOUND : ESP_ERR_TIMEOUT;
+}
+
+#if defined(AT) && AT == 1
+static void format_visible_bytes(const char *input, char *output, size_t output_size)
+{
+    if (output == NULL || output_size == 0) {
+        return;
+    }
+
+    size_t out = 0;
+    output[0] = '\0';
+    if (input == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; input[i] != '\0' && out + 1 < output_size; ++i) {
+        unsigned char ch = (unsigned char)input[i];
+        const char *escaped = NULL;
+        char hex[5] = { 0 };
+
+        switch (ch) {
+        case '\r':
+            escaped = "\\r";
             break;
+        case '\n':
+            escaped = "\\n";
+            break;
+        case '\t':
+            escaped = "\\t";
+            break;
+        default:
+            if (!isprint(ch)) {
+                snprintf(hex, sizeof(hex), "\\x%02X", ch);
+                escaped = hex;
+            }
+            break;
+        }
+
+        if (escaped != NULL) {
+            size_t escaped_len = strlen(escaped);
+            if (out + escaped_len >= output_size) {
+                break;
+            }
+            memcpy(output + out, escaped, escaped_len);
+            out += escaped_len;
+        } else {
+            output[out++] = (char)ch;
+        }
     }
-    if (PPP_VERBOSE)
-    {
-        ESP_LOGW(TAG, "✗ Timeout waiting for: %s", expected_response);
-        ESP_LOGW(TAG, "  Got: %s", response_buffer);
+    output[out] = '\0';
+}
+#endif
+
+static esp_err_t modem_send_command(const char *cmd,
+                                    char *response,
+                                    size_t response_size,
+                                    uint32_t timeout_ms)
+{
+    if (cmd == NULL || response == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
-    return ESP_FAIL;
+
+#if defined(AT) && AT == 1
+    char tx_visible[160];
+    char tx_frame[128];
+    int tx_frame_len = snprintf(tx_frame, sizeof(tx_frame), "%s\r\n", cmd);
+    if (tx_frame_len < 0) {
+        return ESP_FAIL;
+    }
+    format_visible_bytes(tx_frame, tx_visible, sizeof(tx_visible));
+    ESP_LOGI(TAG, ">>> UART TX AT frame=\"%s\" cmd=\"%s\" len=%d", tx_visible, cmd, tx_frame_len);
+#endif
+
+    (void)uart_flush_input(UART_PORT_NUM);
+    int written = uart_write_bytes(UART_PORT_NUM, cmd, (size_t)strlen(cmd));
+    if (written < 0) {
+        return ESP_FAIL;
+    }
+    written = uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
+    if (written < 0) {
+        return ESP_FAIL;
+    }
+    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
+
+    esp_err_t err = modem_read_response(response, response_size, timeout_ms);
+#if defined(AT) && AT == 1
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "<<< AT RX:\n%s", response);
+    } else {
+        ESP_LOGW(TAG, "<<< AT RX: (timeout/error=%d)", err);
+    }
+#endif
+    return err;
+}
+
+static bool modem_attached(char *response, size_t response_size)
+{
+    if (modem_send_command("AT+CGATT?", response, response_size, 1000) != ESP_OK) {
+        return false;
+    }
+    return response_has_token(response, "+CGATT: 1");
+}
+
+static bool modem_pdp_active(char *response, size_t response_size)
+{
+    if (modem_send_command("AT+CGACT?", response, response_size, 1000) != ESP_OK) {
+        return false;
+    }
+    return response_has_token(response, "+CGACT: 1,1");
+}
+
+static esp_err_t modem_sync(void)
+{
+    char response[MODEM_RESP_BUF_SIZE];
+    int64_t deadline = deadline_after_ms(MODEM_BOOT_TIMEOUT_MS);
+    while (esp_timer_get_time() < deadline) {
+        esp_err_t err = modem_send_command(MODEM_SYNC_AT_CMD, response, sizeof(response), 200);
+        if (err == ESP_OK && modem_response_is_ok(response)) {
+            return ESP_OK;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t modem_shutdown_gracefully(bool at_ready)
+{
+    if (at_ready) {
+        (void)uart_flush_input(UART_PORT_NUM);
+        static const char shutdown_cmd[] = "AT+QPOWD=1\r\n";
+        int written = uart_write_bytes(UART_PORT_NUM, shutdown_cmd, sizeof(shutdown_cmd) - 1);
+        if (written >= 0) {
+            (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
+            if (modem_wait_for_status_level(0, MODEM_SHUTDOWN_TIMEOUT_MS) == ESP_OK) {
+                ESP_LOGI(TAG, "Module gracefully powered down.");
+                return ESP_OK;
+            }
+            ESP_LOGW(TAG, "Graceful shutdown timeout via STATUS pin.");
+        }
+    }
+
+    if (modem_status_is_on()) {
+        ESP_LOGW(TAG, "Forcing shutdown via PWRKEY...");
+        (void)modem_pulse_low_active_line(MODEM_PWRKEY_PIN, 700);
+        (void)modem_wait_for_status_level(0, 5000);
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
+{
+    char response[MODEM_RESP_BUF_SIZE];
+    int64_t stage_start_us = esp_timer_get_time();
+
+    esp_err_t err = modem_sync();
+    if (result != NULL) {
+        result->timing.boot_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    }
+    if (err != ESP_OK) {
+        if (result != NULL) {
+            result->code = PPP_4G_DIAG_AT_NO_RESPONSE;
+        }
+        return err;
+    }
+    s_at_ready = true;
+
+    stage_start_us = esp_timer_get_time();
+    bool sim_ready = false;
+    int64_t cpin_deadline = deadline_after_ms(MODEM_SIM_TIMEOUT_MS);
+    while (esp_timer_get_time() < cpin_deadline) {
+        if (modem_send_command("AT+CPIN?", response, sizeof(response), 1000) == ESP_OK) {
+            if (response_has_token(response, "+CPIN: READY")) {
+                sim_ready = true;
+                break;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (result != NULL) {
+        result->timing.sim_ready_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    }
+    if (!sim_ready) {
+        if (result != NULL) {
+            result->code = PPP_4G_DIAG_SIM_NOT_READY;
+        }
+        return ESP_ERR_TIMEOUT;
+    }
+    if (result != NULL) {
+        result->sim_ready = true;
+    }
+
+    stage_start_us = esp_timer_get_time();
+    if (modem_send_command("AT+CFUN?", response, sizeof(response), 1000) != ESP_OK ||
+        !response_has_token(response, "+CFUN: 1")) {
+        (void)modem_send_command("AT+CFUN=1", response, sizeof(response), 2000);
+    }
+
+    bool registered = false;
+    int64_t reg_deadline = deadline_after_ms(MODEM_REG_TIMEOUT_MS);
+    while (esp_timer_get_time() < reg_deadline) {
+        if (modem_send_command("AT+CEREG?", response, sizeof(response), 1000) == ESP_OK) {
+            if (modem_response_is_registered(response)) {
+                registered = true;
+                break;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(MODEM_REG_POLL_MS));
+    }
+    if (result != NULL) {
+        result->timing.network_attach_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    }
+    if (!registered) {
+        if (result != NULL) {
+            result->code = PPP_4G_DIAG_NOT_REGISTERED;
+        }
+        return ESP_ERR_TIMEOUT;
+    }
+    if (result != NULL) {
+        result->registered = true;
+    }
+
+    if (!modem_attached(response, sizeof(response))) {
+        err = modem_send_command("AT+CGATT=1", response, sizeof(response), MODEM_ATTACH_TIMEOUT_MS);
+        if (err != ESP_OK || !modem_response_is_ok(response)) {
+            if (result != NULL) {
+                result->timing.network_attach_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+                result->code = PPP_4G_DIAG_ATTACH_FAILED;
+            }
+            return err != ESP_OK ? err : ESP_FAIL;
+        }
+    }
+    if (result != NULL) {
+        result->attached = true;
+        result->timing.network_attach_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    }
+
+    stage_start_us = esp_timer_get_time();
+    if (!modem_pdp_active(response, sizeof(response))) {
+        err = modem_send_command("AT+CGACT=1,1", response, sizeof(response), MODEM_PDP_TIMEOUT_MS);
+        if (err != ESP_OK || !modem_response_is_ok(response)) {
+            if (result != NULL) {
+                result->timing.pdp_active_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+                result->code = PPP_4G_DIAG_PDP_FAILED;
+            }
+            return err != ESP_OK ? err : ESP_FAIL;
+        }
+    }
+
+    err = modem_send_command("AT+CGPADDR=1", response, sizeof(response), 5000);
+    if (result != NULL) {
+        result->timing.pdp_active_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    }
+    if (err != ESP_OK || !modem_response_has_ip(response)) {
+        if (result != NULL) {
+            result->code = PPP_4G_DIAG_NO_IP;
+        }
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+    if (result != NULL) {
+        result->pdp_active = true;
+        modem_copy_cgpaddr_ip(response, result->ip_addr, sizeof(result->ip_addr));
+    }
+
+    ESP_LOGI(TAG, "4G packet service is ready; switching to PPP dial.");
+    return ESP_OK;
+}
+
+static void modem_exit_data_mode(void)
+{
+    if (!s_uart_driver_installed) {
+        return;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    (void)uart_write_bytes(UART_PORT_NUM, "+++", 3);
+    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    (void)uart_flush_input(UART_PORT_NUM);
 }
 
 static esp_err_t ppp_uart_transmit(void *h, void *buffer, size_t len)
@@ -248,7 +831,7 @@ static void ppp_stop_session(void)
     ppp_reset_event_bits();
 }
 
-static void ppp_cleanup_failed_init(bool uart_driver_installed, bool power_enabled)
+static void ppp_cleanup_failed_init(bool power_enabled)
 {
     ppp_stop_session();
 
@@ -258,15 +841,14 @@ static void ppp_cleanup_failed_init(bool uart_driver_installed, bool power_enabl
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    if (uart_driver_installed)
-    {
-        (void)uart_driver_delete(UART_PORT_NUM);
-    }
-
     if (power_enabled)
     {
-        gpio_set_level(MODEM_PWR_EN_PIN, 0);
+        (void)modem_shutdown_gracefully(s_at_ready);
+        (void)modem_power_disable();
     }
+
+    modem_uart_deinit();
+    s_at_ready = false;
 }
 
 static void ppp_destroy_netif(void)
@@ -334,8 +916,16 @@ static esp_err_t ppp_stack_init(void)
 
     if (!s_ppp_handlers_registered)
     {
-        ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, ppp_ip_event_handler, NULL));
-        ESP_ERROR_CHECK(esp_event_handler_register(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, ppp_status_event_handler, NULL));
+        err = esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, ppp_ip_event_handler, NULL);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "IP event handler register failed: %s", esp_err_to_name(err));
+            return err;
+        }
+        err = esp_event_handler_register(NETIF_PPP_STATUS, ESP_EVENT_ANY_ID, ppp_status_event_handler, NULL);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "PPP event handler register failed: %s", esp_err_to_name(err));
+            return err;
+        }
         s_ppp_handlers_registered = true;
     }
 
@@ -360,14 +950,31 @@ static esp_err_t ppp_stack_init(void)
     return ESP_OK;
 }
 
-static esp_err_t ppp_start_and_wait_ip(void)
+static esp_err_t ppp_start_and_wait_ip(ppp_4g_diag_result_t *result)
 {
     char response_buffer[256];
+    int64_t stage_start_us = esp_timer_get_time();
 
-    // 精简：通常驻网成功后自动附着，略过 AT+CGATT=1 节省时间
-    if (send_at_command("ATD*99***1#", "CONNECT", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
+    (void)uart_flush_input(UART_PORT_NUM);
+    static const char dial_cmd[] = "ATD*99***1#\r\n";
+    int written = uart_write_bytes(UART_PORT_NUM, dial_cmd, sizeof(dial_cmd) - 1);
+    esp_err_t err = ESP_OK;
+    if (written < 0) {
+        err = ESP_FAIL;
+    } else {
+        err = uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
+    }
+    if (err == ESP_OK) {
+        err = modem_read_until_pattern(response_buffer, sizeof(response_buffer), "CONNECT", 30000);
+    }
+    if (err != ESP_OK)
     {
+        if (result != NULL) {
+            result->timing.ppp_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+            result->code = PPP_4G_DIAG_PPP_DIAL_FAILED;
+        }
         ESP_LOGE(TAG, "Failed to enter PPP data mode");
+        ESP_LOGE(TAG, "PPP dial response: %s", response_buffer[0] != '\0' ? response_buffer : "(none)");
         return ESP_FAIL;
     }
 
@@ -377,6 +984,10 @@ static esp_err_t ppp_start_and_wait_ip(void)
         if (xTaskCreate(ppp_uart_rx_task, "ppp_rx", 4096, NULL, 5, &s_ppp_rx_task) != pdTRUE)
         {
             s_ppp_rx_task_running = false;
+            if (result != NULL) {
+                result->timing.ppp_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+                result->code = PPP_4G_DIAG_PPP_CONNECT_FAILED;
+            }
             ESP_LOGE(TAG, "Failed to create PPP RX task");
             return ESP_FAIL;
         }
@@ -404,194 +1015,87 @@ static esp_err_t ppp_start_and_wait_ip(void)
         if (ip_ready_err != ESP_OK)
         {
             ppp_stop_session();
+            if (result != NULL) {
+                result->timing.ppp_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+                result->code = PPP_4G_DIAG_PPP_CONNECT_FAILED;
+            }
             return ip_ready_err;
         }
 
         vTaskDelay(pdMS_TO_TICKS(PPP_POST_CONNECT_STABILIZE_MS));
+        if (result != NULL) {
+            result->timing.ppp_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+            result->ppp_connected = true;
+            result->code = PPP_4G_DIAG_OK;
+        }
         return ESP_OK;
     }
 
     ESP_LOGE(TAG, "PPP connect timeout/failed");
     ppp_stop_session();
+    if (result != NULL) {
+        result->timing.ppp_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+        result->code = PPP_4G_DIAG_PPP_CONNECT_FAILED;
+    }
     return ESP_FAIL;
 }
 
 esp_err_t init_ppp_4g(cb_communication_channel_established cb)
 {
-    esp_err_t err = ppp_stack_init();
-    bool uart_driver_installed = false;
+    esp_err_t err = ESP_OK;
     bool power_enabled = false;
+    bool report_logged = false;
+    ppp_4g_diag_result_t result = {
+        .code = PPP_4G_DIAG_IO_ERROR,
+    };
+    int64_t total_start_us = esp_timer_get_time();
+    int64_t stage_start_us = total_start_us;
+
+    err = modem_gpio_init();
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "========================================");
-        ESP_LOGE(TAG, "  ✗ Initialization Failed!");
-        ESP_LOGE(TAG, "========================================");
-        return err;
+        ESP_LOGE(TAG, "4G GPIO init failed: %s", esp_err_to_name(err));
+        goto cleanup;
     }
 
-    // ============== GPIO 配置 ==============
-    // 配置 PWK 引脚
-    gpio_config_t pwk_conf = {
-        .pin_bit_mask = (1ULL << MODEM_PWRKEY_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&pwk_conf);
-    gpio_set_level(MODEM_PWRKEY_PIN, 1); // PWRKEY 初始状态为高
+    err = modem_uart_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "4G UART init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
 
-    // 配置 4G 主电源使能引脚
-    gpio_config_t pwr_en_conf = {
-        .pin_bit_mask = (1ULL << MODEM_PWR_EN_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&pwr_en_conf);
-    gpio_set_level(MODEM_PWR_EN_PIN, 0); // 4G 主电源默认关闭
+    (void)modem_release_low_active_line(MODEM_PWRKEY_PIN);
+    (void)gpio_set_level(MODEM_PWRKEY_PIN, 1);
+    (void)modem_power_disable();
+    vTaskDelay(pdMS_TO_TICKS(100));
 
-    // 板级占位：这些引脚在本阶段只收口定义，不改变现有 4G 时序逻辑。
-    gpio_config_t modem_gpio_placeholder_conf = {
-        .pin_bit_mask = (1ULL << MODEM_RESET_N_PIN),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&modem_gpio_placeholder_conf);
-    gpio_set_level(MODEM_RESET_N_PIN, 1);
-
-    gpio_config_t modem_status_conf = {
-        .pin_bit_mask = (1ULL << MODEM_STATUS_PIN) | (1ULL << MODEM_NET_STATUS_PIN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE};
-    gpio_config(&modem_status_conf);
-
-    // 直接打开 4G 主供电
-    gpio_set_level(MODEM_PWR_EN_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(100)); // 等待电源稳定
+    err = modem_power_enable();
+    result.timing.power_on_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    if (err != ESP_OK)
+    {
+        result.code = PPP_4G_DIAG_POWER_ON_FAILED;
+        ESP_LOGE(TAG, "4G power on failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
     power_enabled = true;
 
-    // ============== UART 配置 ==============
-    uart_config_t uart_config = {
-        .baud_rate = 115200, // 默认波特率，后续会尝试其他值
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_APB,
-    };
-
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT_NUM, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0));
-    uart_driver_installed = true;
-    ESP_ERROR_CHECK(uart_param_config(UART_PORT_NUM, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(UART_PORT_NUM, MODEM_UART_TX_PIN, MODEM_UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    char response_buffer[512];
-
-    // ============== Stage 2: 硬件状态引脚加速开机判定 ==============
-    bool module_on = (gpio_get_level(MODEM_STATUS_PIN) == 1);
-
-    if (!module_on)
+    err = modem_pulse_low_active_line(MODEM_PWRKEY_PIN, MODEM_PULSE_PWRKEY_MS);
+    if (err != ESP_OK)
     {
-        if (PPP_VERBOSE) ESP_LOGI(TAG, "STATUS pin low, powering on module...");
-        ppp_4g_power_on();
-    }
-    else
-    {
-        ESP_LOGI(TAG, "STATUS pin high, module already on.");
-    }
-
-    // 快速 AT 同步，只要有回应就说明串口通了，最多等 15 秒
-    bool at_sync = false;
-    for (int i = 0; i < 75; i++)
-    {
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 200) == ESP_OK)
-        {
-            at_sync = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
-    if (!at_sync)
-    {
-        ESP_LOGE(TAG, "✗ AT sync failed");
-        err = ESP_FAIL;
+        result.code = PPP_4G_DIAG_POWER_ON_FAILED;
+        ESP_LOGE(TAG, "4G PWRKEY pulse failed: %s", esp_err_to_name(err));
         goto cleanup;
     }
 
-    // ============== Stage 3: 精简配置与状态检查 ==============
-    // 关闭回显 (缩短超时)
-    send_at_command("ATE0", "OK", response_buffer, sizeof(response_buffer), 500);
-
-    // 检查 SIM 卡，最多等 10 秒
-    bool sim_ready = false;
-    for (int i = 0; i < 15; i++)
+    err = modem_prepare_packet_service(&result);
+    if (err != ESP_OK)
     {
-        if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer, sizeof(response_buffer), 1000) == ESP_OK)
-        {
-            sim_ready = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    if (!sim_ready)
-    {
-        ESP_LOGE(TAG, "✗ SIM Card not ready");
-        err = ESP_FAIL;
+        ESP_LOGE(TAG, "4G packet service prepare failed: %s", esp_err_to_name(err));
         goto cleanup;
     }
 
-    // 检查并开启全功能模式
-    if (send_at_command("AT+CFUN?", "+CFUN: 1", response_buffer, sizeof(response_buffer), 1000) != ESP_OK)
-    {
-        send_at_command("AT+CFUN=1", "OK", response_buffer, sizeof(response_buffer), 2000);
-    }
-
-    // 检查网络注册状态 (AT+CEREG?)，最多等 60 秒
-    bool registered_success = false;
-    for (int i = 0; i < 60; i++)
-    {
-        if (send_at_command("AT+CEREG?", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK)
-        {
-            if (strstr(response_buffer, "+CEREG: 1") != NULL ||
-                strstr(response_buffer, "+CEREG: 5") != NULL ||
-                strstr(response_buffer, "+CEREG: 0,1") != NULL ||
-                strstr(response_buffer, "+CEREG: 0,5") != NULL)
-            {
-                registered_success = true;
-                break;
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
-
-    if (!registered_success)
-    {
-        ESP_LOGW(TAG, "✗ Network registration timeout");
-        err = ESP_FAIL;
-        goto cleanup;
-    }
-
-    // 检查并附着网络 (AT+CGATT?)
-    if (send_at_command("AT+CGATT?", "+CGATT: 1", response_buffer, sizeof(response_buffer), 1000) != ESP_OK)
-    {
-        if (send_at_command("AT+CGATT=1", "OK", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
-        {
-            ESP_LOGW(TAG, "✗ Network attach failed");
-            err = ESP_FAIL;
-            goto cleanup;
-        }
-    }
-
-    // 快速下发必要配置 (忽略错误)
-    send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 500);
-
-    // ============== Stage 8: 启动 PPP 拨号 ==============
-    err = ppp_start_and_wait_ip();
+    err = ppp_stack_init();
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "========================================");
@@ -599,6 +1103,19 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         ESP_LOGE(TAG, "========================================");
         goto cleanup;
     }
+
+    err = ppp_start_and_wait_ip(&result);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "========================================");
+        ESP_LOGE(TAG, "  ✗ Initialization Failed!");
+        ESP_LOGE(TAG, "========================================");
+        goto cleanup;
+    }
+
+    result.timing.total_ms = (uint32_t)((esp_timer_get_time() - total_start_us) / 1000LL);
+    ppp_4g_log_result(&result);
+    report_logged = true;
 
     if (cb)
     {
@@ -608,7 +1125,11 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
     return ESP_OK;
 
 cleanup:
-    ppp_cleanup_failed_init(uart_driver_installed, power_enabled);
+    if (!report_logged) {
+        result.timing.total_ms = (uint32_t)((esp_timer_get_time() - total_start_us) / 1000LL);
+        ppp_4g_log_result(&result);
+    }
+    ppp_cleanup_failed_init(power_enabled);
     return err;
 }
 
@@ -622,36 +1143,16 @@ esp_err_t shutdown_ppp_4g(void)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    // 发送优雅关机命令
-    char response_buffer[128];
-    send_at_command("AT+QPOWD=1", "OK", response_buffer, sizeof(response_buffer), 1000);
+    modem_exit_data_mode();
 
-    // 检查 STATUS 引脚，最多等 65 秒
-    bool graceful_shutdown = false;
-    for (int i = 0; i < 650; i++)
-    {
-        if (gpio_get_level(MODEM_STATUS_PIN) == 0)
-        {
-            graceful_shutdown = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    if (!graceful_shutdown)
-    {
-        ESP_LOGW(TAG, "Forcing shutdown via PWRKEY...");
-        gpio_set_level(MODEM_PWRKEY_PIN, 0);
-        vTaskDelay(pdMS_TO_TICKS(700));
-        gpio_set_level(MODEM_PWRKEY_PIN, 1);
-        vTaskDelay(pdMS_TO_TICKS(5000));
-    }
+    (void)modem_shutdown_gracefully(s_at_ready);
 
     // 关闭电源使能
-    gpio_set_level(MODEM_PWR_EN_PIN, 0);
+    (void)modem_power_disable();
 
     // 删除 UART 驱动
-    ESP_ERROR_CHECK(uart_driver_delete(UART_PORT_NUM));
+    modem_uart_deinit();
+    s_at_ready = false;
 
     ppp_destroy_netif();
 
