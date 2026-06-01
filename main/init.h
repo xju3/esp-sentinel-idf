@@ -13,9 +13,6 @@ extern "C"
     extern bool is_network_available;
     esp_err_t init_nvs();
     esp_err_t start_local_services();
-    esp_err_t start_network_services();
-    esp_err_t establish_communication_channel();
-    void enable_config_service();
 #ifdef __cplusplus
 }
 #endif
