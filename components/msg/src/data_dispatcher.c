@@ -21,6 +21,7 @@ QueueHandle_t g_msg_dispatcher_queue = NULL;
 extern esp_mqtt_client_handle_t g_mqtt_client;
 
 #define DISPATCHER_QUEUE_LEN 20
+#define DISPATCHER_TASK_STACK_SIZE 8192
 #define DISPATCHER_MAX_PENDING_MSGS 64
 #define DISPATCHER_RETRY_INTERVAL_MS 5000
 #define EVENT_TYPE_RMS_REPORT 1U
@@ -53,6 +54,10 @@ static void dispatcher_enqueue_internal_event(dispatcher_item_type_t type, int32
 
 static bool is_mqtt_connected(void)
 {
+    if (g_user_config.network == 1)
+    {
+        return true;
+    }
     return g_mqtt_client != NULL;
 }
 
@@ -245,6 +250,12 @@ static esp_err_t dispatcher_load_cache(dispatcher_persisted_msg_t **out_msgs, si
 
 static void dispatcher_network_channel_established(void)
 {
+    if (g_user_config.network == 1)
+    {
+        dispatcher_enqueue_internal_event(DISPATCHER_ITEM_MQTT_READY, -1);
+        return;
+    }
+
     esp_err_t err = init_mqtt_client();
     if (err != ESP_OK)
     {
@@ -295,7 +306,7 @@ static esp_err_t dispatcher_request_transport(void)
     if (g_user_config.network == 1)
     {
         LOG_INFO("Dispatcher bringing up 4G transport before send");
-        return init_ppp_4g(dispatcher_network_channel_established);
+        return init_4g_mqtt(dispatcher_network_channel_established);
     }
 
     LOG_INFO("Dispatcher bringing up WiFi STA transport before send");
@@ -310,7 +321,7 @@ static void dispatcher_shutdown_transport(void)
 
     if (g_user_config.network == 1)
     {
-        (void)shutdown_ppp_4g();
+        (void)shutdown_4g_mqtt();
     }
     else
     {
@@ -396,6 +407,18 @@ static bool dispatcher_publish_one(const dispatcher_persisted_msg_t *msg, int32_
     if (!msg || !out_msg_id || !is_mqtt_connected())
     {
         return false;
+    }
+
+    if (g_user_config.network == 1)
+    {
+        esp_err_t err = bsp_4g_mqtt_publish("sentinel", msg->data, msg->len);
+        if (err != ESP_OK)
+        {
+            LOG_WARNF("4G module MQTT publish failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        *out_msg_id = 0;
+        return true;
     }
 
     int msg_id = esp_mqtt_client_publish(g_mqtt_client,
@@ -696,6 +719,31 @@ static void dispatcher_maybe_progress(size_t *pending_count,
         return;
     }
 
+    if (g_user_config.network == 1)
+    {
+        dispatcher_compact_active_batch(*active_msgs, active_count, 1U);
+        esp_err_t cache_err = dispatcher_write_cache(*active_msgs, *active_count);
+        if (cache_err != ESP_OK)
+        {
+            LOG_ERRORF("Failed to update dispatcher cache after 4G publish: %s",
+                       esp_err_to_name(cache_err));
+            dispatcher_handle_transport_failure(false,
+                                                *pending_count,
+                                                *active_count,
+                                                flush_requested,
+                                                immediate_flush_pending,
+                                                mqtt_ready,
+                                                transport_requested,
+                                                send_in_progress,
+                                                flush_done_sem,
+                                                flush_result_out);
+            return;
+        }
+        LOG_INFOF("Dispatcher 4G publish completed, remaining=%u",
+                  (unsigned)*active_count);
+        return;
+    }
+
     *send_in_progress = true;
     *inflight_msg_id = msg_id;
 }
@@ -960,7 +1008,7 @@ esp_err_t data_dispatcher_start(void)
 
     mqtt_proxy_set_event_callback(dispatcher_mqtt_event_handler, NULL);
 
-    xTaskCreate(dispatcher_task, "data_dispatcher", 4096, NULL, 5, NULL);
+    xTaskCreate(dispatcher_task, "data_dispatcher", DISPATCHER_TASK_STACK_SIZE, NULL, 5, NULL);
     LOG_INFO("Data dispatcher task created");
     return ESP_OK;
 }

@@ -15,6 +15,7 @@
 #include "task_rms.h"
 #include "task_kurtosis.h"
 #include "task_envelope.h"
+#include "task_mqtt_message.h"
 #include "off_sleep_manager.h"
 #include "wom_lis2dh12.h"
 #include "web_server.h"
@@ -133,6 +134,13 @@ esp_err_t start_local_services()
     if (err != ESP_OK)
     {
         LOG_ERROR("Data dispatcher initialization failed.");
+        return err;
+    }
+
+    err = start_mqtt_message_task();
+    if (err != ESP_OK)
+    {
+        LOG_ERROR("MQTT message task initialization failed.");
         return err;
     }
 

@@ -11,10 +11,11 @@ idf_component_register(
         "src/wom_lis2dh12.c"
         "src/off_sleep_manager.c"
         "src/task_stash.c"
+        "src/task_mqtt_message.c"
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
-        esp-dsp driver bsp peri net util algo msg)
+        esp-dsp driver bsp peri net util algo msg json)
 
 if(DEFINED DEVICE_ID)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_ID="${DEVICE_ID}")

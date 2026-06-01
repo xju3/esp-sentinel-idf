@@ -5,12 +5,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <errno.h>
+#include <stdio.h>
 #include <string.h>
+
+#ifndef SN
+#define SN 0
+#endif
 
 // 全局 MQTT 客户端句柄
 esp_mqtt_client_handle_t g_mqtt_client = NULL;
 static mqtt_proxy_event_cb_t s_mqtt_proxy_event_cb = NULL;
 static void *s_mqtt_proxy_event_user_ctx = NULL;
+
+extern esp_err_t mqtt_message_task_submit(const char *topic,
+                                          const uint8_t *data,
+                                          size_t len) __attribute__((weak));
 
 // MQTT 事件处理函数
 static void mqtt_event_handler(void *handler_args,
@@ -27,8 +36,17 @@ static void mqtt_event_handler(void *handler_args,
         {
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
-        // 订阅主题（如果需要）
-        // esp_mqtt_client_subscribe(g_mqtt_client, "/device/command", 0);
+        char sub_topic[64];
+        snprintf(sub_topic, sizeof(sub_topic), "sentinel/down/%u", (unsigned)SN);
+        int sub_msg_id = esp_mqtt_client_subscribe(g_mqtt_client, sub_topic, 1);
+        if (sub_msg_id < 0)
+        {
+            LOG_WARNF("MQTT subscribe failed: topic=%s", sub_topic);
+        }
+        else
+        {
+            LOG_INFOF("MQTT subscribing: topic=%s msg_id=%d", sub_topic, sub_msg_id);
+        }
         break;
 
     case MQTT_EVENT_DISCONNECTED:
@@ -58,6 +76,25 @@ static void mqtt_event_handler(void *handler_args,
         LOG_INFOF("MQTT data received: topic=%.*s, data=%.*s",
                   event->topic_len, event->topic,
                   event->data_len, event->data);
+        if (mqtt_message_task_submit != NULL && event != NULL && event->data != NULL)
+        {
+            char topic[128] = {0};
+            size_t topic_len = event->topic_len < (int)(sizeof(topic) - 1)
+                                   ? (size_t)event->topic_len
+                                   : sizeof(topic) - 1;
+            if (event->topic != NULL && topic_len > 0)
+            {
+                memcpy(topic, event->topic, topic_len);
+            }
+
+            esp_err_t submit_err = mqtt_message_task_submit(topic,
+                                                            (const uint8_t *)event->data,
+                                                            (size_t)event->data_len);
+            if (submit_err != ESP_OK)
+            {
+                LOG_WARNF("Failed to submit MQTT message: %s", esp_err_to_name(submit_err));
+            }
+        }
         break;
 
     case MQTT_EVENT_ERROR:

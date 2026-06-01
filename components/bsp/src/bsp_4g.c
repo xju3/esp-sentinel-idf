@@ -1,5 +1,7 @@
 #include "bsp_4g.h"
 #include "bsp_board.h"
+#include "board_config.h"
+#include "config_manager.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -44,6 +46,9 @@
 #define MODEM_ATTACH_TIMEOUT_MS 30000
 #define MODEM_PDP_TIMEOUT_MS 30000
 #define MODEM_SHUTDOWN_TIMEOUT_MS 65000
+#define MODEM_MQTT_OPEN_TIMEOUT_MS 30000
+#define MODEM_MQTT_CONNECT_TIMEOUT_MS 30000
+#define MODEM_MQTT_PUBLISH_TIMEOUT_MS 30000
 #define MODEM_REG_POLL_MS 200
 #define MODEM_SYNC_AT_CMD "AT"
 #define PPP_IP_INFO_TIMEOUT_MS 3000
@@ -62,6 +67,8 @@ static volatile bool s_ppp_rx_task_running = false;
 static bool s_ppp_session_started = false;
 static bool s_uart_driver_installed = false;
 static bool s_at_ready = false;
+static bool s_module_mqtt_connected = false;
+static char s_modem_response[MODEM_RESP_BUF_SIZE];
 
 #define PPP_GOT_IP_BIT BIT0
 #define PPP_FAILED_BIT BIT1
@@ -75,6 +82,9 @@ typedef enum {
     PPP_4G_DIAG_ATTACH_FAILED,
     PPP_4G_DIAG_PDP_FAILED,
     PPP_4G_DIAG_NO_IP,
+    PPP_4G_DIAG_MQTT_OPEN_FAILED,
+    PPP_4G_DIAG_MQTT_CONNECT_FAILED,
+    PPP_4G_DIAG_MQTT_PUBLISH_FAILED,
     PPP_4G_DIAG_PPP_DIAL_FAILED,
     PPP_4G_DIAG_PPP_CONNECT_FAILED,
     PPP_4G_DIAG_IO_ERROR,
@@ -86,6 +96,7 @@ typedef struct {
     uint32_t sim_ready_ms;
     uint32_t network_attach_ms;
     uint32_t pdp_active_ms;
+    uint32_t mqtt_ms;
     uint32_t ppp_ms;
     uint32_t total_ms;
 } ppp_4g_diag_timing_t;
@@ -97,7 +108,12 @@ typedef struct {
     bool registered;
     bool attached;
     bool pdp_active;
+    bool mqtt_opened;
+    bool mqtt_connected;
+    bool ppp_attempted;
     bool ppp_connected;
+    int mqtt_open_result;
+    int mqtt_conn_retcode;
     char ip_addr[48];
 } ppp_4g_diag_result_t;
 
@@ -109,6 +125,31 @@ static int64_t deadline_after_ms(uint32_t timeout_ms)
 static bool response_has_token(const char *response, const char *token)
 {
     return response != NULL && token != NULL && strstr(response, token) != NULL;
+}
+
+static bool response_find_pattern_offset(const char *response,
+                                         size_t response_len,
+                                         const char *pattern,
+                                         size_t *offset)
+{
+    if (response == NULL || pattern == NULL) {
+        return false;
+    }
+
+    size_t pattern_len = strlen(pattern);
+    if (pattern_len == 0 || response_len < pattern_len) {
+        return false;
+    }
+
+    for (size_t i = 0; i <= response_len - pattern_len; ++i) {
+        if (memcmp(response + i, pattern, pattern_len) == 0) {
+            if (offset != NULL) {
+                *offset = i;
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool modem_response_is_ok(const char *response)
@@ -152,6 +193,12 @@ static const char *ppp_4g_diag_code_to_str(ppp_4g_diag_code_t code)
         return "pdp_failed";
     case PPP_4G_DIAG_NO_IP:
         return "no_ip";
+    case PPP_4G_DIAG_MQTT_OPEN_FAILED:
+        return "mqtt_open_failed";
+    case PPP_4G_DIAG_MQTT_CONNECT_FAILED:
+        return "mqtt_connect_failed";
+    case PPP_4G_DIAG_MQTT_PUBLISH_FAILED:
+        return "mqtt_publish_failed";
     case PPP_4G_DIAG_PPP_DIAL_FAILED:
         return "ppp_dial_failed";
     case PPP_4G_DIAG_PPP_CONNECT_FAILED:
@@ -180,9 +227,17 @@ static void ppp_4g_log_result(const ppp_4g_diag_result_t *result)
              (unsigned long)result->timing.pdp_active_ms,
              result->pdp_active ? "true" : "false",
              result->ip_addr[0] != '\0' ? result->ip_addr : "none");
-    ESP_LOGI(TAG, "6. PPP          : %lu ms  (connected=%s)",
-             (unsigned long)result->timing.ppp_ms,
-             result->ppp_connected ? "true" : "false");
+    ESP_LOGI(TAG, "6. MQTT         : %lu ms  (opened=%s connected=%s open_result=%d retcode=%d)",
+             (unsigned long)result->timing.mqtt_ms,
+             result->mqtt_opened ? "true" : "false",
+             result->mqtt_connected ? "true" : "false",
+             result->mqtt_open_result,
+             result->mqtt_conn_retcode);
+    if (result->ppp_attempted) {
+        ESP_LOGI(TAG, "7. PPP          : %lu ms  (connected=%s)",
+                 (unsigned long)result->timing.ppp_ms,
+                 result->ppp_connected ? "true" : "false");
+    }
     ESP_LOGI(TAG, "---------------------------------------");
     ESP_LOGI(TAG, "Total Time      : %lu ms", (unsigned long)result->timing.total_ms);
     ESP_LOGI(TAG, "---------------------------------------");
@@ -223,6 +278,79 @@ static void modem_copy_cgpaddr_ip(const char *response, char *ip_addr, size_t ip
     }
     memcpy(ip_addr, start, len);
     ip_addr[len] = '\0';
+}
+
+static const char *modem_mqtt_host(void)
+{
+    const char *host = g_user_config.host;
+    if (host == NULL || host[0] == '\0') {
+        return BOARD_4G_MQTT_HOST;
+    }
+
+    const char *scheme = strstr(host, "://");
+    return scheme != NULL ? scheme + 3 : host;
+}
+
+static void modem_copy_mqtt_host(char *out, size_t out_size)
+{
+    if (out == NULL || out_size == 0) {
+        return;
+    }
+
+    const char *host = modem_mqtt_host();
+    size_t len = 0;
+    while (host[len] != '\0' && host[len] != ':' && host[len] != '/' && len + 1 < out_size) {
+        out[len] = host[len];
+        len++;
+    }
+    out[len] = '\0';
+}
+
+static const char *modem_mqtt_client_id(void)
+{
+    if (g_user_config.device_id[0] != '\0') {
+        return g_user_config.device_id;
+    }
+    return BOARD_4G_MQTT_CLIENT_ID;
+}
+
+static int modem_parse_qmtopen_result(const char *response)
+{
+    int connect_id = -1;
+    int result = -1;
+    const char *line = response != NULL ? strstr(response, "+QMTOPEN:") : NULL;
+    if (line != NULL && sscanf(line, "+QMTOPEN: %d,%d", &connect_id, &result) == 2) {
+        return result;
+    }
+    return -1;
+}
+
+static int modem_parse_qmtconn_retcode(const char *response)
+{
+    int connect_id = -1;
+    int result = -1;
+    int retcode = -1;
+    const char *line = response != NULL ? strstr(response, "+QMTCONN:") : NULL;
+    if (line != NULL && sscanf(line, "+QMTCONN: %d,%d,%d", &connect_id, &result, &retcode) == 3) {
+        return retcode;
+    }
+    return -1;
+}
+
+static int modem_parse_qmtpub_result(const char *response)
+{
+    int connect_id = -1;
+    int msg_id = -1;
+    int result = -1;
+    const char *line = response != NULL ? strstr(response, "+QMTPUBEX:") : NULL;
+    if (line != NULL && sscanf(line, "+QMTPUBEX: %d,%d,%d", &connect_id, &msg_id, &result) == 3) {
+        return result;
+    }
+    line = response != NULL ? strstr(response, "+QMTPUB:") : NULL;
+    if (line != NULL && sscanf(line, "+QMTPUB: %d,%d,%d", &connect_id, &msg_id, &result) == 3) {
+        return result;
+    }
+    return -1;
 }
 
 static esp_err_t modem_gpio_init(void)
@@ -443,7 +571,14 @@ static esp_err_t modem_read_until_pattern(char *response,
         used += copy_len;
         response[used] = '\0';
 
-        if (strstr(response, pattern) != NULL) {
+        size_t pattern_offset = 0;
+        if (response_find_pattern_offset(response, used, pattern, &pattern_offset)) {
+            if (pattern_offset > 0) {
+                size_t remaining = used - pattern_offset;
+                memmove(response, response + pattern_offset, remaining);
+                used = remaining;
+                response[used] = '\0';
+            }
             return ESP_OK;
         }
     }
@@ -562,16 +697,22 @@ static bool modem_pdp_active(char *response, size_t response_size)
 
 static esp_err_t modem_sync(void)
 {
-    char response[MODEM_RESP_BUF_SIZE];
+    char *response = s_modem_response;
     int64_t deadline = deadline_after_ms(MODEM_BOOT_TIMEOUT_MS);
     while (esp_timer_get_time() < deadline) {
-        esp_err_t err = modem_send_command(MODEM_SYNC_AT_CMD, response, sizeof(response), 200);
+        esp_err_t err = modem_send_command(MODEM_SYNC_AT_CMD, response, MODEM_RESP_BUF_SIZE, 200);
         if (err == ESP_OK && modem_response_is_ok(response)) {
             return ESP_OK;
         }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     return ESP_ERR_TIMEOUT;
+}
+
+static void modem_disable_echo(void)
+{
+    char *response = s_modem_response;
+    (void)modem_send_command("ATE0", response, MODEM_RESP_BUF_SIZE, 1000);
 }
 
 static esp_err_t modem_shutdown_gracefully(bool at_ready)
@@ -601,7 +742,7 @@ static esp_err_t modem_shutdown_gracefully(bool at_ready)
 
 static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
 {
-    char response[MODEM_RESP_BUF_SIZE];
+    char *response = s_modem_response;
     int64_t stage_start_us = esp_timer_get_time();
 
     esp_err_t err = modem_sync();
@@ -615,12 +756,13 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
         return err;
     }
     s_at_ready = true;
+    modem_disable_echo();
 
     stage_start_us = esp_timer_get_time();
     bool sim_ready = false;
     int64_t cpin_deadline = deadline_after_ms(MODEM_SIM_TIMEOUT_MS);
     while (esp_timer_get_time() < cpin_deadline) {
-        if (modem_send_command("AT+CPIN?", response, sizeof(response), 1000) == ESP_OK) {
+        if (modem_send_command("AT+CPIN?", response, MODEM_RESP_BUF_SIZE, 1000) == ESP_OK) {
             if (response_has_token(response, "+CPIN: READY")) {
                 sim_ready = true;
                 break;
@@ -642,15 +784,15 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
     }
 
     stage_start_us = esp_timer_get_time();
-    if (modem_send_command("AT+CFUN?", response, sizeof(response), 1000) != ESP_OK ||
+    if (modem_send_command("AT+CFUN?", response, MODEM_RESP_BUF_SIZE, 1000) != ESP_OK ||
         !response_has_token(response, "+CFUN: 1")) {
-        (void)modem_send_command("AT+CFUN=1", response, sizeof(response), 2000);
+        (void)modem_send_command("AT+CFUN=1", response, MODEM_RESP_BUF_SIZE, 2000);
     }
 
     bool registered = false;
     int64_t reg_deadline = deadline_after_ms(MODEM_REG_TIMEOUT_MS);
     while (esp_timer_get_time() < reg_deadline) {
-        if (modem_send_command("AT+CEREG?", response, sizeof(response), 1000) == ESP_OK) {
+        if (modem_send_command("AT+CEREG?", response, MODEM_RESP_BUF_SIZE, 1000) == ESP_OK) {
             if (modem_response_is_registered(response)) {
                 registered = true;
                 break;
@@ -671,8 +813,8 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
         result->registered = true;
     }
 
-    if (!modem_attached(response, sizeof(response))) {
-        err = modem_send_command("AT+CGATT=1", response, sizeof(response), MODEM_ATTACH_TIMEOUT_MS);
+    if (!modem_attached(response, MODEM_RESP_BUF_SIZE)) {
+        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE, MODEM_ATTACH_TIMEOUT_MS);
         if (err != ESP_OK || !modem_response_is_ok(response)) {
             if (result != NULL) {
                 result->timing.network_attach_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
@@ -687,8 +829,8 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
     }
 
     stage_start_us = esp_timer_get_time();
-    if (!modem_pdp_active(response, sizeof(response))) {
-        err = modem_send_command("AT+CGACT=1,1", response, sizeof(response), MODEM_PDP_TIMEOUT_MS);
+    if (!modem_pdp_active(response, MODEM_RESP_BUF_SIZE)) {
+        err = modem_send_command("AT+CGACT=1,1", response, MODEM_RESP_BUF_SIZE, MODEM_PDP_TIMEOUT_MS);
         if (err != ESP_OK || !modem_response_is_ok(response)) {
             if (result != NULL) {
                 result->timing.pdp_active_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
@@ -698,7 +840,7 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
         }
     }
 
-    err = modem_send_command("AT+CGPADDR=1", response, sizeof(response), 5000);
+    err = modem_send_command("AT+CGPADDR=1", response, MODEM_RESP_BUF_SIZE, 5000);
     if (result != NULL) {
         result->timing.pdp_active_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
     }
@@ -714,6 +856,164 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
     }
 
     ESP_LOGI(TAG, "4G packet service is ready; switching to PPP dial.");
+    return ESP_OK;
+}
+
+static esp_err_t modem_mqtt_open(char *response, size_t response_size)
+{
+    char host[96];
+    char cmd[160];
+    modem_copy_mqtt_host(host, sizeof(host));
+
+    int len = snprintf(cmd,
+                       sizeof(cmd),
+                       "AT+QMTOPEN=0,\"%s\",%d",
+                       host,
+                       BOARD_4G_MQTT_PORT);
+    if (len < 0 || (size_t)len >= sizeof(cmd)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_err_t err = modem_send_command(cmd, response, response_size, 10000);
+    if (err != ESP_OK || !modem_response_is_ok(response)) {
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+    if (response_has_token(response, "+QMTOPEN:")) {
+        return ESP_OK;
+    }
+    return modem_read_until_pattern(response, response_size, "+QMTOPEN:", MODEM_MQTT_OPEN_TIMEOUT_MS);
+}
+
+static esp_err_t modem_mqtt_connect(char *response, size_t response_size)
+{
+    char cmd[160];
+    int len = snprintf(cmd,
+                       sizeof(cmd),
+                       "AT+QMTCONN=0,\"%s\"",
+                       modem_mqtt_client_id());
+    if (len < 0 || (size_t)len >= sizeof(cmd)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_err_t err = modem_send_command(cmd, response, response_size, 10000);
+    if (err != ESP_OK || !modem_response_is_ok(response)) {
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+    if (response_has_token(response, "+QMTCONN:")) {
+        return ESP_OK;
+    }
+    return modem_read_until_pattern(response, response_size, "+QMTCONN:", MODEM_MQTT_CONNECT_TIMEOUT_MS);
+}
+
+static esp_err_t modem_mqtt_disconnect(char *response, size_t response_size)
+{
+    return modem_send_command("AT+QMTDISC=0", response, response_size, 5000);
+}
+
+static esp_err_t modem_mqtt_close(char *response, size_t response_size)
+{
+    return modem_send_command("AT+QMTCLOSE=0", response, response_size, 5000);
+}
+
+static esp_err_t modem_mqtt_connect_session(ppp_4g_diag_result_t *result)
+{
+    char *response = s_modem_response;
+    int64_t stage_start_us = esp_timer_get_time();
+
+    esp_err_t err = modem_mqtt_open(response, MODEM_RESP_BUF_SIZE);
+    if (result != NULL) {
+        result->timing.mqtt_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+        result->mqtt_open_result = modem_parse_qmtopen_result(response);
+    }
+    if (err != ESP_OK || modem_parse_qmtopen_result(response) != 0) {
+        if (result != NULL) {
+            result->code = PPP_4G_DIAG_MQTT_OPEN_FAILED;
+        }
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+    if (result != NULL) {
+        result->mqtt_opened = true;
+    }
+
+    err = modem_mqtt_connect(response, MODEM_RESP_BUF_SIZE);
+    if (result != NULL) {
+        result->timing.mqtt_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+        result->mqtt_conn_retcode = modem_parse_qmtconn_retcode(response);
+    }
+    if (err != ESP_OK || modem_parse_qmtconn_retcode(response) != 0) {
+        if (result != NULL) {
+            result->code = PPP_4G_DIAG_MQTT_CONNECT_FAILED;
+        }
+        return err != ESP_OK ? err : ESP_FAIL;
+    }
+
+    s_module_mqtt_connected = true;
+    if (result != NULL) {
+        result->mqtt_connected = true;
+        result->code = PPP_4G_DIAG_OK;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t modem_mqtt_publish_binary(const char *topic, const uint8_t *data, size_t len)
+{
+    if (topic == NULL || data == NULL || len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_module_mqtt_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char *response = s_modem_response;
+    char cmd[192];
+    int cmd_len = snprintf(cmd,
+                           sizeof(cmd),
+                           "AT+QMTPUBEX=0,1,1,0,\"%s\",%u",
+                           topic,
+                           (unsigned)len);
+    if (cmd_len < 0 || (size_t)cmd_len >= sizeof(cmd)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    (void)uart_flush_input(UART_PORT_NUM);
+    int written = uart_write_bytes(UART_PORT_NUM, cmd, (size_t)cmd_len);
+    if (written < 0) {
+        return ESP_FAIL;
+    }
+    written = uart_write_bytes(UART_PORT_NUM, "\r\n", 2);
+    if (written < 0) {
+        return ESP_FAIL;
+    }
+    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
+
+    esp_err_t err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, ">", 5000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "QMTPUBEX prompt failed: %s", response[0] != '\0' ? response : "(none)");
+        return err;
+    }
+
+    written = uart_write_bytes(UART_PORT_NUM, data, len);
+    if (written < 0 || (size_t)written != len) {
+        return ESP_FAIL;
+    }
+    static const uint8_t end_marker = 0x1A;
+    written = uart_write_bytes(UART_PORT_NUM, &end_marker, sizeof(end_marker));
+    if (written < 0) {
+        return ESP_FAIL;
+    }
+    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(5000));
+
+    err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "+QMTPUB", MODEM_MQTT_PUBLISH_TIMEOUT_MS);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "QMTPUBEX result wait failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    int pub_result = modem_parse_qmtpub_result(response);
+    if (pub_result != 0) {
+        ESP_LOGE(TAG, "QMTPUBEX failed result=%d", pub_result);
+        return ESP_FAIL;
+    }
     return ESP_OK;
 }
 
@@ -954,6 +1254,9 @@ static esp_err_t ppp_start_and_wait_ip(ppp_4g_diag_result_t *result)
 {
     char response_buffer[256];
     int64_t stage_start_us = esp_timer_get_time();
+    if (result != NULL) {
+        result->ppp_attempted = true;
+    }
 
     (void)uart_flush_input(UART_PORT_NUM);
     static const char dial_cmd[] = "ATD*99***1#\r\n";
@@ -1131,6 +1434,117 @@ cleanup:
     }
     ppp_cleanup_failed_init(power_enabled);
     return err;
+}
+
+esp_err_t init_4g_mqtt(cb_communication_channel_established cb)
+{
+    esp_err_t err = ESP_OK;
+    bool power_enabled = false;
+    bool report_logged = false;
+    ppp_4g_diag_result_t result = {
+        .code = PPP_4G_DIAG_IO_ERROR,
+    };
+    int64_t total_start_us = esp_timer_get_time();
+    int64_t stage_start_us = total_start_us;
+
+    if (s_module_mqtt_connected) {
+        if (cb != NULL) {
+            cb();
+        }
+        return ESP_OK;
+    }
+
+    err = modem_gpio_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "4G GPIO init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = modem_uart_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "4G UART init failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    (void)modem_release_low_active_line(MODEM_PWRKEY_PIN);
+    (void)gpio_set_level(MODEM_PWRKEY_PIN, 1);
+    (void)modem_power_disable();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    err = modem_power_enable();
+    result.timing.power_on_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+    if (err != ESP_OK) {
+        result.code = PPP_4G_DIAG_POWER_ON_FAILED;
+        ESP_LOGE(TAG, "4G power on failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+    power_enabled = true;
+
+    err = modem_pulse_low_active_line(MODEM_PWRKEY_PIN, MODEM_PULSE_PWRKEY_MS);
+    if (err != ESP_OK) {
+        result.code = PPP_4G_DIAG_POWER_ON_FAILED;
+        ESP_LOGE(TAG, "4G PWRKEY pulse failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = modem_prepare_packet_service(&result);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "4G packet service prepare failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = modem_mqtt_connect_session(&result);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "4G module MQTT connect failed: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    result.timing.total_ms = (uint32_t)((esp_timer_get_time() - total_start_us) / 1000LL);
+    ppp_4g_log_result(&result);
+    report_logged = true;
+
+    if (cb != NULL) {
+        cb();
+    }
+    return ESP_OK;
+
+cleanup:
+    if (!report_logged) {
+        result.timing.total_ms = (uint32_t)((esp_timer_get_time() - total_start_us) / 1000LL);
+        ppp_4g_log_result(&result);
+    }
+    if (power_enabled) {
+        char *response = s_modem_response;
+        if (s_module_mqtt_connected) {
+            (void)modem_mqtt_disconnect(response, MODEM_RESP_BUF_SIZE);
+            (void)modem_mqtt_close(response, MODEM_RESP_BUF_SIZE);
+            s_module_mqtt_connected = false;
+        }
+    }
+    ppp_cleanup_failed_init(power_enabled);
+    return err;
+}
+
+esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len)
+{
+    return modem_mqtt_publish_binary(topic, data, len);
+}
+
+esp_err_t shutdown_4g_mqtt(void)
+{
+    char *response = s_modem_response;
+
+    if (s_module_mqtt_connected) {
+        (void)modem_mqtt_disconnect(response, MODEM_RESP_BUF_SIZE);
+        (void)modem_mqtt_close(response, MODEM_RESP_BUF_SIZE);
+        s_module_mqtt_connected = false;
+    }
+
+    (void)modem_shutdown_gracefully(s_at_ready);
+    (void)modem_power_disable();
+    modem_uart_deinit();
+    s_at_ready = false;
+    return ESP_OK;
 }
 
 esp_err_t shutdown_ppp_4g(void)
