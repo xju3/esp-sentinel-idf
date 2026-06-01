@@ -38,13 +38,17 @@ struct  MsgPayload
    */
   uint32_t et;
   /*
+   * Unix时间戳 ms，varint ~6B
+   */
+  uint64_t ts;
+  /*
    * 对应 message 的序列化字节
    */
   ProtobufCBinaryData data;
 };
 #define MSG_PAYLOAD__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&msg_payload__descriptor) \
-, 0, 0, {0,NULL} }
+, 0, 0, 0, {0,NULL} }
 
 
 struct  MsgTriaxialValue
@@ -66,19 +70,27 @@ struct  MsgTriaxialValue
 struct  MsgRmsReport
 {
   ProtobufCMessage base;
-  MsgTriaxialValue *rms;
-  MsgTriaxialValue *peak;
-  MsgTriaxialValue *crest;
-  MsgTriaxialValue *impulse;
+  /*
+   * 设备序列号
+   */
+  uint32_t sn;
   float temperature;
   /*
    * iso标准
    */
   uint32_t iso;
+  float rms_x;
+  float rms_y;
+  float rms_z;
+  float rms_m;
+  float peak_x;
+  float peak_y;
+  float peak_z;
+  float peak_m;
 };
 #define MSG_RMS_REPORT__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&msg_rms_report__descriptor) \
-, NULL, NULL, NULL, NULL, 0, 0 }
+, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 
 
 struct  MsgMachineStatus

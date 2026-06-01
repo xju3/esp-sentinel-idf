@@ -86,35 +86,18 @@ static esp_err_t rms_report(vib_3axis_features_t *features,
     (void)sample_rate;
 
     MsgRmsReport msg_rms_report = MSG_RMS_REPORT__INIT;
-    MsgTriaxialValue rms = MSG_TRIAXIAL_VALUE__INIT;
-    MsgTriaxialValue peak = MSG_TRIAXIAL_VALUE__INIT;
-    MsgTriaxialValue crest = MSG_TRIAXIAL_VALUE__INIT;
 
-    rms.x = features->x_axis.rms;
-    rms.y = features->y_axis.rms;
-    rms.z = features->z_axis.rms;
-    rms.m = vib_3d_norm(features->x_axis.rms, features->y_axis.rms, features->z_axis.rms);
-    msg_rms_report.rms = &rms;
+    msg_rms_report.rms_x = features->x_axis.rms;
+    msg_rms_report.rms_y = features->y_axis.rms;
+    msg_rms_report.rms_z = features->z_axis.rms;
+    msg_rms_report.rms_m = vib_3d_norm(features->x_axis.rms, features->y_axis.rms, features->z_axis.rms);
 
-    peak.x = features->x_axis.peak;
-    peak.y = features->y_axis.peak;
-    peak.z = features->z_axis.peak;
-    peak.m = vib_3d_norm(features->x_axis.peak, features->y_axis.peak, features->z_axis.peak);
-    msg_rms_report.peak = &peak;
+    msg_rms_report.peak_x = features->x_axis.peak;
+    msg_rms_report.peak_y = features->y_axis.peak;
+    msg_rms_report.peak_z = features->z_axis.peak;
+    msg_rms_report.peak_m = vib_3d_norm(features->x_axis.peak, features->y_axis.peak, features->z_axis.peak);
 
-    crest.x = features->x_axis.crest_factor;
-    crest.y = features->y_axis.crest_factor;
-    crest.z = features->z_axis.crest_factor;
-    crest.m = vib_3d_norm(features->x_axis.crest_factor, features->y_axis.crest_factor, features->z_axis.crest_factor);
-    msg_rms_report.crest = &crest;
-
-    MsgTriaxialValue impulse = MSG_TRIAXIAL_VALUE__INIT;
-    impulse.x = features->x_axis.impulse_factor;
-    impulse.y = features->y_axis.impulse_factor;
-    impulse.z = features->z_axis.impulse_factor;
-    impulse.m = vib_3d_norm(features->x_axis.impulse_factor, features->y_axis.impulse_factor, features->z_axis.impulse_factor);
-    msg_rms_report.impulse = &impulse;
-    msg_rms_report.iso = (int8_t)status;
+    msg_rms_report.iso = (uint32_t)status;
     msg_rms_report.temperature = temperature;
 
     (void)mode;
@@ -266,8 +249,6 @@ static void rms_task_entry(void *arg)
                 LOG_INFOF("Vibration level is acceptable. Max: %.2f mm/s", max_v);
                 break;
             }
-
-            bool request_off_sleep = false;
 
             if (job.task_mode == TASK_MODE_PATROLING && g_fft_job_queue != NULL)
             {
