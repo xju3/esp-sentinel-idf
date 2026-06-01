@@ -16,7 +16,6 @@ extern "C" {
 /* Power and control */
 #define BOARD_GPIO_CHARGE_PWM      GPIO_NUM_1
 #define BOARD_GPIO_SENSOR_EN       GPIO_NUM_2
-#define BOARD_GPIO_4G_PWR_EN       GPIO_NUM_13
 #define BOARD_GPIO_LED             GPIO_NUM_40
 
 /* Analog monitoring */
@@ -40,9 +39,10 @@ extern "C" {
 #define BOARD_GPIO_IIS3DWB_INT2    GPIO_NUM_38
 
 /* 4G modem */
-#define BOARD_GPIO_4G_UART_RX      GPIO_NUM_18
-#define BOARD_GPIO_4G_UART_TX      GPIO_NUM_17
+#define BOARD_GPIO_4G_PWR          GPIO_NUM_13
 #define BOARD_GPIO_4G_PWRKEY       GPIO_NUM_14
+#define BOARD_GPIO_4G_UART_TX      GPIO_NUM_17
+#define BOARD_GPIO_4G_UART_RX      GPIO_NUM_18
 #define BOARD_GPIO_4G_STATUS       GPIO_NUM_21
 #define BOARD_GPIO_4G_NET_STATUS   GPIO_NUM_47
 #define BOARD_GPIO_4G_RESET_N      GPIO_NUM_48
