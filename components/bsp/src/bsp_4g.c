@@ -73,11 +73,20 @@ static void uart_drain_with_log(void)
 // 开机操作
 static void ppp_4g_power_on(void)
 {
+    // 先断开主电源
+    gpio_set_level(MODEM_PWRKEY_PIN, 1);
+    gpio_set_level(MODEM_PWR_EN_PIN, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 重新使能主电源
+    gpio_set_level(MODEM_PWR_EN_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 拉低 PWRKEY 进行开机脉冲 (600ms)
     gpio_set_level(MODEM_PWRKEY_PIN, 0);
-    vTaskDelay(pdMS_TO_TICKS(1200));
+    vTaskDelay(pdMS_TO_TICKS(600));
 
     gpio_set_level(MODEM_PWRKEY_PIN, 1);
-    vTaskDelay(pdMS_TO_TICKS(100));
 }
 
 // 发送 AT 命令
@@ -488,35 +497,22 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
     {
         if (PPP_VERBOSE) ESP_LOGI(TAG, "STATUS pin low, powering on module...");
         ppp_4g_power_on();
-        
-        // 使用 STATUS 引脚判断是否开机，最长等待 3 秒
-        for (int i = 0; i < 30; i++)
-        {
-            if (gpio_get_level(MODEM_STATUS_PIN) == 1)
-            {
-                module_on = true;
-                if (PPP_VERBOSE) ESP_LOGI(TAG, "STATUS pin high, module powered on.");
-                break;
-            }
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
     }
-
-    if (!module_on)
+    else
     {
-        ESP_LOGW(TAG, "STATUS pin still low, fallback to AT test...");
+        ESP_LOGI(TAG, "STATUS pin high, module already on.");
     }
 
-    // 快速 AT 同步，只要有回应就说明串口通了
+    // 快速 AT 同步，只要有回应就说明串口通了，最多等 15 秒
     bool at_sync = false;
-    for (int i = 0; i < 15; i++)
+    for (int i = 0; i < 75; i++)
     {
-        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 300) == ESP_OK)
+        if (send_at_command("AT", "OK", response_buffer, sizeof(response_buffer), 200) == ESP_OK)
         {
             at_sync = true;
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
     if (!at_sync)
@@ -530,16 +526,16 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
     // 关闭回显 (缩短超时)
     send_at_command("ATE0", "OK", response_buffer, sizeof(response_buffer), 500);
 
-    // 检查 SIM 卡，轮询等待，缩短单次延时，最多等3秒
+    // 检查 SIM 卡，最多等 10 秒
     bool sim_ready = false;
     for (int i = 0; i < 15; i++)
     {
-        if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer, sizeof(response_buffer), 300) == ESP_OK)
+        if (send_at_command("AT+CPIN?", "+CPIN: READY", response_buffer, sizeof(response_buffer), 1000) == ESP_OK)
         {
             sim_ready = true;
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
     if (!sim_ready)
@@ -549,28 +545,28 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         goto cleanup;
     }
 
-    // 快速下发必要配置 (忽略错误，以防因为基带忙导致全流程失败)
-    send_at_command("AT+CREG=1", "OK", response_buffer, sizeof(response_buffer), 500);
-    send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 500);
-
-    // 检查网络注册状态，快速轮询 (每次间隔500ms，总计约10秒)
-    bool registered_success = false;
-    for (int i = 0; i < 20; i++)
+    // 检查并开启全功能模式
+    if (send_at_command("AT+CFUN?", "+CFUN: 1", response_buffer, sizeof(response_buffer), 1000) != ESP_OK)
     {
-        if (send_at_command("AT+CREG?", "+CREG:", response_buffer, sizeof(response_buffer), 500) == ESP_OK)
+        send_at_command("AT+CFUN=1", "OK", response_buffer, sizeof(response_buffer), 2000);
+    }
+
+    // 检查网络注册状态 (AT+CEREG?)，最多等 60 秒
+    bool registered_success = false;
+    for (int i = 0; i < 60; i++)
+    {
+        if (send_at_command("AT+CEREG?", "OK", response_buffer, sizeof(response_buffer), 1000) == ESP_OK)
         {
-            int n = 0, stat = 0;
-            char *creg_start = strstr(response_buffer, "+CREG:");
-            if (creg_start != NULL && sscanf(creg_start, "+CREG: %d,%d", &n, &stat) == 2)
+            if (strstr(response_buffer, "+CEREG: 1") != NULL ||
+                strstr(response_buffer, "+CEREG: 5") != NULL ||
+                strstr(response_buffer, "+CEREG: 0,1") != NULL ||
+                strstr(response_buffer, "+CEREG: 0,5") != NULL)
             {
-                if (stat == 1 || stat == 5)
-                {
-                    registered_success = true;
-                    break;
-                }
+                registered_success = true;
+                break;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 
     if (!registered_success)
@@ -579,6 +575,20 @@ esp_err_t init_ppp_4g(cb_communication_channel_established cb)
         err = ESP_FAIL;
         goto cleanup;
     }
+
+    // 检查并附着网络 (AT+CGATT?)
+    if (send_at_command("AT+CGATT?", "+CGATT: 1", response_buffer, sizeof(response_buffer), 1000) != ESP_OK)
+    {
+        if (send_at_command("AT+CGATT=1", "OK", response_buffer, sizeof(response_buffer), 30000) != ESP_OK)
+        {
+            ESP_LOGW(TAG, "✗ Network attach failed");
+            err = ESP_FAIL;
+            goto cleanup;
+        }
+    }
+
+    // 快速下发必要配置 (忽略错误)
+    send_at_command("AT+CGDCONT=1,\"IP\",\"CMNET\"", "OK", response_buffer, sizeof(response_buffer), 500);
 
     // ============== Stage 8: 启动 PPP 拨号 ==============
     err = ppp_start_and_wait_ip();
@@ -612,9 +622,30 @@ esp_err_t shutdown_ppp_4g(void)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
-    // 可选：发送关机命令
+    // 发送优雅关机命令
     char response_buffer[128];
-    send_at_command("AT+CPOF", "OK", response_buffer, sizeof(response_buffer), 5000);
+    send_at_command("AT+QPOWD=1", "OK", response_buffer, sizeof(response_buffer), 1000);
+
+    // 检查 STATUS 引脚，最多等 65 秒
+    bool graceful_shutdown = false;
+    for (int i = 0; i < 650; i++)
+    {
+        if (gpio_get_level(MODEM_STATUS_PIN) == 0)
+        {
+            graceful_shutdown = true;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (!graceful_shutdown)
+    {
+        ESP_LOGW(TAG, "Forcing shutdown via PWRKEY...");
+        gpio_set_level(MODEM_PWRKEY_PIN, 0);
+        vTaskDelay(pdMS_TO_TICKS(700));
+        gpio_set_level(MODEM_PWRKEY_PIN, 1);
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
 
     // 关闭电源使能
     gpio_set_level(MODEM_PWR_EN_PIN, 0);

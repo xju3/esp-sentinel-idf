@@ -159,12 +159,12 @@ esp_err_t start_network_services()
     return establish_communication_channel();
 }
 
-void enable_config_service()
-{
-    wifi_init_softap();
-    esp_err_t ret = web_server_start();
-    if (ret != ESP_OK)
-    {
-        return;
-    }
-}
+// void enable_config_service()
+// {
+//     wifi_init_softap();
+//     esp_err_t ret = web_server_start();
+//     if (ret != ESP_OK)
+//     {
+//         return;
+//     }
+// }

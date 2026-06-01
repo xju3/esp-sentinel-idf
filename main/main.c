@@ -20,49 +20,13 @@ void app_main(void)
     init_nvs();
     init_machine_state();
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
-    const bool had_valid_config_on_boot = g_user_config.is_configured;
+    // const bool had_valid_config_on_boot = g_user_config.is_configured;
+    const bool had_valid_config_on_boot = true; // 开发阶段强制使用本地服务
 
-    startup_gate_reset();
-    startup_gate_set_waiting_for_config(true);
-    enable_config_service();
+    // startup_gate_reset();
+    // startup_gate_set_waiting_for_config(true);
+ 
 
-    bool ap_client_connected = startup_gate_wait_for_ap_client(
-        pdMS_TO_TICKS(CONFIG_SENTINEL_BOOT_AP_CONNECT_WINDOW_SEC * 1000U));
-    if (ap_client_connected)
-    {
-        LOG_INFOF("AP client connected during boot window, waiting up to %d seconds for configuration submission.",
-                  CONFIG_SENTINEL_BOOT_AP_CONFIG_WINDOW_SEC);
-
-        bool config_completed = startup_gate_wait_for_config_completed(
-            pdMS_TO_TICKS(CONFIG_SENTINEL_BOOT_AP_CONFIG_WINDOW_SEC * 1000U));
-        if (config_completed)
-        {
-            ESP_ERROR_CHECK(config_manager_load(&g_user_config));
-        }
-        else
-        {
-            LOG_INFO("Configuration window expired.");
-        }
-    }
-    else
-    {
-        LOG_INFO("No AP client connected during boot window.");
-    }
-
-    startup_gate_set_waiting_for_config(false);
-
-    if (!g_user_config.is_configured)
-    {
-        if (had_valid_config_on_boot)
-        {
-            LOG_WARN("Device configuration became invalid during boot gate, staying in configuration mode.");
-        }
-        else
-        {
-            LOG_INFO("Device is not configured, staying in configuration mode.");
-        }
-        return;
-    }
-
+    // 直接启动检测程序
     ESP_ERROR_CHECK(start_local_services());
 }

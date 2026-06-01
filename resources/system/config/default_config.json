@@ -9,22 +9,19 @@
         "y": "v",
         "z": "a"
     },
-    "deviceId": "TX01922-9",
     "deviceName": "TX01922-9",
     "deviceType": "",
     "motorType": 1,
     "rpm": 1480,
-    "months": 6,
     "battery": 19000,
     "host": "139.9.50.7",
     "patrol": 1,
     "diagnosis": 10,
-    "report": 6,
+    "report": 1,
     "network": 1,
-    "ble": true,
     "wifi": {
         "ssid": "CU_Up3k",
         "pass": "hen6n6c7"
     },
-    "configured": false
+    "configured": true
 }

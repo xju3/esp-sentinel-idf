@@ -268,9 +268,6 @@ static void rms_task_entry(void *arg)
             }
 
             bool request_off_sleep = false;
-#if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
-            request_off_sleep = should_request_off_sleep_mode(&job, &features);
-#endif
 
             if (job.task_mode == TASK_MODE_PATROLING && g_fft_job_queue != NULL)
             {
@@ -289,17 +286,6 @@ static void rms_task_entry(void *arg)
             }
             LOG_DEBUGF("Current temperature: %.2f °C", temp);
             rms_report(&features, status, job.task_mode, job.sample_rate, temp);
-
-#if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
-            if (request_off_sleep)
-            {
-                esp_err_t sleep_req_ret = off_sleep_manager_request_sleep();
-                if (sleep_req_ret != ESP_OK)
-                {
-                    LOG_ERRORF("Failed to request OFF sleep: %s", esp_err_to_name(sleep_req_ret));
-                }
-            }
-#endif
         }
     }
 }
