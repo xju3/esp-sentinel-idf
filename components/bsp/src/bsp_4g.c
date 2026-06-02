@@ -1260,6 +1260,7 @@ esp_err_t bsp_4g_http_get(const char *url, char **out_response)
                 }
             }
         } else {
+            ESP_LOGW(TAG, "HTTP GET failed: AT_err=%d, HTTP_status=%d, content_len=%d", qerr, qstatus, qlen);
             err = ESP_FAIL;
         }
     }
