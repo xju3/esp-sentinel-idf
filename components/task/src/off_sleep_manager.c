@@ -10,6 +10,7 @@
 #include "task_daq.h"
 #include "task_fft.h"
 #include "wom_lis2dh12.h"
+#include "mqtt_proxy.h" // 用于调用 mqtt_client_stop 关闭网络
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -86,6 +87,27 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
     }
 
     LOG_INFO("Dispatcher flush completed before OFF sleep.");
+
+    // [关键机制 1] 动态静默期: 500ms
+    // 确保上报数据后，云端刚好下发或积压的控制指令有足够时间通过空口和串口到达单片机
+    LOG_INFO("Waiting 500ms for incoming downlink messages...");
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // [关键机制 2] 锁的接力: 等待所有因为下发消息而触发的异步网络任务(如 HTTP/OTA)执行完毕
+    uint32_t wait_sec = 0;
+    // 考虑到 OTA 下载可能耗时较长，超时时间放宽至 10 分钟 (600秒)
+    while (system_wake_lock_count() > 0 && wait_sec < 600)
+    {
+        if (wait_sec == 0) {
+            LOG_INFO("Waiting for background downlink tasks to finish before shutting down...");
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        wait_sec++;
+    }
+
+    // 此时确认双向无业务，主动调用代理层接口优雅关闭网络(含 4G 断电退网)
+    LOG_INFO("Network idle. Shutting down transport...");
+    (void)mqtt_client_stop();
 
     ret = off_sleep_prepare_capture_path();
     if (ret != ESP_OK)

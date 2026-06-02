@@ -9,6 +9,14 @@
 #define SN 0
 #endif
 
+// Extern references for bsp_4g.c AT wrapper functions
+typedef void (*bsp_4g_urc_cb_t)(int event_type, const char *topic, const char *payload, size_t len);
+extern void bsp_4g_set_urc_cb(bsp_4g_urc_cb_t cb);
+extern esp_err_t init_4g_mqtt(void* cb);
+extern esp_err_t bsp_4g_mqtt_subscribe(const char *topic, int qos);
+extern esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len);
+extern esp_err_t shutdown_4g_mqtt(void);
+
 // 全局 MQTT 客户端句柄
 esp_mqtt_client_handle_t g_mqtt_client = NULL;
 static mqtt_proxy_event_cb_t s_mqtt_proxy_event_cb = NULL;
@@ -37,7 +45,8 @@ static void mqtt_event_handler(void *handler_args,
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
         char sub_topic[64];
-        snprintf(sub_topic, sizeof(sub_topic), "sentinel/task/%u", (unsigned)SN);
+        // 修复：添加前导斜杠，确保与云端一致
+        snprintf(sub_topic, sizeof(sub_topic), "/sentinel/task/%u", (unsigned)SN);
         int sub_msg_id = esp_mqtt_client_subscribe(g_mqtt_client, sub_topic, 1);
         if (sub_msg_id < 0)
         {
@@ -128,9 +137,58 @@ void mqtt_proxy_set_event_callback(mqtt_proxy_event_cb_t cb, void *user_ctx)
     s_mqtt_proxy_event_user_ctx = user_ctx;
 }
 
+// 处理来自 4G AT 后台任务抛出的 URC 事件
+static void mqtt_proxy_4g_urc_cb(int event_type, const char *topic, const char *payload, size_t len)
+{
+    if (event_type == 0) // 接收到下行数据
+    {
+        LOG_INFOF("4G MQTT URC received: topic=%s, payload=%.*s", topic, (int)len, payload);
+        if (mqtt_message_task_submit != NULL)
+        {
+            mqtt_message_task_submit(topic, (const uint8_t *)payload, len);
+        }
+    }
+    else if (event_type == 1) // 异常断开
+    {
+        LOG_WARN("4G MQTT connection lost");
+        if (s_mqtt_proxy_event_cb)
+        {
+            s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_DISCONNECTED, -1, s_mqtt_proxy_event_user_ctx);
+        }
+    }
+}
+
 // 初始化 MQTT 客户端
 esp_err_t init_mqtt_client(void)
 {
+    // 1. 如果走 4G 路线
+    if (g_user_config.network == 1)
+    {
+        LOG_INFO("Initializing 4G AT MQTT client...");
+        bsp_4g_set_urc_cb(mqtt_proxy_4g_urc_cb);
+        esp_err_t err = init_4g_mqtt(NULL);
+        if (err == ESP_OK)
+        {
+            if (s_mqtt_proxy_event_cb)
+                s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, -1, s_mqtt_proxy_event_user_ctx);
+
+            // 订阅云端任务主题
+            char sub_topic[64];
+            snprintf(sub_topic, sizeof(sub_topic), "/sentinel/task/%u", (unsigned)SN);
+            if (bsp_4g_mqtt_subscribe(sub_topic, 1) == ESP_OK)
+                LOG_INFOF("4G MQTT subscribed to: %s", sub_topic);
+            else
+                LOG_WARNF("4G MQTT failed to subscribe: %s", sub_topic);
+        }
+        else
+        {
+            if (s_mqtt_proxy_event_cb)
+                s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_ERROR, -1, s_mqtt_proxy_event_user_ctx);
+        }
+        return err;
+    }
+
+    // 2. 如果走 WiFi 路线
     if (g_mqtt_client != NULL)
     {
         LOG_WARN("MQTT client already initialized");
@@ -198,6 +256,11 @@ esp_err_t init_mqtt_client(void)
 // 停止 MQTT 客户端
 esp_err_t mqtt_client_stop(void)
 {
+    if (g_user_config.network == 1)
+    {
+        return shutdown_4g_mqtt();
+    }
+
     if (g_mqtt_client == NULL)
     {
         return ESP_OK;
@@ -221,4 +284,19 @@ esp_err_t mqtt_client_stop(void)
     g_mqtt_client = NULL;
     LOG_INFO("MQTT client stopped");
     return ESP_OK;
+}
+
+esp_err_t mqtt_proxy_publish(const char *topic, const uint8_t *data, size_t len, int qos, int retain)
+{
+    if (g_user_config.network == 1)
+    {
+        return bsp_4g_mqtt_publish(topic, data, len);
+    }
+    
+    if (g_mqtt_client)
+    {
+        int msg_id = esp_mqtt_client_publish(g_mqtt_client, topic, (const char *)data, len, qos, retain);
+        return msg_id >= 0 ? ESP_OK : ESP_FAIL;
+    }
+    return ESP_FAIL;
 }

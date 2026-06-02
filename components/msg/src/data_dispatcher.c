@@ -298,15 +298,16 @@ static void dispatcher_mqtt_event_handler(mqtt_proxy_event_t event, int32_t msg_
             break;
         default:
             break;
-    }
+   }
 }
 
 static esp_err_t dispatcher_request_transport(void)
 {
     if (g_user_config.network == 1)
     {
-        LOG_INFO("Dispatcher bringing up 4G transport before send");
-        return init_4g_mqtt(dispatcher_network_channel_established);
+        LOG_INFO("Dispatcher bringing up 4G transport via proxy");
+        // init_mqtt_client will call 4G internal logic and fire READY event synchronously
+        return init_mqtt_client();
     }
 
     LOG_INFO("Dispatcher bringing up WiFi STA transport before send");
@@ -318,15 +319,6 @@ static esp_err_t dispatcher_request_transport(void)
 static void dispatcher_shutdown_transport(void)
 {
     (void)mqtt_client_stop();
-
-    if (g_user_config.network == 1)
-    {
-        (void)shutdown_4g_mqtt();
-    }
-    else
-    {
-        (void)wifi_stop_sta();
-    }
 }
 
 static void dispatcher_finish_batch(bool success,
@@ -409,31 +401,16 @@ static bool dispatcher_publish_one(const dispatcher_persisted_msg_t *msg, int32_
         return false;
     }
 
-    if (g_user_config.network == 1)
-    {
-        esp_err_t err = bsp_4g_mqtt_publish("sentinel", msg->data, msg->len);
-        if (err != ESP_OK)
-        {
-            LOG_WARNF("4G module MQTT publish failed: %s", esp_err_to_name(err));
-            return false;
-        }
-        *out_msg_id = 0;
-        return true;
-    }
-
-    int msg_id = esp_mqtt_client_publish(g_mqtt_client,
-                                         "sentinel",
-                                         (const char *)msg->data,
-                                         msg->len,
-                                         1,
-                                         0);
-    if (msg_id == -1)
+    // 抹平底层差异，直接统一调用 mqtt_proxy
+    esp_err_t err = mqtt_proxy_publish("sentinel", msg->data, msg->len, 1, 0);
+    
+    if (err != ESP_OK)
     {
         LOG_WARN("MQTT publish request failed");
         return false;
     }
 
-    *out_msg_id = msg_id;
+    *out_msg_id = 0;
     return true;
 }
 

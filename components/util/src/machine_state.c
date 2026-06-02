@@ -11,6 +11,8 @@ static SemaphoreHandle_t g_machine_state_mutex;
 // Global mutex to ensure sequential execution of major tasks (diagnostics, state checks, etc.).
 static SemaphoreHandle_t g_system_task_mutex;
 
+// Atomic counter for background task wake locks
+static volatile uint32_t s_wake_lock_count = 0;
 
 void init_machine_state(void)
 {
@@ -68,4 +70,19 @@ void unlock_system_task(void)
     } else {
         LOG_DEBUG("System task mutex unlocked");
     }
+}
+
+void system_wake_lock_acquire(void)
+{
+    __atomic_add_fetch(&s_wake_lock_count, 1, __ATOMIC_SEQ_CST);
+}
+
+void system_wake_lock_release(void)
+{
+    __atomic_sub_fetch(&s_wake_lock_count, 1, __ATOMIC_SEQ_CST);
+}
+
+uint32_t system_wake_lock_count(void)
+{
+    return __atomic_load_n(&s_wake_lock_count, __ATOMIC_SEQ_CST);
 }

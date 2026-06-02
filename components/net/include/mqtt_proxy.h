@@ -36,6 +36,8 @@ extern esp_mqtt_client_handle_t g_mqtt_client;
  */
 esp_err_t init_mqtt_client(void);
 esp_err_t mqtt_client_stop(void);
+esp_err_t mqtt_proxy_publish(const char *topic, const uint8_t *data, size_t len, int qos, int retain);
+
 void mqtt_proxy_set_event_callback(mqtt_proxy_event_cb_t cb, void *user_ctx);
 
 #ifdef __cplusplus

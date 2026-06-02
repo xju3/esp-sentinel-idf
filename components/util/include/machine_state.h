@@ -45,4 +45,12 @@ void lock_system_task(void);
  */
 void unlock_system_task(void);
 
+/**
+ * @brief 异步任务唤醒锁机制
+ * 用于防止休眠管理器在后台网络任务（如 HTTP 下载、OTA）未完成时关闭电源
+ */
+void system_wake_lock_acquire(void);
+void system_wake_lock_release(void);
+uint32_t system_wake_lock_count(void);
+
 #endif // MACHINE_STATE_H
