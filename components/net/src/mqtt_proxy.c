@@ -2,9 +2,6 @@
 #include "mqtt_client.h"
 #include "config_manager.h"
 #include "logger.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -26,6 +23,9 @@ static void mqtt_event_handler(void *handler_args,
                                esp_event_base_t base, 
                                int32_t event_id, void *event_data)
 {
+    (void)handler_args;
+    (void)base;
+
     esp_mqtt_event_handle_t event = event_data;
 
     switch (event_id)

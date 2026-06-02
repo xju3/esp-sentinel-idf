@@ -23,6 +23,10 @@
 
 #define PPP_VERBOSE 0 // 设为 1 可开启调试日志
 
+#ifndef SN
+#define SN "0"
+#endif
+
 // ============== Board pin aliases ==============
 #define MODEM_UART_RX_PIN      BOARD_GPIO_4G_UART_RX
 #define MODEM_UART_TX_PIN      BOARD_GPIO_4G_UART_TX
@@ -304,14 +308,6 @@ static void modem_copy_mqtt_host(char *out, size_t out_size)
         len++;
     }
     out[len] = '\0';
-}
-
-static const char *modem_mqtt_client_id(void)
-{
-    if (g_user_config.device_id[0] != '\0') {
-        return g_user_config.device_id;
-    }
-    return BOARD_4G_MQTT_CLIENT_ID;
 }
 
 static int modem_parse_qmtopen_result(const char *response)
@@ -887,10 +883,7 @@ static esp_err_t modem_mqtt_open(char *response, size_t response_size)
 static esp_err_t modem_mqtt_connect(char *response, size_t response_size)
 {
     char cmd[160];
-    int len = snprintf(cmd,
-                       sizeof(cmd),
-                       "AT+QMTCONN=0,\"%s\"",
-                       modem_mqtt_client_id());
+    int len = snprintf(cmd, sizeof(cmd), "AT+QMTCONN=0,\"%s\"", SN);
     if (len < 0 || (size_t)len >= sizeof(cmd)) {
         return ESP_ERR_INVALID_SIZE;
     }
