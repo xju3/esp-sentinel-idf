@@ -19,7 +19,6 @@
 
 static void restart_task(void *arg)
 {
-    LOG_INFO("restarting...");
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
     vTaskDelete(NULL);

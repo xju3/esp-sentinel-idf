@@ -37,7 +37,7 @@ static void mqtt_event_handler(void *handler_args,
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
         char sub_topic[64];
-        snprintf(sub_topic, sizeof(sub_topic), "sentinel/config/%u", (unsigned)SN);
+        snprintf(sub_topic, sizeof(sub_topic), "sentinel/task/%u", (unsigned)SN);
         int sub_msg_id = esp_mqtt_client_subscribe(g_mqtt_client, sub_topic, 1);
         if (sub_msg_id < 0)
         {
@@ -165,7 +165,7 @@ esp_err_t init_mqtt_client(void)
     // 配置 MQTT 客户端
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = mqtt_uri,
-        .credentials.client_id = g_user_config.device_id,
+        .credentials.client_id = g_user_config.sn,
         .session.keepalive = 60,                 // 60秒心跳
         .network.disable_auto_reconnect = false, // 启用自动重连
         .network.reconnect_timeout_ms = 5000,    // 5秒重连间隔

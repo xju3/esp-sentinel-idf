@@ -4,16 +4,7 @@
         "category": 3,
         "foundation": 1
     },
-    "pos": {
-        "x": "h",
-        "y": "v",
-        "z": "a"
-    },
-    "deviceName": "TX01922-9",
-    "deviceType": "",
-    "motorType": 1,
     "rpm": 1480,
-    "battery": 19000,
     "host": "139.9.50.7",
     "patrol": 2,
     "diagnosis": 1440,
