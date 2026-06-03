@@ -13,7 +13,6 @@
 typedef void (*bsp_4g_urc_cb_t)(int event_type, const char *topic, const char *payload, size_t len);
 extern void bsp_4g_set_urc_cb(bsp_4g_urc_cb_t cb);
 extern esp_err_t init_4g_mqtt(void* cb);
-extern esp_err_t bsp_4g_mqtt_subscribe(const char *topic, int qos);
 extern esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len);
 extern esp_err_t shutdown_4g_mqtt(void);
 
@@ -21,10 +20,6 @@ extern esp_err_t shutdown_4g_mqtt(void);
 esp_mqtt_client_handle_t g_mqtt_client = NULL;
 static mqtt_proxy_event_cb_t s_mqtt_proxy_event_cb = NULL;
 static void *s_mqtt_proxy_event_user_ctx = NULL;
-
-extern esp_err_t mqtt_message_task_submit(const char *topic,
-                                          const uint8_t *data,
-                                          size_t len) __attribute__((weak));
 
 // MQTT 事件处理函数
 static void mqtt_event_handler(void *handler_args,
@@ -44,18 +39,6 @@ static void mqtt_event_handler(void *handler_args,
         {
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
-        char sub_topic[64];
-        // 修复：添加前导斜杠，确保与云端一致
-        snprintf(sub_topic, sizeof(sub_topic), "/sentinel/task/%u", (unsigned)SN);
-        int sub_msg_id = esp_mqtt_client_subscribe(g_mqtt_client, sub_topic, 1);
-        if (sub_msg_id < 0)
-        {
-            LOG_WARNF("MQTT subscribe failed: topic=%s", sub_topic);
-        }
-        else
-        {
-            LOG_INFOF("MQTT subscribing: topic=%s msg_id=%d", sub_topic, sub_msg_id);
-        }
         break;
 
     case MQTT_EVENT_DISCONNECTED:
@@ -66,43 +49,10 @@ static void mqtt_event_handler(void *handler_args,
         }
         break;
 
-    case MQTT_EVENT_SUBSCRIBED:
-        LOG_INFO("MQTT subscribed");
-        break;
-
-    case MQTT_EVENT_UNSUBSCRIBED:
-        LOG_INFO("MQTT unsubscribed");
-        break;
-
     case MQTT_EVENT_PUBLISHED:
         if (s_mqtt_proxy_event_cb)
         {
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_PUBLISHED, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
-        }
-        break;
-
-    case MQTT_EVENT_DATA:
-        LOG_INFOF("MQTT data received: topic=%.*s, data=%.*s",
-                  event->topic_len, event->topic,
-                  event->data_len, event->data);
-        if (mqtt_message_task_submit != NULL && event != NULL && event->data != NULL)
-        {
-            char topic[128] = {0};
-            size_t topic_len = event->topic_len < (int)(sizeof(topic) - 1)
-                                   ? (size_t)event->topic_len
-                                   : sizeof(topic) - 1;
-            if (event->topic != NULL && topic_len > 0)
-            {
-                memcpy(topic, event->topic, topic_len);
-            }
-
-            esp_err_t submit_err = mqtt_message_task_submit(topic,
-                                                            (const uint8_t *)event->data,
-                                                            (size_t)event->data_len);
-            if (submit_err != ESP_OK)
-            {
-                LOG_WARNF("Failed to submit MQTT message: %s", esp_err_to_name(submit_err));
-            }
         }
         break;
 
@@ -142,11 +92,7 @@ static void mqtt_proxy_4g_urc_cb(int event_type, const char *topic, const char *
 {
     if (event_type == 0) // 接收到下行数据
     {
-        LOG_INFOF("4G MQTT URC received: topic=%s, payload=%.*s", topic, (int)len, payload);
-        if (mqtt_message_task_submit != NULL)
-        {
-            mqtt_message_task_submit(topic, (const uint8_t *)payload, len);
-        }
+        // MQTT 下行订阅已弃用，统一改为 HTTP 主动拉取模式
     }
     else if (event_type == 1) // 异常断开
     {
@@ -171,14 +117,6 @@ esp_err_t init_mqtt_client(void)
         {
             if (s_mqtt_proxy_event_cb)
                 s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, -1, s_mqtt_proxy_event_user_ctx);
-
-            // 订阅云端任务主题
-            char sub_topic[64];
-            snprintf(sub_topic, sizeof(sub_topic), "/sentinel/task/%u", (unsigned)SN);
-            if (bsp_4g_mqtt_subscribe(sub_topic, 1) == ESP_OK)
-                LOG_INFOF("4G MQTT subscribed to: %s", sub_topic);
-            else
-                LOG_WARNF("4G MQTT failed to subscribe: %s", sub_topic);
         }
         else
         {

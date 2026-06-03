@@ -11,6 +11,8 @@ extern "C" {
 
 typedef esp_err_t (*mqtt_action_handler_t)(int action, const char *ts);
 
+void mqtt_message_process_pending_tasks(void);
+
 esp_err_t start_mqtt_message_task(void);
 esp_err_t mqtt_message_task_submit(const char *topic, const uint8_t *data, size_t len);
 void mqtt_message_task_register_action_handler(mqtt_action_handler_t handler);

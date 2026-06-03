@@ -7,6 +7,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
@@ -58,6 +59,14 @@ static bool s_module_mqtt_connected = false;
 static char s_modem_response[MODEM_RESP_BUF_SIZE];
 static volatile bool s_at_cmd_active = false;
 static TaskHandle_t s_urc_task_handle = NULL;
+static SemaphoreHandle_t s_at_mutex = NULL;
+
+static void ensure_at_mutex(void)
+{
+    if (s_at_mutex == NULL) {
+        s_at_mutex = xSemaphoreCreateMutex();
+    }
+}
 
 // URC Callback
 typedef void (*bsp_4g_urc_cb_t)(int event_type, const char *topic, const char *payload, size_t len);
@@ -965,21 +974,6 @@ static esp_err_t modem_mqtt_connect_session(ppp_4g_diag_result_t *result)
     return ESP_OK;
 }
 
-esp_err_t bsp_4g_mqtt_subscribe(const char *topic, int qos)
-{
-    if (topic == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    char *response = s_modem_response;
-    char cmd[128];
-    int len = snprintf(cmd, sizeof(cmd), "AT+QMTSUB=0,1,\"%s\",%d", topic, qos);
-    if (len < 0 || (size_t)len >= sizeof(cmd)) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    esp_err_t err = modem_send_command(cmd, response, MODEM_RESP_BUF_SIZE, 5000);
-    return (err == ESP_OK && modem_response_is_ok(response)) ? ESP_OK : ESP_FAIL;
-}
-
 static esp_err_t modem_mqtt_publish_binary(const char *topic, const uint8_t *data, size_t len)
 {
     if (topic == NULL || data == NULL || len == 0) {
@@ -1076,7 +1070,7 @@ static void modem_urc_task(void *arg)
     }
 }
 
-esp_err_t init_4g_mqtt(cb_communication_channel_established cb)
+static esp_err_t init_4g_mqtt_internal(cb_communication_channel_established cb)
 {
     esp_err_t err = ESP_OK;
     bool power_enabled = false;
@@ -1172,12 +1166,25 @@ cleanup:
     return err;
 }
 
-esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len)
+esp_err_t init_4g_mqtt(cb_communication_channel_established cb)
 {
-    return modem_mqtt_publish_binary(topic, data, len);
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = init_4g_mqtt_internal(cb);
+    xSemaphoreGive(s_at_mutex);
+    return err;
 }
 
-esp_err_t shutdown_4g_mqtt(void)
+esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = modem_mqtt_publish_binary(topic, data, len);
+    xSemaphoreGive(s_at_mutex);
+    return err;
+}
+
+static esp_err_t shutdown_4g_mqtt_internal(void)
 {
     char response[MODEM_RESP_BUF_SIZE];
     if (s_module_mqtt_connected) {
@@ -1192,7 +1199,16 @@ esp_err_t shutdown_4g_mqtt(void)
     return ESP_OK;
 }
 
-esp_err_t bsp_4g_http_get(const char *url, char **out_response)
+esp_err_t shutdown_4g_mqtt(void)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = shutdown_4g_mqtt_internal();
+    xSemaphoreGive(s_at_mutex);
+    return err;
+}
+
+static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
 {
     if (!url || !out_response) return ESP_ERR_INVALID_ARG;
     *out_response = NULL;
@@ -1266,5 +1282,14 @@ esp_err_t bsp_4g_http_get(const char *url, char **out_response)
     }
 
     s_at_cmd_active = false;
+    return err;
+}
+
+esp_err_t bsp_4g_http_get(const char *url, char **out_response)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = bsp_4g_http_get_internal(url, out_response);
+    xSemaphoreGive(s_at_mutex);
     return err;
 }
