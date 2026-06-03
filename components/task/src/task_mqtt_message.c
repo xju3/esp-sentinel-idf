@@ -8,6 +8,7 @@
 #include "esp_system.h"
 #include "mqtt_proxy.h" // 引入用于重启前关停网络的接口
 #include "task_ota.h"
+#include "http_proxy.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,9 +18,6 @@
 #ifndef SN
 #define SN 0
 #endif
-
-// 声明 http_proxy_get 接口 (将在之后的 http_proxy.h 中定义)
-extern esp_err_t http_proxy_get(const char *url, char **out_response);
 
 static void execute_config_update_sync(const char *task_id)
 {

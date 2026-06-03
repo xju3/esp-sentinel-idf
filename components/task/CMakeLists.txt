@@ -11,10 +11,12 @@ idf_component_register(
         "src/off_sleep_manager.c"
         "src/task_stash.c"
         "src/task_mqtt_message.c"
+        "src/task_ota.c"
+        "src/http_proxy.c"
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
-        esp-dsp driver bsp peri net util algo msg json)
+        esp-dsp driver bsp peri net util algo msg json esp_http_client)
 
 if(DEFINED DEVICE_ID)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_ID="${DEVICE_ID}")

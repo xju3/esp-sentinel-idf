@@ -1362,11 +1362,17 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
         uart_flush_input(UART_PORT_NUM);
         uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
         err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
-        if (err != ESP_OK) { if (++retry_count > 3) break; continue; }
+        if (err != ESP_OK) { 
+            if (++retry_count > 3) break; 
+            continue; 
+        }
         
         uart_write_bytes(UART_PORT_NUM, url, strlen(url));
         err = modem_read_response(response, sizeof(response), 5000);
-        if (err != ESP_OK || !modem_response_is_ok(response)) { if (++retry_count > 3) break; continue; }
+        if (err != ESP_OK || !modem_response_is_ok(response)) { 
+            if (++retry_count > 3) break; 
+            continue; 
+        }
 
         // 处理鉴权 Header
         char auth_header[128] = {0};
@@ -1386,13 +1392,19 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
         snprintf(cmd, sizeof(cmd), "AT+QHTTPGET=80,%d\r\n", req_len);
         uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
         err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
-        if (err != ESP_OK) { if (++retry_count > 3) break; continue; }
+        if (err != ESP_OK) { 
+            if (++retry_count > 3) break; 
+            continue; 
+        }
         
         uart_write_bytes(UART_PORT_NUM, req_header, req_len);
 
         // 等待 MinIO 响应 206 Partial Content (或者200)
         err = modem_read_until_pattern(response, sizeof(response), "+QHTTPGET:", 20000);
-        if (err != ESP_OK) { if (++retry_count > 3) break; continue; }
+        if (err != ESP_OK) { 
+            if (++retry_count > 3) break; 
+            continue; 
+        }
         
         int qerr=-1, qstatus=-1, qlen=0;
         char *line = strstr(response, "+QHTTPGET:");
@@ -1400,7 +1412,8 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
             if (qerr != 0 || (qstatus != 206 && qstatus != 200)) {
                 ESP_LOGE(TAG, "MinIO range req rejected: err=%d, status=%d", qerr, qstatus);
                 err = ESP_FAIL;
-                if (++retry_count > 3) break; continue;
+                if (++retry_count > 3) break; 
+                continue;
             }
         }
 
