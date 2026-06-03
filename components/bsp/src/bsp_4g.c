@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <sys/param.h>
 #include <stdbool.h>
+#include "esp_ota_ops.h"
 
 #ifndef SN
 #define SN "0"
@@ -1282,6 +1283,258 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
     }
 
     s_at_cmd_active = false;
+    return err;
+}
+
+// 流式安全读取直到 CONNECT\r\n（防止把固件二进制头部误吃掉）
+static esp_err_t wait_for_connect_stream_safe(uint32_t timeout_ms)
+{
+    const char *target = "CONNECT\r\n";
+    int match_idx = 0;
+    int target_len = strlen(target);
+    int64_t deadline = esp_timer_get_time() + timeout_ms * 1000LL;
+    
+    while(esp_timer_get_time() < deadline) {
+        uint8_t c;
+        int len = uart_read_bytes(UART_PORT_NUM, &c, 1, pdMS_TO_TICKS(10));
+        if (len > 0) {
+            if (c == target[match_idx]) {
+                match_idx++;
+                if (match_idx == target_len) return ESP_OK;
+            } else {
+                if (c == target[0]) match_idx = 1;
+                else match_idx = 0;
+            }
+        }
+    }
+    return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle)
+{
+    if (!url || fw_size <= 0) return ESP_ERR_INVALID_ARG;
+    if (!s_module_mqtt_connected) return ESP_ERR_INVALID_STATE;
+
+    // 解析出 host 和 path 用于手动构造 Header
+    const char *proto_end = strstr(url, "://");
+    const char *host_start = proto_end ? proto_end + 3 : url;
+    const char *path_start = strchr(host_start, '/');
+    char host[128] = {0};
+    char path[256] = {0};
+    
+    if (path_start) {
+        int host_len = path_start - host_start;
+        if (host_len > 127) host_len = 127;
+        strncpy(host, host_start, host_len);
+        strncpy(path, path_start, sizeof(path)-1);
+    } else {
+        strncpy(host, host_start, sizeof(host)-1);
+        strcpy(path, "/");
+    }
+
+    s_at_cmd_active = true;
+    char cmd[256];
+    char response[MODEM_RESP_BUF_SIZE];
+    esp_err_t err = ESP_OK;
+
+    // 1. 临时开启 AT+QHTTP 自定义 Header 能力
+    modem_send_command("AT+QHTTPCFG=\"requestheader\",1", response, sizeof(response), 2000);
+
+    char *ota_buf = malloc(4096);
+    if (!ota_buf) {
+        s_at_cmd_active = false;
+        return ESP_ERR_NO_MEM;
+    }
+
+    int offset = 0;
+    int chunk_size = 4096;
+    int retry_count = 0;
+
+    ESP_LOGI(TAG, "Starting 4G Chunked OTA from MinIO: %s", host);
+
+    while (offset < fw_size) {
+        int end = offset + chunk_size - 1;
+        if (end >= fw_size) end = fw_size - 1;
+        int expect_len = end - offset + 1;
+
+        // 设置目标 URL
+        snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", (int)strlen(url));
+        uart_flush_input(UART_PORT_NUM);
+        uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
+        err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
+        if (err != ESP_OK) { if (++retry_count > 3) break; continue; }
+        
+        uart_write_bytes(UART_PORT_NUM, url, strlen(url));
+        err = modem_read_response(response, sizeof(response), 5000);
+        if (err != ESP_OK || !modem_response_is_ok(response)) { if (++retry_count > 3) break; continue; }
+
+        // 处理鉴权 Header
+        char auth_header[128] = {0};
+        if (access_key && access_key[0] != '\0') {
+            snprintf(auth_header, sizeof(auth_header), "Authorization: %s\r\n", access_key);
+        }
+
+        // 构造含有 Range 的 HTTP GET 请求头
+        char req_header[512];
+        int req_len = snprintf(req_header, sizeof(req_header),
+            "GET %s HTTP/1.1\r\n"
+            "Host: %s\r\n"
+            "%s"
+            "Range: bytes=%d-%d\r\n"
+            "Connection: keep-alive\r\n\r\n", path, host, auth_header, offset, end);
+
+        snprintf(cmd, sizeof(cmd), "AT+QHTTPGET=80,%d\r\n", req_len);
+        uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
+        err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
+        if (err != ESP_OK) { if (++retry_count > 3) break; continue; }
+        
+        uart_write_bytes(UART_PORT_NUM, req_header, req_len);
+
+        // 等待 MinIO 响应 206 Partial Content (或者200)
+        err = modem_read_until_pattern(response, sizeof(response), "+QHTTPGET:", 20000);
+        if (err != ESP_OK) { if (++retry_count > 3) break; continue; }
+        
+        int qerr=-1, qstatus=-1, qlen=0;
+        char *line = strstr(response, "+QHTTPGET:");
+        if (line && sscanf(line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) >= 2) {
+            if (qerr != 0 || (qstatus != 206 && qstatus != 200)) {
+                ESP_LOGE(TAG, "MinIO range req rejected: err=%d, status=%d", qerr, qstatus);
+                err = ESP_FAIL;
+                if (++retry_count > 3) break; continue;
+            }
+        }
+
+        // 准备读取本块二进制数据
+        uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
+        err = wait_for_connect_stream_safe(5000);
+        if (err == ESP_OK) {
+            int received = 0;
+            int64_t start_us = esp_timer_get_time();
+            while (received < expect_len) {
+                int r = uart_read_bytes(UART_PORT_NUM, ota_buf + received, expect_len - received, pdMS_TO_TICKS(100));
+                if (r > 0) received += r;
+                if ((esp_timer_get_time() - start_us) > 15000000) {
+                    err = ESP_ERR_TIMEOUT;
+                    break;
+                }
+            }
+            if (received == expect_len) {
+                // ★ 极其关键的一步：边读边写进入 Flash
+                if (esp_ota_write(update_handle, ota_buf, expect_len) != ESP_OK) {
+                    ESP_LOGE(TAG, "OTA Write to Flash failed");
+                    err = ESP_FAIL;
+                    break;
+                }
+                offset += expect_len;
+                retry_count = 0;
+                ESP_LOGI(TAG, "OTA Progress: %d / %d bytes (%.1f%%)", offset, fw_size, (float)offset*100.0/fw_size);
+                
+                // 清除剩余的 OK 回复
+                modem_read_response(response, sizeof(response), 2000);
+            } else {
+                err = ESP_FAIL;
+                if (++retry_count > 3) break;
+            }
+        } else {
+            if (++retry_count > 3) break;
+        }
+    }
+
+    free(ota_buf);
+    // 恢复标准 Header 设置，以免影响后续的其他普通网络请求
+    modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, sizeof(response), 2000);
+    s_at_cmd_active = false;
+
+    return (offset >= fw_size) ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
+{
+    if (!url || !payload) return ESP_ERR_INVALID_ARG;
+    if (!s_module_mqtt_connected) return ESP_ERR_INVALID_STATE;
+
+    // 同样由于 QHTTP 默认是 POST，要实现真正的 PUT，需自己手写 Header
+    const char *proto_end = strstr(url, "://");
+    const char *host_start = proto_end ? proto_end + 3 : url;
+    const char *path_start = strchr(host_start, '/');
+    char host[128] = {0};
+    char path[256] = {0};
+    
+    if (path_start) {
+        int host_len = path_start - host_start;
+        if (host_len > 127) host_len = 127;
+        strncpy(host, host_start, host_len);
+        strncpy(path, path_start, sizeof(path)-1);
+    } else {
+        strncpy(host, host_start, sizeof(host)-1);
+        strcpy(path, "/");
+    }
+
+    s_at_cmd_active = true;
+    char cmd[256];
+    char response[MODEM_RESP_BUF_SIZE];
+    esp_err_t err = ESP_OK;
+
+    modem_send_command("AT+QHTTPCFG=\"requestheader\",1", response, sizeof(response), 2000);
+
+    snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", (int)strlen(url));
+    uart_flush_input(UART_PORT_NUM);
+    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
+    if (modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000) == ESP_OK) {
+        uart_write_bytes(UART_PORT_NUM, url, strlen(url));
+        modem_read_response(response, sizeof(response), 5000);
+    }
+
+    int payload_len = strlen(payload);
+    char req_header[512];
+    int req_len = snprintf(req_header, sizeof(req_header),
+        "PUT %s HTTP/1.1\r\n"
+        "Host: %s\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: %d\r\n"
+        "Connection: close\r\n\r\n", path, host, payload_len);
+
+    int total_len = req_len + payload_len;
+    snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=80,%d,80\r\n", total_len);
+    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
+
+    if (modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000) == ESP_OK) {
+        uart_write_bytes(UART_PORT_NUM, req_header, req_len);
+        uart_write_bytes(UART_PORT_NUM, payload, payload_len);
+
+        err = modem_read_until_pattern(response, sizeof(response), "+QHTTPPOST:", 15000);
+        if (err == ESP_OK) {
+            int qerr=-1, qstatus=-1;
+            char *line = strstr(response, "+QHTTPPOST:");
+            if (line && sscanf(line, "+QHTTPPOST: %d,%d", &qerr, &qstatus) >= 2) {
+                if (qerr == 0 && (qstatus >= 200 && qstatus < 300)) err = ESP_OK;
+                else err = ESP_FAIL;
+            } else { err = ESP_FAIL; }
+        }
+    } else {
+        err = ESP_FAIL;
+    }
+
+    modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, sizeof(response), 2000);
+    s_at_cmd_active = false;
+    return err;
+}
+
+esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = bsp_4g_ota_download_and_write_internal(url, fw_size, access_key, update_handle);
+    xSemaphoreGive(s_at_mutex);
+    return err;
+}
+
+esp_err_t bsp_4g_http_put(const char *url, const char *payload)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = bsp_4g_http_put_internal(url, payload);
+    xSemaphoreGive(s_at_mutex);
     return err;
 }
 

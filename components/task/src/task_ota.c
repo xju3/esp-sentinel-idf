@@ -14,6 +14,10 @@
 #include "freertos/task.h"
 #include <string.h>
 
+// 引入 bsp_4g 中为 OTA 扩展的接口
+extern esp_err_t bsp_4g_http_put(const char *url, const char *payload);
+extern esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle);
+
 // 最长等待采样及计算队列排空的超时时间
 #define OTA_DRAIN_TIMEOUT_MS 30000
 
@@ -29,8 +33,12 @@ static void report_ota_result(const char *task_id, int result_code)
     LOG_INFOF("Reporting OTA result %d to %s", result_code, url);
 
     if (g_user_config.network == 1) {
-        LOG_WARN("4G HTTP PUT for OTA result is pending implementation in bsp_4g.c");
-        // TODO: 需要在 4G 底层添加 bsp_4g_http_put(url, payload) 进行发送
+        esp_err_t err = bsp_4g_http_put(url, payload);
+        if (err == ESP_OK) {
+            LOG_INFO("4G HTTP PUT result reported successfully.");
+        } else {
+            LOG_ERROR("4G HTTP PUT result report failed.");
+        }
     } else {
         esp_http_client_config_t config = {
             .url = url,
@@ -113,6 +121,7 @@ void execute_ota_update_sync(const char *task_id)
 
     cJSON *size_item = cJSON_GetObjectItem(root, "size");
     cJSON *path_item = cJSON_GetObjectItem(root, "path");
+    cJSON *key_item = cJSON_GetObjectItem(root, "access_key");
 
     if (!cJSON_IsNumber(size_item) || !cJSON_IsString(path_item)) {
         LOG_ERROR("Invalid OTA info format (missing size or path).");
@@ -125,6 +134,7 @@ void execute_ota_update_sync(const char *task_id)
 
     int fw_size = size_item->valueint;
     const char *fw_url = path_item->valuestring;
+    const char *access_key = cJSON_IsString(key_item) ? key_item->valuestring : "";
     LOG_INFOF("OTA Firmware Info: size=%d, url=%s", fw_size, fw_url);
 
     // 5. 执行下载与写分区
@@ -132,9 +142,26 @@ void execute_ota_update_sync(const char *task_id)
     
     if (g_user_config.network == 1) {
         // 4G 模式
-        LOG_ERROR("4G OTA chunked download is pending implementation.");
-        // TODO: 需要在 bsp_4g 中实现基于 UFS 文件系统的分块读写接口，然后在这里调用。
-        ota_err = ESP_FAIL; 
+        LOG_INFO("Starting OTA chunked download via 4G AT Mode...");
+        const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+        if (update_partition) {
+            LOG_INFOF("Writing to partition subtype %d at offset 0x%lx", update_partition->subtype, update_partition->address);
+            esp_ota_handle_t update_handle = 0;
+            
+            if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle) == ESP_OK) {
+                if (bsp_4g_ota_download_and_write(fw_url, fw_size, access_key, update_handle) == ESP_OK) {
+                    if (esp_ota_end(update_handle) == ESP_OK) {
+                        if (esp_ota_set_boot_partition(update_partition) == ESP_OK) {
+                            ota_err = ESP_OK;
+                            LOG_INFO("OTA Success! Boot partition configured.");
+                        }
+                    }
+                } else {
+                    LOG_ERROR("4G OTA Download aborted due to error.");
+                    esp_ota_abort(update_handle);
+                }
+            }
+        }
     } else {
         // WiFi 模式 (使用原生 esp_https_ota 会吃大内存，这里手写分块写入防 OOM)
         LOG_INFO("Starting OTA download via WiFi...");
@@ -146,6 +173,11 @@ void execute_ota_update_sync(const char *task_id)
         esp_http_client_handle_t client = esp_http_client_init(&config);
         
         if (client) {
+            // 设置授权 Header，必须在 esp_http_client_open 之前设置
+            if (access_key && access_key[0] != '\0') {
+                esp_http_client_set_header(client, "Authorization", access_key);
+            }
+            
             if (esp_http_client_open(client, 0) == ESP_OK) {
                 esp_http_client_fetch_headers(client);
                 
