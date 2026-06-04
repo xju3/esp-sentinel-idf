@@ -17,12 +17,12 @@ esp_err_t http_proxy_get(const char *url, char **out_response)
 
     // --- 1. 如果是 4G 模式 ---
     if (g_user_config.network == 1) {
-        LOG_INFO("HTTP GET routing via 4G AT Mode...");
+        // LOG_INFO("HTTP GET routing via 4G AT Mode...");
         return bsp_4g_http_get(url, out_response);
     }
 
     // --- 2. 如果是 WiFi 模式 ---
-    LOG_INFO("HTTP GET routing via WiFi LwIP...");
+    // LOG_INFO("HTTP GET routing via WiFi LwIP...");
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_GET,
