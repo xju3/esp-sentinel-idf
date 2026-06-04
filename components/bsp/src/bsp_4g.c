@@ -52,6 +52,7 @@
 #define MODEM_MQTT_PUBLISH_TIMEOUT_MS 30000
 #define MODEM_REG_POLL_MS 200
 #define MODEM_SYNC_AT_CMD "AT"
+#define MODEM_HTTP_RESP_BUF_SIZE 4096
 
 static const char *TAG = "ppp_4g";
 
@@ -1400,14 +1401,34 @@ esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len
     return err;
 }
 
-static esp_err_t shutdown_4g_mqtt_internal(void)
+static esp_err_t bsp_4g_mqtt_disconnect_internal(void)
 {
     char response[MODEM_RESP_BUF_SIZE];
+    if (!s_module_mqtt_connected)
+    {
+        return ESP_OK;
+    }
+
+    esp_err_t err = modem_mqtt_disconnect(response, sizeof(response));
+    (void)modem_mqtt_close(response, sizeof(response));
+    s_module_mqtt_connected = false;
+    return err;
+}
+
+esp_err_t bsp_4g_mqtt_disconnect(void)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = bsp_4g_mqtt_disconnect_internal();
+    xSemaphoreGive(s_at_mutex);
+    return err;
+}
+
+static esp_err_t shutdown_4g_mqtt_internal(void)
+{
     if (s_module_mqtt_connected)
     {
-        (void)modem_mqtt_disconnect(response, sizeof(response));
-        (void)modem_mqtt_close(response, sizeof(response));
-        s_module_mqtt_connected = false;
+        (void)bsp_4g_mqtt_disconnect_internal();
     }
     (void)modem_shutdown_gracefully(s_at_ready);
     (void)modem_power_disable();
@@ -1422,104 +1443,6 @@ esp_err_t shutdown_4g_mqtt(void)
     xSemaphoreTake(s_at_mutex, portMAX_DELAY);
     esp_err_t err = shutdown_4g_mqtt_internal();
     xSemaphoreGive(s_at_mutex);
-    return err;
-}
-
-static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
-{
-    if (!url || !out_response)
-        return ESP_ERR_INVALID_ARG;
-    *out_response = NULL;
-    if (!s_module_mqtt_connected)
-        return ESP_ERR_INVALID_STATE;
-
-    char cmd[128];
-    char *response = calloc(1, 4096);
-    if (!response)
-        return ESP_ERR_NO_MEM;
-    int url_len = strlen(url);
-
-    // 互斥锁定：防止 URC 监听任务在此期间抢夺串口数据
-    s_at_cmd_active = true;
-
-    // 1. 设置 URL 长度
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", url_len);
-    uart_flush_input(UART_PORT_NUM);
-    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-    esp_err_t err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 2000);
-    ESP_LOGI("HTTP_DBG", "Step1 err=%d response=[%s]", err, response); // ← 加这行
-    if (err != ESP_OK)
-    {
-        s_at_cmd_active = false;
-        return err;
-    }
-
-    // 2. 发送实际 URL
-    uart_write_bytes(UART_PORT_NUM, url, url_len);
-    err = modem_read_response(response, sizeof(response), 2000);
-    ESP_LOGI("HTTP_DBG", "Step2 err=%d is_ok=%d response=[%s]", // ← 加这行
-         err, modem_response_is_ok(response), response);
-    if (err != ESP_OK || !modem_response_is_ok(response))
-    {
-        s_at_cmd_active = false;
-        return ESP_FAIL;
-    }
-
-    // 3. 触发模块发起底层 HTTP GET 请求
-    uart_write_bytes(UART_PORT_NUM, "AT+QHTTPGET=80\r\n", 16);
-    // 请求可能耗时很长，给 40 秒超时
-    err = modem_read_until_pattern(response, sizeof(response), "+QHTTPGET:", 40000);
-    if (err != ESP_OK)
-    {
-        s_at_cmd_active = false;
-        return err;
-    }
-
-    // 解析 QHTTPGET: err, status, len
-    int qerr = -1, qstatus = -1, qlen = 0;
-    const char *httpget_line = strstr(response, "+QHTTPGET:");
-    if (httpget_line && sscanf(httpget_line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) == 3)
-    {
-        if (qerr == 0 && qstatus == 200 && qlen > 0)
-        {
-            // 4. 从模块内部提取 JSON 数据
-            uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
-            err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
-            if (err == ESP_OK)
-            {
-                char *body = calloc(1, qlen + 1);
-                int received = 0;
-                int64_t start_us = esp_timer_get_time();
-                while (body && received < qlen)
-                {
-                    int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
-                    if (r > 0)
-                        received += r;
-                    if ((esp_timer_get_time() - start_us) > 15000000)
-                        break; // 防止死等，15秒超时
-                }
-                if (received == qlen)
-                {
-                    *out_response = body;
-                    // 读取完毕后模块通常还会吐出 OK 和 +QHTTPREAD:0，这里主动读取清空
-                    modem_read_response(response, sizeof(response), 3000);
-                    err = ESP_OK;
-                }
-                else
-                {
-                    free(body);
-                    err = ESP_FAIL;
-                }
-            }
-        }
-        else
-        {
-            ESP_LOGW(TAG, "HTTP GET failed: AT_err=%d, HTTP_status=%d, content_len=%d", qerr, qstatus, qlen);
-            err = ESP_FAIL;
-        }
-    }
-    free(response);
-    s_at_cmd_active = false;
     return err;
 }
 
@@ -1555,11 +1478,153 @@ static esp_err_t wait_for_connect_stream_safe(uint32_t timeout_ms)
     return ESP_ERR_TIMEOUT;
 }
 
+static void append_uart_response_until_line_end(char *response, size_t response_size, uint32_t timeout_ms)
+{
+    if (response == NULL || response_size == 0)
+        return;
+
+    int64_t deadline = deadline_after_ms(timeout_ms);
+    while (esp_timer_get_time() < deadline)
+    {
+        size_t used = strlen(response);
+        if (used > 0 && response[used - 1] == '\n')
+            return;
+        if (used >= response_size - 1)
+            return;
+
+        int read_len = uart_read_bytes(UART_PORT_NUM,
+                                       response + used,
+                                       response_size - used - 1,
+                                       pdMS_TO_TICKS(20));
+        if (read_len > 0)
+        {
+            response[used + read_len] = '\0';
+        }
+    }
+}
+
+static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
+{
+    if (!url || !out_response)
+        return ESP_ERR_INVALID_ARG;
+    *out_response = NULL;
+    if (!s_at_ready)
+        return ESP_ERR_INVALID_STATE;
+
+    char cmd[128];
+    char *response = calloc(1, MODEM_HTTP_RESP_BUF_SIZE);
+    if (!response)
+        return ESP_ERR_NO_MEM;
+    int url_len = strlen(url);
+    esp_err_t err = ESP_OK;
+
+    err = modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+    if (err != ESP_OK || !modem_response_is_ok(response))
+    {
+        err = err != ESP_OK ? err : ESP_FAIL;
+        goto cleanup;
+    }
+
+    err = modem_send_command("AT+QHTTPCFG=\"responseheader\",0", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+    if (err != ESP_OK || !modem_response_is_ok(response))
+    {
+        err = err != ESP_OK ? err : ESP_FAIL;
+        goto cleanup;
+    }
+
+    // 互斥锁定：防止 URC 监听任务在此期间抢夺串口数据
+    s_at_cmd_active = true;
+
+    // 1. 设置 URL 长度
+    snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", url_len);
+    uart_flush_input(UART_PORT_NUM);
+    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
+    err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "CONNECT", 5000);
+    if (err != ESP_OK)
+    {
+        goto cleanup;
+    }
+
+    // 2. 发送实际 URL
+    uart_write_bytes(UART_PORT_NUM, url, url_len);
+    err = modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 5000);
+         err, modem_response_is_ok(response), response);
+    if (err != ESP_OK || !modem_response_is_ok(response))
+    {
+        err = err != ESP_OK ? err : ESP_FAIL;
+        goto cleanup;
+    }
+
+    // 3. 触发模块发起底层 HTTP GET 请求
+    uart_write_bytes(UART_PORT_NUM, "AT+QHTTPGET=80\r\n", 16);
+    // 请求可能耗时很长，给 40 秒超时
+    err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "+QHTTPGET:", 40000);
+    if (err != ESP_OK)
+    {
+        goto cleanup;
+    }
+    append_uart_response_until_line_end(response, MODEM_HTTP_RESP_BUF_SIZE, 1000);
+
+    // 解析 QHTTPGET: err, status, len
+    int qerr = -1, qstatus = -1, qlen = 0;
+    const char *httpget_line = strstr(response, "+QHTTPGET:");
+    if (httpget_line && sscanf(httpget_line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) == 3)
+    {
+        if (qerr == 0 && qstatus == 200 && qlen > 0)
+        {
+            // 4. 从模块内部提取 JSON 数据
+            uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
+            err = wait_for_connect_stream_safe(5000);
+            if (err == ESP_OK)
+            {
+                char *body = calloc(1, qlen + 1);
+                int received = 0;
+                int64_t start_us = esp_timer_get_time();
+                while (body && received < qlen)
+                {
+                    int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
+                    if (r > 0)
+                        received += r;
+                    if ((esp_timer_get_time() - start_us) > 15000000)
+                        break; // 防止死等，15秒超时
+                }
+                if (received == qlen)
+                {
+                    *out_response = body;
+                    // 读取完毕后模块通常还会吐出 OK 和 +QHTTPREAD:0，这里主动读取清空
+                    modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 3000);
+                    err = ESP_OK;
+                }
+                else
+                {
+                    free(body);
+                    err = ESP_FAIL;
+                }
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "HTTP GET failed: AT_err=%d, HTTP_status=%d, content_len=%d", qerr, qstatus, qlen);
+            err = ESP_FAIL;
+        }
+    }
+    else
+    {
+        ESP_LOGW(TAG, "Unexpected QHTTPGET response: %s", response);
+        err = ESP_FAIL;
+    }
+
+cleanup:
+    free(response);
+    s_at_cmd_active = false;
+    return err;
+}
+
 static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle)
 {
     if (!url || fw_size <= 0)
         return ESP_ERR_INVALID_ARG;
-    if (!s_module_mqtt_connected)
+    if (!s_at_ready)
         return ESP_ERR_INVALID_STATE;
 
     // 解析出 host 和 path 用于手动构造 Header
@@ -1670,6 +1735,15 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
             continue;
         }
 
+        int64_t qdeadline = esp_timer_get_time() + 1000000;
+        while (strchr(response, '\n') == NULL && esp_timer_get_time() < qdeadline)
+        {
+            int rlen = strlen(response);
+            int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
+            if (r > 0)
+                response[rlen + r] = '\0';
+        }
+
         int qerr = -1, qstatus = -1, qlen = 0;
         char *line = strstr(response, "+QHTTPGET:");
         if (line && sscanf(line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) >= 2)
@@ -1744,7 +1818,7 @@ static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
 {
     if (!url || !payload)
         return ESP_ERR_INVALID_ARG;
-    if (!s_module_mqtt_connected)
+    if (!s_at_ready)
         return ESP_ERR_INVALID_STATE;
 
     // 同样由于 QHTTP 默认是 POST，要实现真正的 PUT，需自己手写 Header
@@ -1806,6 +1880,15 @@ static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
         err = modem_read_until_pattern(response, sizeof(response), "+QHTTPPOST:", 15000);
         if (err == ESP_OK)
         {
+            int64_t qdeadline = esp_timer_get_time() + 1000000;
+            while (strchr(response, '\n') == NULL && esp_timer_get_time() < qdeadline)
+            {
+                int rlen = strlen(response);
+                int r = uart_read_bytes(UART_PORT_NUM, response + rlen, sizeof(response) - rlen - 1, pdMS_TO_TICKS(10));
+                if (r > 0)
+                    response[rlen + r] = '\0';
+            }
+
             int qerr = -1, qstatus = -1;
             char *line = strstr(response, "+QHTTPPOST:");
             if (line && sscanf(line, "+QHTTPPOST: %d,%d", &qerr, &qstatus) >= 2)

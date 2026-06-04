@@ -11,7 +11,6 @@
 #include "logger.h"
 #include "web_server.h"
 #include "machine_state.h"
-#include "data_dispatcher.h"
 #include "startup_gate.h"
 #include "task_daq.h"
 #include "task_fft.h"
@@ -104,15 +103,14 @@ void app_main(void)
     // 额外留出 1.5 秒余量，确保各个分析任务把刚刚出队的最后一条数据也处理并上报完
     vTaskDelay(pdMS_TO_TICKS(1500));
 
-    // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
+    // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新 / 本地任务)
     LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");
-    mqtt_message_process_pending_tasks();
+    mqtt_pending_tasks_result_t task_result = mqtt_message_process_pending_tasks();
+    if (task_result == MQTT_PENDING_TASKS_NONE) {
+        LOG_INFO("No pending cloud tasks.");
+    }
 
-    // 6. 强制将所有分析结果推送到云端
-    LOG_INFO("Flushing MQTT dispatcher...");
-    data_dispatcher_flush_all(pdMS_TO_TICKS(15000));
-
-    // --- 修复3：休眠前必须显式关断外部高功耗模块 ---
+    // --- 休眠前必须显式关断外部高功耗模块 ---
     LOG_INFO("Shutting down peripherals before deep sleep...");
     (void)mqtt_client_stop(); // 通知 4G 模块 AT+QPOWD=1 关机并释放串口
     (void)drv_iis3dwb_enter_standby(); // 传感器待机

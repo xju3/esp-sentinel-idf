@@ -6,7 +6,7 @@
     },
     "rpm": 1480,
     "host": "139.9.50.7",
-    "patrol": 2,
+    "patrol": 1,
     "diagnosis": 1440,
     "report": 1,
     "network": 1,

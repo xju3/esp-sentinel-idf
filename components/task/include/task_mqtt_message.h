@@ -11,7 +11,14 @@ extern "C" {
 
 typedef esp_err_t (*mqtt_action_handler_t)(int action, const char *ts);
 
-void mqtt_message_process_pending_tasks(void);
+typedef enum
+{
+    MQTT_PENDING_TASKS_NONE = 0,
+    MQTT_PENDING_TASKS_KEEP_4G,
+    MQTT_PENDING_TASKS_CAN_SHUTDOWN_4G,
+} mqtt_pending_tasks_result_t;
+
+mqtt_pending_tasks_result_t mqtt_message_process_pending_tasks(void);
 
 esp_err_t start_mqtt_message_task(void);
 esp_err_t mqtt_message_task_submit(const char *topic, const uint8_t *data, size_t len);

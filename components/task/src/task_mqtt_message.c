@@ -5,7 +5,6 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "config_manager.h"
-#include "esp_system.h"
 #include "mqtt_proxy.h" // 引入用于重启前关停网络的接口
 #include "task_ota.h"
 #include "http_proxy.h"
@@ -19,29 +18,25 @@
 #define SN 0
 #endif
 
-static void execute_config_update_sync(const char *task_id)
+static mqtt_action_handler_t s_action_handler = NULL;
+
+static esp_err_t execute_config_update_sync(const char *task_id)
 {
     char url[256];
     char *json_response = NULL;
+    esp_err_t ret = ESP_FAIL;
 
     // 1. 拼接获取配置的完整 URL
-    snprintf(url, sizeof(url), "http://%s/api/v1/sensor/config/%s", g_user_config.host, task_id);
+    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/config/%s", g_user_config.host, task_id);
     LOG_INFOF("Fetching config from: %s", url);
 
     // 2. 通过统一代理接口获取纯 JSON 字符串（自动抹平 4G AT 与 WiFi 差异）
     if (http_proxy_get(url, &json_response) == ESP_OK && json_response != NULL) {
         LOG_INFO("Config downloaded successfully, saving to SPIFFS...");
         
-        // 3. 直接存盘覆盖 user_config.json
-        esp_err_t err = config_manager_save_user_json(json_response);
-        if (err == ESP_OK) {
-            LOG_INFO("New config saved. Restarting system to apply changes...");
-            free(json_response);
-            
-            // [极其重要] 同步架构下，由于我们准备原地重启系统，必须先手动优雅关闭 4G
-            (void)mqtt_client_stop();
-            vTaskDelay(pdMS_TO_TICKS(500));
-            esp_restart();                   // 4. 重启单片机使新配置生效
+        ret = config_manager_save_user_json(json_response);
+        if (ret == ESP_OK) {
+            LOG_INFO("New config saved. It will be applied on the next wakeup.");
         } else {
             LOG_ERROR("Failed to save new configuration");
         }
@@ -49,12 +44,17 @@ static void execute_config_update_sync(const char *task_id)
     } else {
         LOG_ERROR("Failed to fetch new configuration from server");
     }
+
+    return ret;
 }
 
-void mqtt_message_process_pending_tasks(void)
+mqtt_pending_tasks_result_t mqtt_message_process_pending_tasks(void)
 {
     char url[256];
     char *json_response = NULL;
+    bool found_task = false;
+    bool keep_4g_required = false;
+    bool transport_shutdown = false;
 
     // 1. 组装拉取任务列表的 URL（去掉硬编码的 :3090 端口，由 g_user_config.host 统一管理）
     snprintf(url, sizeof(url), "http://%s/api/v1/sensors/tasks/%u", g_user_config.host, (unsigned)SN);
@@ -77,16 +77,29 @@ void mqtt_message_process_pending_tasks(void)
                     int action = action_item->valueint;
                     int val = cJSON_IsNumber(val_item) ? val_item->valueint : 0;
                     const char *task_id = task_id_item->valuestring;
+                    found_task = true;
                     
                     LOG_INFOF("Executing task synchronously: id=%s, action=%d, val=%d", task_id, action, val);
 
+                    if (action < 10) {
+                        keep_4g_required = true;
+                    } else if (!transport_shutdown) {
+                        LOG_INFOF("Action %d does not require 4G. Shutting down 4G before local task execution.", action);
+                        (void)mqtt_client_stop();
+                        transport_shutdown = true;
+                    }
+
                     if (action == 1) {
-                        execute_config_update_sync(task_id);
+                        (void)execute_config_update_sync(task_id);
                     } else if (action == 2) {
                         LOG_INFO("Action 2 (OTA) received. Processing synchronously...");
                         execute_ota_update_sync(task_id);
                     } else if (action == 3) {
                         LOG_INFOF("Action 3 (Local Update) received. Applying val=%d", val);
+                    } else if (s_action_handler != NULL) {
+                        (void)s_action_handler(action, task_id);
+                    } else {
+                        LOG_WARNF("No handler registered for action=%d", action);
                     }
                 }
             }
@@ -98,6 +111,11 @@ void mqtt_message_process_pending_tasks(void)
     } else {
         LOG_WARN("Failed to fetch pending tasks from server");
     }
+
+    if (!found_task) {
+        return MQTT_PENDING_TASKS_NONE;
+    }
+    return keep_4g_required ? MQTT_PENDING_TASKS_KEEP_4G : MQTT_PENDING_TASKS_CAN_SHUTDOWN_4G;
 }
 
 // 兼容旧的接口签名 (空存根防止外部直接调用报错)
@@ -113,4 +131,5 @@ esp_err_t mqtt_message_task_submit(const char *topic, const uint8_t *data, size_
 
 void mqtt_message_task_register_action_handler(mqtt_action_handler_t handler)
 {
+    s_action_handler = handler;
 }

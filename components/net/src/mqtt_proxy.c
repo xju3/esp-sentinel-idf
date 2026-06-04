@@ -13,6 +13,7 @@
 typedef void (*bsp_4g_urc_cb_t)(int event_type, const char *topic, const char *payload, size_t len);
 extern void bsp_4g_set_urc_cb(bsp_4g_urc_cb_t cb);
 extern esp_err_t init_4g_mqtt(void* cb);
+extern esp_err_t bsp_4g_mqtt_disconnect(void);
 extern esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len);
 extern esp_err_t shutdown_4g_mqtt(void);
 
@@ -191,12 +192,11 @@ esp_err_t init_mqtt_client(void)
     return ESP_OK;
 }
 
-// 停止 MQTT 客户端
-esp_err_t mqtt_client_stop(void)
+esp_err_t mqtt_client_disconnect(void)
 {
     if (g_user_config.network == 1)
     {
-        return shutdown_4g_mqtt();
+        return bsp_4g_mqtt_disconnect();
     }
 
     if (g_mqtt_client == NULL)
@@ -222,6 +222,17 @@ esp_err_t mqtt_client_stop(void)
     g_mqtt_client = NULL;
     LOG_INFO("MQTT client stopped");
     return ESP_OK;
+}
+
+// 停止 MQTT 客户端并释放底层网络/模块
+esp_err_t mqtt_client_stop(void)
+{
+    if (g_user_config.network == 1)
+    {
+        return shutdown_4g_mqtt();
+    }
+
+    return mqtt_client_disconnect();
 }
 
 esp_err_t mqtt_proxy_publish(const char *topic, const uint8_t *data, size_t len, int qos, int retain)

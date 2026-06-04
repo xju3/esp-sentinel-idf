@@ -2,7 +2,6 @@
 #include "bsp_board.h"
 #include "off_sleep_manager.h"
 
-#include "data_dispatcher.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
 #include "machine_state.h"
@@ -79,20 +78,22 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
         goto rollback;
     }
 
-    ret = data_dispatcher_flush_all(
-        pdMS_TO_TICKS(CONFIG_SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC * 1000U));
-    if (ret != ESP_OK)
+    // 分析流水线排空后，阻塞拉取云端任务并处理。
+    mqtt_pending_tasks_result_t task_result = mqtt_message_process_pending_tasks();
+    if (task_result == MQTT_PENDING_TASKS_NONE)
     {
-        LOG_ERRORF("Failed to flush dispatcher before OFF sleep: %s", esp_err_to_name(ret));
-        goto rollback;
+        LOG_INFO("No pending cloud tasks. Proceeding to sleep.");
+    }
+    else if (task_result == MQTT_PENDING_TASKS_KEEP_4G)
+    {
+        LOG_INFO("Cloud tasks used 4G. Shutting down transport before sleep.");
+    }
+    else
+    {
+        LOG_INFO("Cloud tasks completed without requiring 4G.");
     }
 
-    LOG_INFO("Dispatcher flush completed before OFF sleep.");
-
-    // [核心流程：同步控制流] 在确认上行排空后，阻塞拉取云端任务并处理
-    mqtt_message_process_pending_tasks();
-
-    LOG_INFO("All tasks processed. Shutting down transport...");
+    LOG_INFO("All tasks processed. Shutting down transport before OFF sleep...");
     (void)mqtt_client_stop();
 
     ret = off_sleep_prepare_capture_path();

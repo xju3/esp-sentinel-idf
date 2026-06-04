@@ -4,7 +4,6 @@
 #include "machine_state.h"
 #include "task_daq.h"
 #include "task_fft.h"
-#include "data_dispatcher.h"
 #include "http_proxy.h"
 #include "cJSON.h"
 #include "esp_ota_ops.h"
@@ -86,15 +85,11 @@ void execute_ota_update_sync(const char *task_id)
         LOG_INFO("Pipeline drained successfully.");
     }
 
-    // 2. 将积压特征数据落袋为安，推送到云端
-    LOG_INFO("2. Flushing remaining data to server...");
-    data_dispatcher_flush_all(pdMS_TO_TICKS(5000));
-
-    // 3. 加锁独占系统，屏蔽硬件扫描被以外唤醒
-    LOG_INFO("3. Locking system task mutex for exclusive OTA operations...");
+    // 2. 加锁独占系统，屏蔽硬件扫描被以外唤醒
+    LOG_INFO("2. Locking system task mutex for exclusive OTA operations...");
     lock_system_task();
 
-    // 4. 向服务器获取固件元信息
+    // 3. 向服务器获取固件元信息
     char url[256];
     char *json_response = NULL;
     snprintf(url, sizeof(url), "http://%s/sensors/ota/%s", g_user_config.host, task_id);
@@ -137,7 +132,7 @@ void execute_ota_update_sync(const char *task_id)
     const char *access_key = cJSON_IsString(key_item) ? key_item->valuestring : "";
     LOG_INFOF("OTA Firmware Info: size=%d, url=%s", fw_size, fw_url);
 
-    // 5. 执行下载与写分区
+    // 4. 执行下载与写分区
     esp_err_t ota_err = ESP_FAIL;
     
     if (g_user_config.network == 1) {
@@ -236,7 +231,7 @@ void execute_ota_update_sync(const char *task_id)
 
     cJSON_Delete(root);
 
-    // 6. 汇报结果并根据情况重启系统
+    // 5. 汇报结果并根据情况重启系统
     if (ota_err == ESP_OK) {
         report_ota_result(task_id, 0); // 0 表示成功
         LOG_INFO("OTA Update completed successfully. System will restart in 3 seconds...");
