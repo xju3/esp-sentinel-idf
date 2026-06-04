@@ -12,7 +12,6 @@ idf_component_register(
         "src/task_stash.c"
         "src/task_mqtt_message.c"
         "src/task_ota.c"
-        "src/http_proxy.c"
     INCLUDE_DIRS 
         "include" 
     REQUIRES 

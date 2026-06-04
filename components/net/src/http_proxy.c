@@ -17,48 +17,79 @@ esp_err_t http_proxy_get(const char *url, char **out_response)
 
     // --- 1. 如果是 4G 模式 ---
     if (g_user_config.network == 1) {
-        // LOG_INFO("HTTP GET routing via 4G AT Mode...");
         return bsp_4g_http_get(url, out_response);
     }
 
     // --- 2. 如果是 WiFi 模式 ---
-    // LOG_INFO("HTTP GET routing via WiFi LwIP...");
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_GET,
         .timeout_ms = 15000,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) return ESP_FAIL;
+    if (!client) {
+        LOG_ERROR("Failed to initialize HTTP client");
+        return ESP_FAIL;
+    }
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err == ESP_OK) {
         int content_length = esp_http_client_fetch_headers(client);
         int status_code = esp_http_client_get_status_code(client);
+        
         if (status_code == 200) {
-            int buffer_size = (content_length > 0) ? content_length : 1024;
-            char *buffer = calloc(1, buffer_size + 1);
-            int read_bytes = 0;
-            while (buffer != NULL) {
-                int r = esp_http_client_read(client, buffer + read_bytes, buffer_size - read_bytes);
-                if (r < 0) { free(buffer); buffer = NULL; break; }
-                if (r == 0) break;
-                read_bytes += r;
-                if (read_bytes == buffer_size) {
-                    buffer_size *= 2; // 如果 content_length 未知，动态扩容
-                    buffer = realloc(buffer, buffer_size + 1);
+            if (content_length > 0) {
+                *out_response = calloc(1, content_length + 1);
+                if (*out_response) {
+                    int read_len = esp_http_client_read(client, *out_response, content_length);
+                    if (read_len != content_length) {
+                        LOG_WARN("Incomplete HTTP read");
+                        err = ESP_FAIL;
+                        free(*out_response);
+                        *out_response = NULL;
+                    }
+                } else {
+                    LOG_ERROR("OOM allocating HTTP response buffer");
+                    err = ESP_ERR_NO_MEM;
+                }
+            } else {
+                // Chunked 编码或未指定长度，动态增长读取
+                int chunk_size = 512;
+                int total_read = 0;
+                char *buf = malloc(chunk_size);
+                if (buf) {
+                    while (1) {
+                        int read_len = esp_http_client_read(client, buf + total_read, chunk_size - 1);
+                        if (read_len <= 0) break;
+                        total_read += read_len;
+                        
+                        char *new_buf = realloc(buf, total_read + chunk_size);
+                        if (!new_buf) {
+                            LOG_ERROR("OOM reallocating HTTP response buffer");
+                            err = ESP_ERR_NO_MEM;
+                            break;
+                        }
+                        buf = new_buf;
+                    }
+                    if (err == ESP_OK) {
+                        buf[total_read] = '\0';
+                        *out_response = buf;
+                    } else {
+                        free(buf);
+                    }
+                } else {
+                    LOG_ERROR("OOM allocating HTTP response buffer");
+                    err = ESP_ERR_NO_MEM;
                 }
             }
-            if (buffer) {
-                buffer[read_bytes] = '\0';
-                *out_response = buffer;
-            } else {
-                err = ESP_FAIL;
-            }
         } else {
+            LOG_ERRORF("HTTP GET failed with status code: %d", status_code);
             err = ESP_FAIL;
         }
+    } else {
+        LOG_ERRORF("Failed to open HTTP connection: %s", esp_err_to_name(err));
     }
+
     esp_http_client_cleanup(client);
     return err;
 }

@@ -88,14 +88,14 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     item = cJSON_GetObjectItemCaseSensitive(root, "patrol");
     if (cJSON_IsNumber(item))
     {
-        cfg->patrol = (int16_t)item->valueint;
+        cfg->patrol = item->valuedouble;
     }
 
 
     item = cJSON_GetObjectItemCaseSensitive(root, "diagnosis");
     if (cJSON_IsNumber(item))
     {
-        cfg->diagnosis = (int16_t)item->valueint;
+        cfg->diagnosis = item->valuedouble;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "report");

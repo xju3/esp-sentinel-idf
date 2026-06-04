@@ -59,11 +59,11 @@ esp_err_t daq_scheduler_execute(void)
         err = start_daq_worker(&param);
         
         // 更新下次诊断时间
-        s_next_diagnosis_time = now + (g_user_config.diagnosis * 60);
+        s_next_diagnosis_time = now + (time_t)(g_user_config.diagnosis * 60);
         
         // 如果因为合并策略跳过了巡检，必须同步将巡检下一次时间后移，防止它在下次唤醒时立刻抢跑
         if (now >= s_next_patrol_time - WAKEUP_TOLERANCE_SEC) {
-            s_next_patrol_time = now + (g_user_config.patrol * 60);
+            s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
         }
     } 
     else if (run_patrol) {
@@ -75,7 +75,7 @@ esp_err_t daq_scheduler_execute(void)
         err = start_daq_worker(&param);
         
         // 更新下次巡检时间
-        s_next_patrol_time = now + (g_user_config.patrol * 60);
+        s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
     } else {
         LOG_INFO("Woke up but no DAQ task scheduled to run right now.");
     }
