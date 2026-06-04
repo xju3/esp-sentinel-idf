@@ -41,42 +41,6 @@ static float max_axis_rms_mm_s(const vib_3axis_features_t *features)
     return max_rms;
 }
 
-#if CONFIG_SENTINEL_ENABLE_OFF_SLEEP_GATE
-static bool should_request_off_sleep_mode(const vib_job_t *job, const vib_3axis_features_t *features)
-{
-    if (!job || !features || job->task_mode != TASK_MODE_PATROLING)
-    {
-        s_patrol_low_rms_streak = 0;
-        return false;
-    }
-
-    const float max_rms = max_axis_rms_mm_s(features);
-    const float off_threshold = (float)CONFIG_SENTINEL_OFF_RMS_THRESHOLD_MM_S;
-
-    if (max_rms >= off_threshold)
-    {
-        s_patrol_low_rms_streak = 0;
-        return false;
-    }
-
-    s_patrol_low_rms_streak++;
-    LOG_INFOF("Low patrol RMS detected: max_rms=%.4f mm/s, threshold=%.4f mm/s, streak=%lu/%d",
-              max_rms,
-              off_threshold,
-              (unsigned long)s_patrol_low_rms_streak,
-              CONFIG_SENTINEL_OFF_CONFIRM_COUNT);
-
-    if (s_patrol_low_rms_streak < (uint32_t)CONFIG_SENTINEL_OFF_CONFIRM_COUNT)
-    {
-        return false;
-    }
-
-    s_patrol_low_rms_streak = 0;
-    LOG_WARN("Machine appears OFF from patrol RMS. Requesting WoM light sleep.");
-    return true;
-}
-#endif
-
 static esp_err_t rms_report(vib_3axis_features_t *features,
                             iso_alarm_status_t status,
                             task_mode_t mode,

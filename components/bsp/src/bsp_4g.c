@@ -1548,7 +1548,6 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
     // 2. 发送实际 URL
     uart_write_bytes(UART_PORT_NUM, url, url_len);
     err = modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 5000);
-         err, modem_response_is_ok(response), response);
     if (err != ESP_OK || !modem_response_is_ok(response))
     {
         err = err != ESP_OK ? err : ESP_FAIL;
