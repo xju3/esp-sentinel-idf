@@ -56,8 +56,8 @@ void mqtt_message_process_pending_tasks(void)
     char url[256];
     char *json_response = NULL;
 
-    // 1. 组装拉取任务列表的 URL
-    snprintf(url, sizeof(url), "http://%s/api/v1/sensor/tasks/%u", g_user_config.host, (unsigned)SN);
+    // 1. 组装拉取任务列表的 URL（去掉硬编码的 :3090 端口，由 g_user_config.host 统一管理）
+    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/tasks/%u", g_user_config.host, (unsigned)SN);
     LOG_INFOF("Polling pending tasks from: %s", url);
 
     // 2. 通过 http_proxy 获取 JSON 响应

@@ -10,6 +10,12 @@ extern "C"
 {
 #endif
 
+/** @brief 执行基于RTC时间单次任务调度决策与采集 */
+esp_err_t daq_scheduler_execute(void);
+
+/** @brief 获取距离下一次任务唤醒所需的时间差 (微秒) */
+uint64_t daq_scheduler_get_sleep_time_us(void);
+
 esp_err_t start_task_daq(void);
 esp_err_t task_daq_pause_periodic(void);
 esp_err_t task_daq_resume_periodic(bool trigger_patrol_now);

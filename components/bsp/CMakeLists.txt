@@ -10,6 +10,7 @@ idf_component_register(
     REQUIRES 
         esp_wifi esp_netif nvs_flash esp_event driver esp_adc esp_timer esp_driver_ledc lwip algo util app_update)
 
+    # target_compile_definitions(${COMPONENT_TARGET} PRIVATE AT=1)
 if(DEFINED DEVICE_ID)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_ID="${DEVICE_ID}")
 endif()
