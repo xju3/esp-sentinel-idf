@@ -297,7 +297,7 @@ static const char *modem_mqtt_host(void)
     const char *host = g_user_config.mqtt_host;
     if (host == NULL || host[0] == '\0')
     {
-        return BOARD_4G_MQTT_HOST;
+        return "";
     }
 
     const char *scheme = strstr(host, "://");
@@ -312,6 +312,11 @@ static void modem_copy_mqtt_host(char *out, size_t out_size)
     }
 
     const char *host = modem_mqtt_host();
+    if (host == NULL || host[0] == '\0')
+    {
+        out[0] = '\0';
+        return;
+    }
     size_t len = 0;
     while (host[len] != '\0' && host[len] != ':' && host[len] != '/' && len + 1 < out_size)
     {
@@ -1058,6 +1063,10 @@ static esp_err_t modem_mqtt_open(char *response, size_t response_size)
     char host[96];
     char cmd[160];
     modem_copy_mqtt_host(host, sizeof(host));
+    if (host[0] == '\0')
+    {
+        return ESP_FAIL;
+    }
 
     int len = snprintf(cmd,
                        sizeof(cmd),

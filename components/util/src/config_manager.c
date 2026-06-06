@@ -73,10 +73,16 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     }
 
     const cJSON *item = NULL;
-    item = cJSON_GetObjectItemCaseSensitive(root, "host");
+    item = cJSON_GetObjectItemCaseSensitive(root, "mqtt_host");
     if (cJSON_IsString(item))
     {
-        safe_copy(cfg->host, sizeof(cfg->host), item->valuestring);
+        safe_copy(cfg->mqtt_host, sizeof(cfg->mqtt_host), item->valuestring);
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "api_host");
+    if (cJSON_IsString(item))
+    {
+        safe_copy(cfg->api_host, sizeof(cfg->api_host), item->valuestring);
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
@@ -346,7 +352,8 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     }
 
     cJSON_AddNumberToObject(root, "months", cfg->months);
-    cJSON_AddStringToObject(root, "host", cfg->host);
+    cJSON_AddStringToObject(root, "mqtt_host", cfg->mqtt_host);
+    cJSON_AddStringToObject(root, "api_host", cfg->api_host);
     cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
     cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
     cJSON_AddNumberToObject(root, "report", cfg->report);

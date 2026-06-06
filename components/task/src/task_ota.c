@@ -24,7 +24,7 @@ extern esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, con
 static void report_ota_result(const char *task_id, int result_code)
 {
     char url[256];
-    snprintf(url, sizeof(url), "http://%s/sensors/ota/%s", g_user_config.host, task_id);
+    snprintf(url, sizeof(url), "http://%s/sensors/ota/%s", g_user_config.api_host, task_id);
     
     char payload[64];
     snprintf(payload, sizeof(payload), "{\"result\": %d}", result_code);
@@ -92,7 +92,7 @@ void execute_ota_update_sync(const char *task_id)
     // 3. 向服务器获取固件元信息
     char url[256];
     char *json_response = NULL;
-    snprintf(url, sizeof(url), "http://%s/sensors/ota/%s", g_user_config.host, task_id);
+    snprintf(url, sizeof(url), "http://%s/sensors/ota/%s", g_user_config.api_host, task_id);
     
     LOG_INFOF("Fetching OTA info from: %s", url);
     if (http_proxy_get(url, &json_response) != ESP_OK || json_response == NULL) {

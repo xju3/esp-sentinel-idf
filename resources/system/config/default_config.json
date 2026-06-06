@@ -5,8 +5,8 @@
         "foundation": 1
     },
     "rpm": 1480,
-    "mqtt_host": "mqtt.api-server.icu",
-    "api_host": "api.api-server.icu",
+    "mqtt_host": "139.9.50.7",
+    "api_host": "139.9.50.7",
     "patrol": 1,
     "diagnosis": 1440,
     "report": 1,
