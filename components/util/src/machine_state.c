@@ -11,7 +11,6 @@ static SemaphoreHandle_t g_machine_state_mutex;
 // Global mutex to ensure sequential execution of major tasks (diagnostics, state checks, etc.).
 static SemaphoreHandle_t g_system_task_mutex;
 
-
 void init_machine_state(void)
 {
     g_machine_state_mutex = xSemaphoreCreateMutex();

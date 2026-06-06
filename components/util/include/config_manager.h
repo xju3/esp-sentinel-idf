@@ -56,7 +56,7 @@ extern "C"
 
     typedef struct
     {
-        char device_id[LEN_MAX_DEVICE_ID];
+        char sn[LEN_MAX_DEVICE_ID];
         char device_name[LEN_MAX_DEVICE_NAME];
         char device_type[LEN_MAX_DEVICE_TYPE]; // defined in iso standards.
         int8_t motor_type;                     // 1. fixed speed motor, 2. variable frequency device, 3. servo
@@ -64,7 +64,8 @@ extern "C"
         int32_t rpm;                           // geater than 600 and less than 10000
         user_wifi_config_t wifi;
         int8_t network;
-        char host[LEN_MAX_HOST]; // server name or IP for data reporting
+        char mqtt_host[LEN_MAX_HOST];          // MQTT server name or IP for data reporting
+        char api_host[LEN_MAX_HOST];           // HTTP API server name or IP
         int16_t battery;
         bool ble;
         iso_config_t iso;

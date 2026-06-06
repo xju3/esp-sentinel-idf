@@ -73,36 +73,16 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     }
 
     const cJSON *item = NULL;
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
+    item = cJSON_GetObjectItemCaseSensitive(root, "mqtt_host");
     if (cJSON_IsString(item))
     {
-        safe_copy(cfg->device_id, sizeof(cfg->device_id), item->valuestring);
+        safe_copy(cfg->mqtt_host, sizeof(cfg->mqtt_host), item->valuestring);
     }
 
-    item = cJSON_GetObjectItemCaseSensitive(root, "deviceName");
+    item = cJSON_GetObjectItemCaseSensitive(root, "api_host");
     if (cJSON_IsString(item))
     {
-        safe_copy(cfg->device_name, sizeof(cfg->device_name), item->valuestring);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "host");
-    if (cJSON_IsString(item))
-    {
-        safe_copy(cfg->host, sizeof(cfg->host), item->valuestring);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "deviceType");
-    if (cJSON_IsString(item))
-    {
-        // device_type 现在是字符串类型
-        safe_copy(cfg->device_type, sizeof(cfg->device_type), item->valuestring);
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "motorType");
-    if (cJSON_IsNumber(item))
-    {
-        cfg->motor_type = (int8_t)item->valueint;
+        safe_copy(cfg->api_host, sizeof(cfg->api_host), item->valuestring);
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
@@ -114,14 +94,14 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     item = cJSON_GetObjectItemCaseSensitive(root, "patrol");
     if (cJSON_IsNumber(item))
     {
-        cfg->patrol = (int16_t)item->valueint;
+        cfg->patrol = item->valuedouble;
     }
 
 
     item = cJSON_GetObjectItemCaseSensitive(root, "diagnosis");
     if (cJSON_IsNumber(item))
     {
-        cfg->diagnosis = (int16_t)item->valueint;
+        cfg->diagnosis = item->valuedouble;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "report");
@@ -371,12 +351,9 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
         return ESP_ERR_NO_MEM;
     }
 
-    cJSON_AddStringToObject(root, "deviceId", cfg->device_id);
-    cJSON_AddStringToObject(root, "deviceName", cfg->device_name);
-    cJSON_AddStringToObject(root, "deviceType", cfg->device_type);
-    cJSON_AddNumberToObject(root, "motorType", cfg->motor_type);
     cJSON_AddNumberToObject(root, "months", cfg->months);
-    cJSON_AddStringToObject(root, "host", cfg->host);
+    cJSON_AddStringToObject(root, "mqtt_host", cfg->mqtt_host);
+    cJSON_AddStringToObject(root, "api_host", cfg->api_host);
     cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
     cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
     cJSON_AddNumberToObject(root, "report", cfg->report);

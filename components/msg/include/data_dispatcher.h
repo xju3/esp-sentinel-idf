@@ -21,14 +21,12 @@ extern "C"
         char topic[128];    // MQTT topic
     } binary_msg_t;
 
-    // Queue is created/owned by producer, dispatcher only consumes
-    // Queue items are of type binary_msg_t
+    // Legacy initialization marker used by older call sites for readiness checks.
     extern QueueHandle_t g_msg_dispatcher_queue;
     esp_err_t data_dispatcher_start(void);
 
-    // Unified message sending function for protobuf messages
+    // Sends one protobuf message immediately; no batching, persistent cache, or flush step.
     esp_err_t send_protobuf_message(uint32_t event_type, const ProtobufCMessage *message);
-    esp_err_t data_dispatcher_flush_all(TickType_t timeout_ticks);
 
 #ifdef __cplusplus
 }

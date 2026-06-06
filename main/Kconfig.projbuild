@@ -75,4 +75,62 @@ config SENTINEL_NETWORK_BRINGUP_TIMEOUT_SEC
       STA or 4G according to user configuration and wait up to this many
       seconds for MQTT to become ready.
 
+config SENTINEL_CAP_READY_DELTA_MV
+    int "Super-cap ready delta threshold (mV)"
+    range 10 1000
+    default 100
+    help
+      The super-cap is considered ready when battery_voltage_mv minus
+      supercap_voltage_mv is less than or equal to this threshold.
+
+config SENTINEL_CAP_CHARGE_PWM_FREQ_HZ
+    int "Super-cap charge PWM frequency (Hz)"
+    range 1000 50000
+    default 5000
+    help
+      PWM frequency used on GPIO_CHARGE while charging the super-cap.
+
+config SENTINEL_CAP_CHARGE_RAMP_MS
+    int "Super-cap charge ramp duration (ms)"
+    range 100 10000
+    default 3000
+    help
+      During this time window the charge PWM duty rises linearly from 0 to 50%.
+
+config SENTINEL_CAP_CHARGE_HOLD_MS
+    int "Super-cap charge hold duration after ramp (ms)"
+    range 0 10000
+    default 2000
+    help
+      After the ramp phase, charge PWM stays at 50% for this long before the
+      firmware starts checking the voltage delta.
+
+config SENTINEL_CAP_CHARGE_POLL_MS
+    int "Super-cap charge poll interval (ms)"
+    range 50 5000
+    default 200
+    help
+      Voltage-delta polling interval after the initial 5-second charge profile.
+
+config SENTINEL_CAP_CHARGE_TIMEOUT_SEC
+    int "Super-cap charge timeout (seconds)"
+    range 5 300
+    default 60
+    help
+      Maximum allowed total charging time before the boot energy guard fails.
+
+config SENTINEL_SENSOR_POWER_SETTLE_MS
+    int "IIS3DWB power settle time (ms)"
+    range 1 1000
+    default 20
+    help
+      Wait time after enabling the IIS3DWB power rail before SPI access.
+
+config SENTINEL_4G_POWER_SETTLE_MS
+    int "4G main power settle time (ms)"
+    range 1 5000
+    default 500
+    help
+      Wait time after enabling the 4G main power rail before modem probing.
+
 endmenu

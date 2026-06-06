@@ -2,10 +2,20 @@
 #include "mqtt_client.h"
 #include "config_manager.h"
 #include "logger.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include <errno.h>
+#include <stdio.h>
 #include <string.h>
+
+#ifndef SN
+#define SN 0
+#endif
+
+// Extern references for bsp_4g.c AT wrapper functions
+typedef void (*bsp_4g_urc_cb_t)(int event_type, const char *topic, const char *payload, size_t len);
+extern void bsp_4g_set_urc_cb(bsp_4g_urc_cb_t cb);
+extern esp_err_t init_4g_mqtt(void* cb);
+extern esp_err_t bsp_4g_mqtt_disconnect(void);
+extern esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len);
+extern esp_err_t shutdown_4g_mqtt(void);
 
 // 全局 MQTT 客户端句柄
 esp_mqtt_client_handle_t g_mqtt_client = NULL;
@@ -17,6 +27,9 @@ static void mqtt_event_handler(void *handler_args,
                                esp_event_base_t base, 
                                int32_t event_id, void *event_data)
 {
+    (void)handler_args;
+    (void)base;
+
     esp_mqtt_event_handle_t event = event_data;
 
     switch (event_id)
@@ -27,8 +40,6 @@ static void mqtt_event_handler(void *handler_args,
         {
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
-        // 订阅主题（如果需要）
-        // esp_mqtt_client_subscribe(g_mqtt_client, "/device/command", 0);
         break;
 
     case MQTT_EVENT_DISCONNECTED:
@@ -39,25 +50,11 @@ static void mqtt_event_handler(void *handler_args,
         }
         break;
 
-    case MQTT_EVENT_SUBSCRIBED:
-        LOG_INFO("MQTT subscribed");
-        break;
-
-    case MQTT_EVENT_UNSUBSCRIBED:
-        LOG_INFO("MQTT unsubscribed");
-        break;
-
     case MQTT_EVENT_PUBLISHED:
         if (s_mqtt_proxy_event_cb)
         {
             s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_PUBLISHED, event ? event->msg_id : -1, s_mqtt_proxy_event_user_ctx);
         }
-        break;
-
-    case MQTT_EVENT_DATA:
-        LOG_INFOF("MQTT data received: topic=%.*s, data=%.*s",
-                  event->topic_len, event->topic,
-                  event->data_len, event->data);
         break;
 
     case MQTT_EVENT_ERROR:
@@ -91,9 +88,46 @@ void mqtt_proxy_set_event_callback(mqtt_proxy_event_cb_t cb, void *user_ctx)
     s_mqtt_proxy_event_user_ctx = user_ctx;
 }
 
+// 处理来自 4G AT 后台任务抛出的 URC 事件
+static void mqtt_proxy_4g_urc_cb(int event_type, const char *topic, const char *payload, size_t len)
+{
+    if (event_type == 0) // 接收到下行数据
+    {
+        // MQTT 下行订阅已弃用，统一改为 HTTP 主动拉取模式
+    }
+    else if (event_type == 1) // 异常断开
+    {
+        LOG_WARN("4G MQTT connection lost");
+        if (s_mqtt_proxy_event_cb)
+        {
+            s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_DISCONNECTED, -1, s_mqtt_proxy_event_user_ctx);
+        }
+    }
+}
+
 // 初始化 MQTT 客户端
 esp_err_t init_mqtt_client(void)
 {
+    // 1. 如果走 4G 路线
+    if (g_user_config.network == 1)
+    {
+        LOG_INFO("Initializing 4G AT MQTT client...");
+        bsp_4g_set_urc_cb(mqtt_proxy_4g_urc_cb);
+        esp_err_t err = init_4g_mqtt(NULL);
+        if (err == ESP_OK)
+        {
+            if (s_mqtt_proxy_event_cb)
+                s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_READY, -1, s_mqtt_proxy_event_user_ctx);
+        }
+        else
+        {
+            if (s_mqtt_proxy_event_cb)
+                s_mqtt_proxy_event_cb(MQTT_PROXY_EVENT_ERROR, -1, s_mqtt_proxy_event_user_ctx);
+        }
+        return err;
+    }
+
+    // 2. 如果走 WiFi 路线
     if (g_mqtt_client != NULL)
     {
         LOG_WARN("MQTT client already initialized");
@@ -101,25 +135,25 @@ esp_err_t init_mqtt_client(void)
     }
 
     // 检查 MQTT 服务器地址是否配置
-    if (strlen(g_user_config.host) == 0)
+    if (strlen(g_user_config.mqtt_host) == 0)
     {
         LOG_ERROR("MQTT server address not configured");
         return ESP_FAIL;
     }
 
-    LOG_INFOF("Initializing MQTT client to: %s", g_user_config.host);
+    LOG_INFOF("Initializing MQTT client to: %s", g_user_config.mqtt_host);
 
     // 构建完整的 MQTT URI
     char mqtt_uri[LEN_MAX_HOST + 20]; // 额外空间用于协议和端口
-    if (strstr(g_user_config.host, "://") == NULL)
+    if (strstr(g_user_config.mqtt_host, "://") == NULL)
     {
         // 如果没有协议前缀，添加 mqtt://
-        snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:1883", g_user_config.host);
+        snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:1883", g_user_config.mqtt_host);
     }
     else
     {
         // 如果已有协议前缀，直接使用
-        strncpy(mqtt_uri, g_user_config.host, sizeof(mqtt_uri) - 1);
+        strncpy(mqtt_uri, g_user_config.mqtt_host, sizeof(mqtt_uri) - 1);
         mqtt_uri[sizeof(mqtt_uri) - 1] = '\0';
     }
 
@@ -128,7 +162,7 @@ esp_err_t init_mqtt_client(void)
     // 配置 MQTT 客户端
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = mqtt_uri,
-        .credentials.client_id = g_user_config.device_id,
+        .credentials.client_id = g_user_config.sn,
         .session.keepalive = 60,                 // 60秒心跳
         .network.disable_auto_reconnect = false, // 启用自动重连
         .network.reconnect_timeout_ms = 5000,    // 5秒重连间隔
@@ -158,9 +192,13 @@ esp_err_t init_mqtt_client(void)
     return ESP_OK;
 }
 
-// 停止 MQTT 客户端
-esp_err_t mqtt_client_stop(void)
+esp_err_t mqtt_client_disconnect(void)
 {
+    if (g_user_config.network == 1)
+    {
+        return bsp_4g_mqtt_disconnect();
+    }
+
     if (g_mqtt_client == NULL)
     {
         return ESP_OK;
@@ -184,4 +222,30 @@ esp_err_t mqtt_client_stop(void)
     g_mqtt_client = NULL;
     LOG_INFO("MQTT client stopped");
     return ESP_OK;
+}
+
+// 停止 MQTT 客户端并释放底层网络/模块
+esp_err_t mqtt_client_stop(void)
+{
+    if (g_user_config.network == 1)
+    {
+        return shutdown_4g_mqtt();
+    }
+
+    return mqtt_client_disconnect();
+}
+
+esp_err_t mqtt_proxy_publish(const char *topic, const uint8_t *data, size_t len, int qos, int retain)
+{
+    if (g_user_config.network == 1)
+    {
+        return bsp_4g_mqtt_publish(topic, data, len);
+    }
+    
+    if (g_mqtt_client)
+    {
+        int msg_id = esp_mqtt_client_publish(g_mqtt_client, topic, (const char *)data, len, qos, retain);
+        return msg_id >= 0 ? ESP_OK : ESP_FAIL;
+    }
+    return ESP_FAIL;
 }

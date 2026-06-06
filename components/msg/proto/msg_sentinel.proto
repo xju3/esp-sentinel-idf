@@ -3,29 +3,33 @@ syntax = "proto3";
 message MsgPayload {
   uint32  sn   = 1;  // 设备序列号 1000-9999，varint 2B
   uint32  et   = 2;  // event_type 0/1/2，varint 1B
+  uint64  ts   = 3;  // Unix时间戳 ms，varint ~6B
   bytes   data = 4;  // 对应 message 的序列化字节
-  reserved 3;        // 设备时间字段已移除（NTP）
-  reserved "ts";
 }
 
 message MsgTriaxialValue {
-  float   x   = 1; 
+  float   x   = 1;
   float   y   = 2;
   float   z   = 3;
   float   m   = 4;  // 均值
 }
 
+
 message MsgRmsReport {
-  MsgTriaxialValue rms      = 1;
-  MsgTriaxialValue peak     = 2;
-  MsgTriaxialValue crest    = 3;
-  MsgTriaxialValue impulse  = 4;
-  float temperature         = 5; 
-  uint32 iso                = 6;  // iso标准
+  uint32 sn          = 1;   // 设备序列号
+  float  temperature = 2;
+  uint32 iso         = 3;   // iso标准
+  float  rms_x       = 4;
+  float  rms_y       = 5;
+  float  rms_z       = 6;
+  float  rms_m       = 7;
+  float  peak_x      = 8;
+  float  peak_y      = 9;
+  float  peak_z      = 10;
+  float  peak_m      = 11;
 }
 
 message MsgMachineStatus{
   MsgTriaxialValue rms = 1;
   uint32  st   = 2;  // 设备状态, 0 -> 关机,  1 -> 过度态, 2-> 稳定态
 }
-

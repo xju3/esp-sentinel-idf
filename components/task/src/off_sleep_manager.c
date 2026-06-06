@@ -1,6 +1,7 @@
+#include "driver/gpio.h"
+#include "bsp_board.h"
 #include "off_sleep_manager.h"
 
-#include "data_dispatcher.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
 #include "machine_state.h"
@@ -8,6 +9,8 @@
 #include "task_daq.h"
 #include "task_fft.h"
 #include "wom_lis2dh12.h"
+#include "mqtt_proxy.h" // 用于调用 mqtt_client_stop 关闭网络
+#include "task_mqtt_message.h" // 引入同步拉取接口
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -26,6 +29,13 @@ static esp_err_t off_sleep_prepare_capture_path(void)
     if (ret != ESP_OK)
     {
         LOG_ERRORF("Failed to place IIS3DWB into standby before OFF sleep: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to disable IIS3DWB power rail before OFF sleep: %s", esp_err_to_name(ret));
         return ret;
     }
 
@@ -68,15 +78,23 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
         goto rollback;
     }
 
-    ret = data_dispatcher_flush_all(
-        pdMS_TO_TICKS(CONFIG_SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC * 1000U));
-    if (ret != ESP_OK)
+    // 分析流水线排空后，阻塞拉取云端任务并处理。
+    mqtt_pending_tasks_result_t task_result = mqtt_message_process_pending_tasks();
+    if (task_result == MQTT_PENDING_TASKS_NONE)
     {
-        LOG_ERRORF("Failed to flush dispatcher before OFF sleep: %s", esp_err_to_name(ret));
-        goto rollback;
+        LOG_INFO("No pending cloud tasks. Proceeding to sleep.");
+    }
+    else if (task_result == MQTT_PENDING_TASKS_KEEP_4G)
+    {
+        LOG_INFO("Cloud tasks used 4G. Shutting down transport before sleep.");
+    }
+    else
+    {
+        LOG_INFO("Cloud tasks completed without requiring 4G.");
     }
 
-    LOG_INFO("Dispatcher flush completed before OFF sleep.");
+    LOG_INFO("All tasks processed. Shutting down transport before OFF sleep...");
+    (void)mqtt_client_stop();
 
     ret = off_sleep_prepare_capture_path();
     if (ret != ESP_OK)

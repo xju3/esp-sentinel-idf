@@ -187,7 +187,7 @@ void   msg_machine_status__free_unpacked
   assert(message->base.descriptor == &msg_machine_status__descriptor);
   protobuf_c_message_free_unpacked ((ProtobufCMessage*)message, allocator);
 }
-static const ProtobufCFieldDescriptor msg_payload__field_descriptors[3] =
+static const ProtobufCFieldDescriptor msg_payload__field_descriptors[4] =
 {
   {
     "sn",
@@ -214,6 +214,18 @@ static const ProtobufCFieldDescriptor msg_payload__field_descriptors[3] =
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
+    "ts",
+    3,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_UINT64,
+    0,   /* quantifier_offset */
+    offsetof(MsgPayload, ts),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
     "data",
     4,
     PROTOBUF_C_LABEL_NONE,
@@ -227,15 +239,15 @@ static const ProtobufCFieldDescriptor msg_payload__field_descriptors[3] =
   },
 };
 static const unsigned msg_payload__field_indices_by_name[] = {
-  2,   /* field[2] = data */
+  3,   /* field[3] = data */
   1,   /* field[1] = et */
   0,   /* field[0] = sn */
+  2,   /* field[2] = ts */
 };
-static const ProtobufCIntRange msg_payload__number_ranges[2 + 1] =
+static const ProtobufCIntRange msg_payload__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 4, 2 },
-  { 0, 3 }
+  { 0, 4 }
 };
 const ProtobufCMessageDescriptor msg_payload__descriptor =
 {
@@ -245,10 +257,10 @@ const ProtobufCMessageDescriptor msg_payload__descriptor =
   "MsgPayload",
   "",
   sizeof(MsgPayload),
-  3,
+  4,
   msg_payload__field_descriptors,
   msg_payload__field_indices_by_name,
-  2,  msg_payload__number_ranges,
+  1,  msg_payload__number_ranges,
   (ProtobufCMessageInit) msg_payload__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
@@ -329,59 +341,23 @@ const ProtobufCMessageDescriptor msg_triaxial_value__descriptor =
   (ProtobufCMessageInit) msg_triaxial_value__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor msg_rms_report__field_descriptors[6] =
+static const ProtobufCFieldDescriptor msg_rms_report__field_descriptors[11] =
 {
   {
-    "rms",
+    "sn",
     1,
     PROTOBUF_C_LABEL_NONE,
-    PROTOBUF_C_TYPE_MESSAGE,
+    PROTOBUF_C_TYPE_UINT32,
     0,   /* quantifier_offset */
-    offsetof(MsgRmsReport, rms),
-    &msg_triaxial_value__descriptor,
+    offsetof(MsgRmsReport, sn),
     NULL,
-    0,             /* flags */
-    0,NULL,NULL    /* reserved1,reserved2, etc */
-  },
-  {
-    "peak",
-    2,
-    PROTOBUF_C_LABEL_NONE,
-    PROTOBUF_C_TYPE_MESSAGE,
-    0,   /* quantifier_offset */
-    offsetof(MsgRmsReport, peak),
-    &msg_triaxial_value__descriptor,
-    NULL,
-    0,             /* flags */
-    0,NULL,NULL    /* reserved1,reserved2, etc */
-  },
-  {
-    "crest",
-    3,
-    PROTOBUF_C_LABEL_NONE,
-    PROTOBUF_C_TYPE_MESSAGE,
-    0,   /* quantifier_offset */
-    offsetof(MsgRmsReport, crest),
-    &msg_triaxial_value__descriptor,
-    NULL,
-    0,             /* flags */
-    0,NULL,NULL    /* reserved1,reserved2, etc */
-  },
-  {
-    "impulse",
-    4,
-    PROTOBUF_C_LABEL_NONE,
-    PROTOBUF_C_TYPE_MESSAGE,
-    0,   /* quantifier_offset */
-    offsetof(MsgRmsReport, impulse),
-    &msg_triaxial_value__descriptor,
     NULL,
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
   {
     "temperature",
-    5,
+    2,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_FLOAT,
     0,   /* quantifier_offset */
@@ -393,7 +369,7 @@ static const ProtobufCFieldDescriptor msg_rms_report__field_descriptors[6] =
   },
   {
     "iso",
-    6,
+    3,
     PROTOBUF_C_LABEL_NONE,
     PROTOBUF_C_TYPE_UINT32,
     0,   /* quantifier_offset */
@@ -403,19 +379,120 @@ static const ProtobufCFieldDescriptor msg_rms_report__field_descriptors[6] =
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
+  {
+    "rms_x",
+    4,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, rms_x),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "rms_y",
+    5,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, rms_y),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "rms_z",
+    6,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, rms_z),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "rms_m",
+    7,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, rms_m),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "peak_x",
+    8,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, peak_x),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "peak_y",
+    9,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, peak_y),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "peak_z",
+    10,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, peak_z),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
+  {
+    "peak_m",
+    11,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_FLOAT,
+    0,   /* quantifier_offset */
+    offsetof(MsgRmsReport, peak_m),
+    NULL,
+    NULL,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
 };
 static const unsigned msg_rms_report__field_indices_by_name[] = {
-  2,   /* field[2] = crest */
-  3,   /* field[3] = impulse */
-  5,   /* field[5] = iso */
-  1,   /* field[1] = peak */
-  0,   /* field[0] = rms */
-  4,   /* field[4] = temperature */
+  2,   /* field[2] = iso */
+  10,   /* field[10] = peak_m */
+  7,   /* field[7] = peak_x */
+  8,   /* field[8] = peak_y */
+  9,   /* field[9] = peak_z */
+  6,   /* field[6] = rms_m */
+  3,   /* field[3] = rms_x */
+  4,   /* field[4] = rms_y */
+  5,   /* field[5] = rms_z */
+  0,   /* field[0] = sn */
+  1,   /* field[1] = temperature */
 };
 static const ProtobufCIntRange msg_rms_report__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 6 }
+  { 0, 11 }
 };
 const ProtobufCMessageDescriptor msg_rms_report__descriptor =
 {
@@ -425,7 +502,7 @@ const ProtobufCMessageDescriptor msg_rms_report__descriptor =
   "MsgRmsReport",
   "",
   sizeof(MsgRmsReport),
-  6,
+  11,
   msg_rms_report__field_descriptors,
   msg_rms_report__field_indices_by_name,
   1,  msg_rms_report__number_ranges,

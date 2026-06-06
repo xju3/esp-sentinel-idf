@@ -4,65 +4,165 @@
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 #include <string.h>
+#include <time.h>
+#include "esp_attr.h"
 
 #include "init.h"
 #include "config_manager.h"
 #include "logger.h"
-#include "task_baseline.h"
 #include "web_server.h"
 #include "machine_state.h"
 #include "data_dispatcher.h"
 #include "startup_gate.h"
+#include "task_daq.h"
+#include "task_fft.h"
+#include "task_mqtt_message.h"
+#include "task_rms.h"
+#include "task_envelope.h"
+#include "task_kurtosis.h"
+#include "mqtt_proxy.h"
+#include "drv_iis3dwb.h"
+#include "bsp_4g.h"        // 引入 4G 相关接口
+#include "bsp_wifi.h"      // 引入 WiFi 接口
+#include "esp_sntp.h"      // 引入 WiFi 原生对时
+
+// 声明在 bsp_4g.c 中实现的 4G 对时函数
+extern esp_err_t bsp_4g_sync_time(void);
+
+// === 密集诊断模式状态 (存储在 RTC 内存，深睡掉电不丢失) ===
+RTC_DATA_ATTR int g_dense_diag_remaining = 0;       // 剩余密集诊断次数
+RTC_DATA_ATTR int g_dense_diag_interval_s = 300;    // 密集诊断的时间间隔 (默认 300秒 = 5分钟)
+
+// 供外部业务模块(如云端下发任务、或本地算法异常时)调用
+void enable_dense_diagnostic(int times, int interval_seconds) {
+    g_dense_diag_remaining = times;
+    g_dense_diag_interval_s = interval_seconds;
+}
+
+static void network_bringup_task(void *pvParameters)
+{
+    if (g_user_config.network == 1) {
+        LOG_INFO("Background: Connecting to 4G Network...");
+        init_4g_mqtt(NULL); 
+        // 异步更新一次基站时间，防止设备长期休眠带来的 RTC 晶振温漂
+        (void)bsp_4g_sync_time();
+    } else {
+        LOG_INFO("Background: Connecting to WiFi Network...");
+        wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, NULL);
+        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+        esp_sntp_setservername(0, "pool.ntp.org");
+        esp_sntp_init();
+    }
+    vTaskDelete(NULL);
+}
 
 void app_main(void)
 {
-    // 初始化 NVS (Wi-Fi 驱动必须用到)
+    // 1. 初始化基础外设与配置
     init_nvs();
     init_machine_state();
     ESP_ERROR_CHECK(config_manager_load(&g_user_config));
-    const bool had_valid_config_on_boot = g_user_config.is_configured;
 
-    startup_gate_reset();
-    startup_gate_set_waiting_for_config(true);
-    enable_config_service();
-
-    bool ap_client_connected = startup_gate_wait_for_ap_client(
-        pdMS_TO_TICKS(CONFIG_SENTINEL_BOOT_AP_CONNECT_WINDOW_SEC * 1000U));
-    if (ap_client_connected)
-    {
-        LOG_INFOF("AP client connected during boot window, waiting up to %d seconds for configuration submission.",
-                  CONFIG_SENTINEL_BOOT_AP_CONFIG_WINDOW_SEC);
-
-        bool config_completed = startup_gate_wait_for_config_completed(
-            pdMS_TO_TICKS(CONFIG_SENTINEL_BOOT_AP_CONFIG_WINDOW_SEC * 1000U));
-        if (config_completed)
-        {
-            ESP_ERROR_CHECK(config_manager_load(&g_user_config));
-        }
-        else
-        {
-            LOG_INFO("Configuration window expired.");
-        }
-    }
-    else
-    {
-        LOG_INFO("No AP client connected during boot window.");
-    }
-
-    startup_gate_set_waiting_for_config(false);
-
-    if (!g_user_config.is_configured)
-    {
-        if (had_valid_config_on_boot)
-        {
-            LOG_WARN("Device configuration became invalid during boot gate, staying in configuration mode.");
-        }
-        else
-        {
-            LOG_INFO("Device is not configured, staying in configuration mode.");
-        }
-        return;
-    }
-
+    // 2. 启动本地服务
     ESP_ERROR_CHECK(start_local_services());
+
+    // 设置时区为东八区
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    time_t now = 0;
+    time(&now);
+    bool is_hot_wakeup = (now > 1600000000);
+
+    if (is_hot_wakeup) {
+        // 热唤醒：RTC 时间有效，直接进入后台连网，主线程瞬间放行执行 DAQ
+        LOG_INFOF("Hot wakeup detected. Valid RTC time: %ld. Starting network in background...", (long)now);
+        xTaskCreate(network_bringup_task, "net_bringup", 4096, NULL, 5, NULL);
+    } else {
+        // 冷启动：时间无效(断电重启)，必须强阻塞等待对时完成
+        LOG_INFO("Cold start. Initializing Network & Time Sync blockingly...");
+        if (g_user_config.network == 1) {
+            init_4g_mqtt(NULL);
+            for (int i = 0; i < 5; i++) {
+                if (bsp_4g_sync_time() == ESP_OK) break;
+                vTaskDelay(pdMS_TO_TICKS(2000));
+            }
+        } else {
+            wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, NULL);
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_init();
+        }
+
+        LOG_INFO("Waiting for system time to be synchronized...");
+        int retry_count = 0;
+        while (time(&now) < 1600000000 && retry_count < 60) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            retry_count++;
+        }
+        if (now < 1600000000) {
+            LOG_WARN("Time sync timeout! Scheduling will use un-synced time, which might cause errors.");
+        } else {
+            LOG_INFOF("Time synchronized successfully. Current time: %ld", (long)now);
+        }
+    }
+
+    // 3. 执行单次 DAQ 调度决策 (判断当前时间是否需要采集，若需要则阻塞式采集并推入队列)
+    LOG_INFO("Evaluating DAQ schedule after wakeup...");
+    daq_scheduler_execute();
+
+    // --- 修复2：严谨的全流水线排空等待 ---
+    LOG_INFO("Waiting for data pipeline to drain...");
+    bool pipeline_idle = false;
+    while (!pipeline_idle) {
+        pipeline_idle = true;
+        // 检查所有已知队列是否有积压
+        if (g_rms_job_queue && uxQueueMessagesWaiting(g_rms_job_queue) > 0) pipeline_idle = false;
+        if (g_fft_job_queue && uxQueueMessagesWaiting(g_fft_job_queue) > 0) pipeline_idle = false;
+        if (g_envelope_job_queue && uxQueueMessagesWaiting(g_envelope_job_queue) > 0) pipeline_idle = false;
+        if (g_kurtosis_job_queue && uxQueueMessagesWaiting(g_kurtosis_job_queue) > 0) pipeline_idle = false;
+        
+        // 检查 FFT 任务的 busy 状态
+        if (!task_fft_is_idle()) pipeline_idle = false;
+
+        if (!pipeline_idle) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+    }
+
+    // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
+    LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");
+    mqtt_message_process_pending_tasks();
+
+    // --- 修复3：休眠前必须显式关断外部高功耗模块 ---
+    LOG_INFO("Shutting down peripherals before deep sleep...");
+    (void)mqtt_client_stop(); // 通知 4G 模块 AT+QPOWD=1 关机并释放串口
+    (void)drv_iis3dwb_enter_standby(); // 传感器待机
+    vTaskDelay(pdMS_TO_TICKS(500)); // 给 4G 模块一点点关机信号处理时间
+
+    // 7. 计算下一次唤醒时间并进入深度睡眠
+    uint64_t sleep_time_us = daq_scheduler_get_sleep_time_us();
+
+    // === 拦截并动态覆盖休眠时间 (密集诊断逻辑) ===
+    if (g_dense_diag_remaining > 0) {
+        uint64_t dense_sleep_us = (uint64_t)g_dense_diag_interval_s * 1000000ULL;
+        // 只有当密集诊断的时间比原定周期更短时，才进行覆盖
+        if (sleep_time_us == 0 || dense_sleep_us < sleep_time_us) {
+            sleep_time_us = dense_sleep_us;
+            LOG_INFOF("Dense diagnostic mode active (%d times left). Overriding sleep to %d seconds...", 
+                      g_dense_diag_remaining, g_dense_diag_interval_s);
+        }
+        
+        // 扣减一次剩余次数
+        g_dense_diag_remaining--;
+    }
+
+    if (sleep_time_us > 0) {
+        LOG_INFOF("All tasks finished. Entering deep sleep for %llu seconds...", sleep_time_us / 1000000ULL);
+        esp_sleep_enable_timer_wakeup(sleep_time_us);
+    } else {
+        LOG_INFO("No periodic tasks enabled. Entering infinite deep sleep...");
+    }
+
+    esp_deep_sleep_start();
 }

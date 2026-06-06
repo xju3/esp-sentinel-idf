@@ -7,14 +7,15 @@ idf_component_register(
         "src/task_kurtosis.c"
         "src/task_envelope.c"
         "src/daq_worker.c" 
-        "src/task_baseline.c" 
         "src/wom_lis2dh12.c"
         "src/off_sleep_manager.c"
         "src/task_stash.c"
+        "src/task_mqtt_message.c"
+        "src/task_ota.c"
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
-        esp-dsp driver peri net util algo msg)
+        esp-dsp driver bsp peri net util algo msg json esp_http_client)
 
 if(DEFINED DEVICE_ID)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE DEVICE_ID="${DEVICE_ID}")

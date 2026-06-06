@@ -62,6 +62,8 @@ if(EXISTS "${RESOURCES_SYSTEM_DIR}/config")
     file(GLOB config_files "${RESOURCES_SYSTEM_DIR}/config/*")
     file(COPY ${config_files} DESTINATION "${SPIFFS_TEMP_DIR}/c/")
 endif()
+# CMakeLists.txt 或 sdkconfig
+# target_compile_definitions(${COMPONENT_TARGET} PRIVATE AT=1)
 
 # 将 SPIFFS_TEMP_DIR 打包进 10MB 的 system 分区
 spiffs_create_partition_image(system ${SPIFFS_TEMP_DIR} FLASH_IN_PROJECT)

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <esp_err.h>
+#include "bsp_board.h"
 #include "imu_config.h"
 
 #ifdef __cplusplus
@@ -10,12 +11,12 @@ extern "C" {
 #endif
 
 // GPIO assignments
-#define LIS2DH12_PIN_NUM_INT1   GPIO_NUM_8
-#define LIS2DH12_PIN_NUM_INT2   GPIO_NUM_3
-#define LIS2DH12_PIN_NUM_CS     GPIO_NUM_9     
-#define LIS2DH12_PIN_NUM_SDO    GPIO_NUM_10
-#define LIS2DH12_PIN_NUM_SDA    GPIO_NUM_11    
-#define LIS2DH12_PIN_NUM_SCL    GPIO_NUM_12   
+#define LIS2DH12_PIN_NUM_INT1   BOARD_GPIO_LIS2DH12_INT1
+#define LIS2DH12_PIN_NUM_INT2   BOARD_GPIO_LIS2DH12_INT2
+#define LIS2DH12_PIN_NUM_CS     BOARD_GPIO_LIS2DH12_CS
+#define LIS2DH12_PIN_NUM_SDO    BOARD_GPIO_LIS2DH12_MISO
+#define LIS2DH12_PIN_NUM_SDA    BOARD_GPIO_LIS2DH12_MOSI
+#define LIS2DH12_PIN_NUM_SCL    BOARD_GPIO_LIS2DH12_SCL
 
 // Register addresses (exposed for debugging and configuration)
 #define LIS2DH12_REG_WHO_AM_I      0x0F
