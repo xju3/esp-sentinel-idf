@@ -27,7 +27,7 @@ static esp_err_t execute_config_update_sync(const char *task_id)
     esp_err_t ret = ESP_FAIL;
 
     // 1. 拼接获取配置的完整 URL
-    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/config/%s", g_user_config.host, task_id);
+    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/config/%s", g_user_config.api_host, task_id);
     // LOG_INFOF("Fetching config from: %s", url);
 
     // 2. 通过统一代理接口获取纯 JSON 字符串（自动抹平 4G AT 与 WiFi 差异）
@@ -62,8 +62,8 @@ mqtt_pending_tasks_result_t mqtt_message_process_pending_tasks(void)
     bool keep_4g_required = false;
     bool transport_shutdown = false;
 
-    // 1. 组装拉取任务列表的 URL（去掉硬编码的 :3090 端口，由 g_user_config.host 统一管理）
-    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/tasks/%u", g_user_config.host, (unsigned)SN);
+    // 1. 组装拉取任务列表的 URL（去掉硬编码的 :3090 端口，由 g_user_config.api_host 统一管理）
+    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/tasks/%u", g_user_config.api_host, (unsigned)SN);
     // LOG_INFOF("Polling pending tasks from: %s", url);
 
     // 2. 通过 http_proxy 获取 JSON 响应

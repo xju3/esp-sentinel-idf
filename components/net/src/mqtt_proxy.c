@@ -135,25 +135,25 @@ esp_err_t init_mqtt_client(void)
     }
 
     // 检查 MQTT 服务器地址是否配置
-    if (strlen(g_user_config.host) == 0)
+    if (strlen(g_user_config.mqtt_host) == 0)
     {
         LOG_ERROR("MQTT server address not configured");
         return ESP_FAIL;
     }
 
-    LOG_INFOF("Initializing MQTT client to: %s", g_user_config.host);
+    LOG_INFOF("Initializing MQTT client to: %s", g_user_config.mqtt_host);
 
     // 构建完整的 MQTT URI
     char mqtt_uri[LEN_MAX_HOST + 20]; // 额外空间用于协议和端口
-    if (strstr(g_user_config.host, "://") == NULL)
+    if (strstr(g_user_config.mqtt_host, "://") == NULL)
     {
         // 如果没有协议前缀，添加 mqtt://
-        snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:1883", g_user_config.host);
+        snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:1883", g_user_config.mqtt_host);
     }
     else
     {
         // 如果已有协议前缀，直接使用
-        strncpy(mqtt_uri, g_user_config.host, sizeof(mqtt_uri) - 1);
+        strncpy(mqtt_uri, g_user_config.mqtt_host, sizeof(mqtt_uri) - 1);
         mqtt_uri[sizeof(mqtt_uri) - 1] = '\0';
     }
 

@@ -294,7 +294,7 @@ static void modem_copy_cgpaddr_ip(const char *response, char *ip_addr, size_t ip
 
 static const char *modem_mqtt_host(void)
 {
-    const char *host = g_user_config.host;
+    const char *host = g_user_config.mqtt_host;
     if (host == NULL || host[0] == '\0')
     {
         return BOARD_4G_MQTT_HOST;
