@@ -1822,14 +1822,13 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
     return (offset >= fw_size) ? ESP_OK : ESP_FAIL;
 }
 
-static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
+static esp_err_t bsp_4g_http_write_json_internal(const char *method, const char *url, const char *payload)
 {
-    if (!url || !payload)
+    if (!method || !url || !payload)
         return ESP_ERR_INVALID_ARG;
     if (!s_at_ready)
         return ESP_ERR_INVALID_STATE;
 
-    // 同样由于 QHTTP 默认是 POST，要实现真正的 PUT，需自己手写 Header
     const char *proto_end = strstr(url, "://");
     const char *host_start = proto_end ? proto_end + 3 : url;
     const char *path_start = strchr(host_start, '/');
@@ -1869,12 +1868,12 @@ static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
     int payload_len = strlen(payload);
     char req_header[512];
     int req_len = snprintf(req_header, sizeof(req_header),
-                           "PUT %s HTTP/1.1\r\n"
+                           "%s %s HTTP/1.1\r\n"
                            "Host: %s\r\n"
                            "Content-Type: application/json\r\n"
                            "Content-Length: %d\r\n"
                            "Connection: close\r\n\r\n",
-                           path, host, payload_len);
+                           method, path, host, payload_len);
 
     int total_len = req_len + payload_len;
     snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=80,%d,80\r\n", total_len);
@@ -1922,6 +1921,16 @@ static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
     return err;
 }
 
+static esp_err_t bsp_4g_http_post_json_internal(const char *url, const char *payload)
+{
+    return bsp_4g_http_write_json_internal("POST", url, payload);
+}
+
+static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
+{
+    return bsp_4g_http_write_json_internal("PUT", url, payload);
+}
+
 esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle)
 {
     ensure_at_mutex();
@@ -1936,6 +1945,15 @@ esp_err_t bsp_4g_http_put(const char *url, const char *payload)
     ensure_at_mutex();
     xSemaphoreTake(s_at_mutex, portMAX_DELAY);
     esp_err_t err = bsp_4g_http_put_internal(url, payload);
+    xSemaphoreGive(s_at_mutex);
+    return err;
+}
+
+esp_err_t bsp_4g_http_post_json(const char *url, const char *payload)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = bsp_4g_http_post_json_internal(url, payload);
     xSemaphoreGive(s_at_mutex);
     return err;
 }
