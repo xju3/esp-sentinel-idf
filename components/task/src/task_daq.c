@@ -4,8 +4,8 @@
  */
 #include "task_daq.h"
 #include "config_manager.h"
-#include "daq_worker.h"
 #include "logger.h"
+#include "report_pipeline.h"
 #include "esp_sleep.h"
 #include "esp_err.h"
 #include <time.h>
@@ -38,46 +38,34 @@ esp_err_t daq_scheduler_execute(void)
     bool patrol_enabled = (g_user_config.patrol > 0);
     bool diagnosis_enabled = (g_user_config.diagnosis > 0);
 
-    bool run_patrol = patrol_enabled && (now >= s_next_patrol_time - WAKEUP_TOLERANCE_SEC);
-    bool run_diagnosis = diagnosis_enabled && (now >= s_next_diagnosis_time - WAKEUP_TOLERANCE_SEC);
-
-    // --- 任务重叠时的优先级策略：诊断优先，覆盖并跳过巡检 ---
-    if (run_diagnosis && run_patrol) {
-        LOG_INFO("Task overlap detected. Skipping Patrol in favor of Diagnosis.");
-        run_patrol = false; // 取消巡检标记
-    }
+    const bool run_patrol = patrol_enabled && (now >= s_next_patrol_time - WAKEUP_TOLERANCE_SEC);
+    const bool run_diagnosis = diagnosis_enabled && (now >= s_next_diagnosis_time - WAKEUP_TOLERANCE_SEC);
+    const bool run_report = run_patrol || run_diagnosis;
 
     esp_err_t err = ESP_OK;
 
-    // --- 执行 DAQ 任务调度 ---
-    if (run_diagnosis) {
-        LOG_INFO("Executing Diagnosis task...");
-        daq_worker_param_t param = {
-            .rpm = g_user_config.rpm,
-            .task_mode = TASK_MODE_DIAGNOSIS
-        };
-        err = start_daq_worker(&param);
-        
-        // 更新下次诊断时间
-        s_next_diagnosis_time = now + (time_t)(g_user_config.diagnosis * 60);
-        
-        // 如果因为合并策略跳过了巡检，必须同步将巡检下一次时间后移，防止它在下次唤醒时立刻抢跑
-        if (now >= s_next_patrol_time - WAKEUP_TOLERANCE_SEC) {
+    // 新机制不再区分 patrol / diagnosis：任一检测周期到期，都执行一次完整 normal report。
+    if (run_report) {
+        LOG_INFO("Executing unified normal report pipeline...");
+        err = report_pipeline_run(NULL);
+
+        if (run_patrol) {
             s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
         }
-    } 
-    else if (run_patrol) {
-        LOG_INFO("Executing Patrol task...");
-        daq_worker_param_t param = {
-            .rpm = g_user_config.rpm,
-            .task_mode = TASK_MODE_PATROLING
-        };
-        err = start_daq_worker(&param);
-        
-        // 更新下次巡检时间
-        s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
+        if (run_diagnosis) {
+            s_next_diagnosis_time = now + (time_t)(g_user_config.diagnosis * 60);
+        }
     } else {
-        LOG_INFO("Woke up but no DAQ task scheduled to run right now.");
+        LOG_INFO("Woke up but no report task scheduled to run right now.");
+    }
+
+    // If one schedule was never initialized because the matching task is disabled,
+    // keep it away from the past before it is re-enabled by a config update.
+    if (diagnosis_enabled && s_next_diagnosis_time <= 0) {
+        s_next_diagnosis_time = now + (time_t)(g_user_config.diagnosis * 60);
+    }
+    if (patrol_enabled && s_next_patrol_time <= 0) {
+        s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
     }
 
     return err;

@@ -9,11 +9,6 @@
 #include "mqtt_proxy.h"
 #include "data_dispatcher.h"
 #include "task_daq.h"
-#include "task_fft.h"
-#include "task_diag_fusion.h"
-#include "task_rms.h"
-#include "task_kurtosis.h"
-#include "task_envelope.h"
 #include "off_sleep_manager.h"
 #include "wom_lis2dh12.h"
 
@@ -34,31 +29,6 @@ static void init_sensors()
 static esp_err_t enable_tasks()
 {
     esp_err_t ret = start_task_daq();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-    ret = start_rms_task();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-    ret = start_fft_task();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-    ret = start_diag_fusion_task();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-    ret = start_kurtosis_task();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-    ret = start_envelope_task();
     if (ret != ESP_OK)
     {
         return ret;
@@ -111,4 +81,3 @@ esp_err_t start_local_services()
     LOG_INFO("Local services ready without network.");
     return ESP_OK;
 }
-

@@ -15,11 +15,7 @@
 #include "data_dispatcher.h"
 #include "startup_gate.h"
 #include "task_daq.h"
-#include "task_fft.h"
 #include "task_mqtt_message.h"
-#include "task_rms.h"
-#include "task_envelope.h"
-#include "task_kurtosis.h"
 #include "mqtt_proxy.h"
 #include "drv_iis3dwb.h"
 #include "bsp_4g.h"        // 引入 4G 相关接口
@@ -111,24 +107,7 @@ void app_main(void)
     LOG_INFO("Evaluating DAQ schedule after wakeup...");
     daq_scheduler_execute();
 
-    // --- 修复2：严谨的全流水线排空等待 ---
-    LOG_INFO("Waiting for data pipeline to drain...");
-    bool pipeline_idle = false;
-    while (!pipeline_idle) {
-        pipeline_idle = true;
-        // 检查所有已知队列是否有积压
-        if (g_rms_job_queue && uxQueueMessagesWaiting(g_rms_job_queue) > 0) pipeline_idle = false;
-        if (g_fft_job_queue && uxQueueMessagesWaiting(g_fft_job_queue) > 0) pipeline_idle = false;
-        if (g_envelope_job_queue && uxQueueMessagesWaiting(g_envelope_job_queue) > 0) pipeline_idle = false;
-        if (g_kurtosis_job_queue && uxQueueMessagesWaiting(g_kurtosis_job_queue) > 0) pipeline_idle = false;
-        
-        // 检查 FFT 任务的 busy 状态
-        if (!task_fft_is_idle()) pipeline_idle = false;
-
-        if (!pipeline_idle) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-    }
+    LOG_INFO("Report pipeline finished.");
 
     // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
     LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");

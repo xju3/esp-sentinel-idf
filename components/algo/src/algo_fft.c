@@ -18,8 +18,8 @@ static SemaphoreHandle_t s_fft_lock = NULL;
 static StaticSemaphore_t s_fft_peaks_lock_buf;
 static SemaphoreHandle_t s_fft_peaks_lock = NULL;
 
-// 最大支持 4096 点 FFT（与 CONFIG_DSP_MAX_FFT_SIZE=4096 一致）
-#define MAX_FFT_SIZE 4096
+// Match the ESP-DSP lookup table size selected in sdkconfig.
+#define MAX_FFT_SIZE CONFIG_DSP_MAX_FFT_SIZE
 EXT_RAM_BSS_ATTR static float s_fft_scratch[MAX_FFT_SIZE] __attribute__((aligned(16)));
 EXT_RAM_BSS_ATTR static float s_fft_mag_x[MAX_FFT_SIZE / 2];
 EXT_RAM_BSS_ATTR static float s_fft_mag_y[MAX_FFT_SIZE / 2];
