@@ -1,6 +1,7 @@
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
 #include <string.h>
@@ -25,6 +26,10 @@
 // 声明在 bsp_4g.c 中实现的 4G 对时函数
 extern esp_err_t bsp_4g_sync_time(void);
 
+// 定义事件组，用于主线程与后台网络任务的同步
+static EventGroupHandle_t s_network_event_group = NULL;
+#define NETWORK_DONE_BIT BIT0
+
 // === 密集诊断模式状态 (存储在 RTC 内存，深睡掉电不丢失) ===
 RTC_DATA_ATTR int g_dense_diag_remaining = 0;       // 剩余密集诊断次数
 RTC_DATA_ATTR int g_dense_diag_interval_s = 300;    // 密集诊断的时间间隔 (默认 300秒 = 5分钟)
@@ -48,6 +53,19 @@ static void network_bringup_task(void *pvParameters)
         esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
         esp_sntp_setservername(0, "pool.ntp.org");
         esp_sntp_init();
+        
+        // WiFi 模式下，非阻塞等待 SNTP 拿到时间
+        time_t now = 0;
+        int retries = 0;
+        while (time(&now) < 1600000000 && retries < 10) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            retries++;
+        }
+    }
+
+    // 通知主线程：网络及对时已经准备就绪
+    if (s_network_event_group != NULL) {
+        xEventGroupSetBits(s_network_event_group, NETWORK_DONE_BIT);
     }
     vTaskDelete(NULL);
 }
@@ -69,6 +87,8 @@ void app_main(void)
     time_t now = 0;
     time(&now);
     bool is_hot_wakeup = (now > 1600000000);
+
+    s_network_event_group = xEventGroupCreate();
 
     if (is_hot_wakeup) {
         // 热唤醒：RTC 时间有效，直接进入后台连网，主线程瞬间放行执行 DAQ
@@ -112,6 +132,13 @@ void app_main(void)
     // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
     LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");
     mqtt_message_process_pending_tasks();
+    
+    // --- 修复：给后台网络及对时任务留出存活窗口 ---
+    if (is_hot_wakeup) {
+        LOG_INFO("Hot wakeup: Waiting for background network and time sync to complete...");
+        // 最长等待 5 秒。如果网络和对时提前完成，主线程会立刻被唤醒并放行，不会死等
+        xEventGroupWaitBits(s_network_event_group, NETWORK_DONE_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(5000));
+    }
 
     // --- 修复3：休眠前必须显式关断外部高功耗模块 ---
     LOG_INFO("Shutting down peripherals before deep sleep...");
