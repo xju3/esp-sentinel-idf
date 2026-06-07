@@ -1,0 +1,208 @@
+{
+  "schema_version": 2,
+  "sn": "STL26SH0001",
+  "ts_ms": 1780791091029,
+  "temperature_c": 3.4,
+  "fs_hz": 26667,
+  "requested_range_g": 2,
+  "range_g": 2,
+  "points": 4096,
+  "task_id": "",
+  "sample_type": "normal",
+  "analysis_config": {
+    "fft_peak_count": 5,
+    "fft_peak_min_hz": 0,
+    "fft_peak_max_hz": 5000,
+    "dc_removed": true,
+    "band_energy_ranges_hz": [
+      {
+        "key": "0_100",
+        "min_hz": 0,
+        "max_hz": 100
+      },
+      {
+        "key": "100_500",
+        "min_hz": 100,
+        "max_hz": 500
+      },
+      {
+        "key": "500_1000",
+        "min_hz": 500,
+        "max_hz": 1000
+      },
+      {
+        "key": "1000_2000",
+        "min_hz": 1000,
+        "max_hz": 2000
+      },
+      {
+        "key": "2000_5000",
+        "min_hz": 2000,
+        "max_hz": 5000
+      }
+    ]
+  },
+  "quality": {
+    "status": "ok",
+    "auto_range": false,
+    "attempts": [
+      {
+        "range_g": 2,
+        "accepted": true,
+        "reason": "ok",
+        "clip_threshold_g": 1.96,
+        "stats": {
+          "X": {
+            "max_abs_g": 0.179,
+            "clip_count": 0,
+            "clip_ratio": 0
+          },
+          "Y": {
+            "max_abs_g": 0.066,
+            "clip_count": 0,
+            "clip_ratio": 0
+          },
+          "Z": {
+            "max_abs_g": 0.996,
+            "clip_count": 0,
+            "clip_ratio": 0
+          }
+        }
+      }
+    ]
+  },
+  "axis_features": {
+    "X": {
+      "time": {
+        "mean_g": 0.129,
+        "rms_acc_g": 0.014,
+        "peak_acc_g": 0.051,
+        "peak_to_peak_acc_g": 0.102,
+        "rms_vel_mm_s": 0.14,
+        "crest_factor": 3.61,
+        "kurtosis": 2.97
+      },
+      "freq": {
+        "peaks": [
+          {
+            "freq_hz": 1093.8,
+            "amp_g": 0.0013
+          },
+          {
+            "freq_hz": 781.3,
+            "amp_g": 0.0013
+          },
+          {
+            "freq_hz": 2871.1,
+            "amp_g": 0.0012
+          },
+          {
+            "freq_hz": 599.0,
+            "amp_g": 0.0011
+          },
+          {
+            "freq_hz": 826.8,
+            "amp_g": 0.0010
+          }
+        ],
+        "spectral_centroid_hz": 2349.3,
+        "spectral_entropy": 0.927
+      },
+      "band_energy_ratio": {
+        "0_100": 0.026,
+        "100_500": 0.055,
+        "500_1000": 0.13,
+        "1000_2000": 0.25,
+        "2000_5000": 0.539
+      }
+    },
+    "Y": {
+      "time": {
+        "mean_g": -0.013,
+        "rms_acc_g": 0.013,
+        "peak_acc_g": 0.050,
+        "peak_to_peak_acc_g": 0.104,
+        "rms_vel_mm_s": 0.07,
+        "crest_factor": 4.14,
+        "kurtosis": 3.24
+      },
+      "freq": {
+        "peaks": [
+          {
+            "freq_hz": 1028.7,
+            "amp_g": 0.0011
+          },
+          {
+            "freq_hz": 1230.5,
+            "amp_g": 0.0011
+          },
+          {
+            "freq_hz": 520.8,
+            "amp_g": 0.0010
+          },
+          {
+            "freq_hz": 787.8,
+            "amp_g": 0.0010
+          },
+          {
+            "freq_hz": 1234.5,
+            "amp_g": 0.0010
+          }
+        ],
+        "spectral_centroid_hz": 2400.9,
+        "spectral_entropy": 0.934
+      },
+      "band_energy_ratio": {
+        "0_100": 0.029,
+        "100_500": 0.06,
+        "500_1000": 0.13,
+        "1000_2000": 0.24,
+        "2000_5000": 0.541
+      }
+    },
+    "Z": {
+      "time": {
+        "mean_g": -0.928,
+        "rms_acc_g": 0.012,
+        "peak_acc_g": 0.069,
+        "peak_to_peak_acc_g": 0.137,
+        "rms_vel_mm_s": 0.07,
+        "crest_factor": 3.7,
+        "kurtosis": 3.38
+      },
+      "freq": {
+        "peaks": [
+          {
+            "freq_hz": 520.8,
+            "amp_g": 0.0021
+          },
+          {
+            "freq_hz": 618.5,
+            "amp_g": 0.0018
+          },
+          {
+            "freq_hz": 826.8,
+            "amp_g": 0.0017
+          },
+          {
+            "freq_hz": 4778.7,
+            "amp_g": 0.0016
+          },
+          {
+            "freq_hz": 123.4,
+            "amp_g": 0.0015
+          }
+        ],
+        "spectral_centroid_hz": 2341.9,
+        "spectral_entropy": 0.915
+      },
+      "band_energy_ratio": {
+        "0_100": 0.013,
+        "100_500": 0.075,
+        "500_1000": 0.2,
+        "1000_2000": 0.24,
+        "2000_5000": 0.472
+      }
+    }
+  }
+}

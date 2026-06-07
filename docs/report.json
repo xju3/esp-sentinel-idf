@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "sn": "STL26BW001",
   "ts_ms": 1710000000000,
   "temperature_c": 23.8,
@@ -13,6 +13,7 @@
     "fft_peak_count": 5,
     "fft_peak_min_hz": 0,
     "fft_peak_max_hz": 5000,
+    "dc_removed": true,
     "band_energy_ranges_hz": [
       {
         "key": "0_100",
@@ -20,33 +21,23 @@
         "max_hz": 100
       },
       {
-        "key": "100_200",
+        "key": "100_500",
         "min_hz": 100,
-        "max_hz": 200
+        "max_hz": 500
       },
       {
-        "key": "200_400",
-        "min_hz": 200,
-        "max_hz": 400
+        "key": "500_1000",
+        "min_hz": 500,
+        "max_hz": 1000
       },
       {
-        "key": "400_800",
-        "min_hz": 400,
-        "max_hz": 800
+        "key": "1000_2000",
+        "min_hz": 1000,
+        "max_hz": 2000
       },
       {
-        "key": "800_1600",
-        "min_hz": 800,
-        "max_hz": 1600
-      },
-      {
-        "key": "1600_3200",
-        "min_hz": 1600,
-        "max_hz": 3200
-      },
-      {
-        "key": "3200_5000",
-        "min_hz": 3200,
+        "key": "2000_5000",
+        "min_hz": 2000,
         "max_hz": 5000
       }
     ]
@@ -106,131 +97,134 @@
   "axis_features": {
     "X": {
       "time": {
-        "rms_g": 0.07866,
-        "peak_g": 0.37557,
-        "crest_factor": 4.77,
+        "mean_g": 0.012,
+        "rms_acc_g": 0.079,
+        "peak_acc_g": 0.189,
+        "peak_to_peak_acc_g": 0.361,
+        "rms_vel_mm_s": 4.6,
+        "crest_factor": 2.4,
         "kurtosis": 2.61
       },
       "freq": {
         "peaks": [
           {
-            "freq_hz": 696.62,
+            "freq_hz": 696.6,
             "amp_g": 0.0312
           },
           {
-            "freq_hz": 598.97,
+            "freq_hz": 599,
             "amp_g": 0.0249
           },
           {
-            "freq_hz": 1217.46,
+            "freq_hz": 1217.5,
             "amp_g": 0.0168
           },
           {
-            "freq_hz": 1617.46,
+            "freq_hz": 1617.5,
             "amp_g": 0.0117
           },
           {
-            "freq_hz": 1817.46,
+            "freq_hz": 1817.5,
             "amp_g": 0.0094
           }
         ],
-        "spectral_centroid_hz": 966.27,
+        "spectral_centroid_hz": 966.3,
         "spectral_entropy": 0.411
       },
       "band_energy_ratio": {
-        "0_100": 0.0003,
-        "100_200": 0.0028,
-        "200_400": 0.0265,
-        "400_800": 0.7265,
-        "800_1600": 0.2014,
-        "1600_3200": 0.0350,
-        "3200_5000": 0.0075
+        "0_100": 0,
+        "100_500": 0.03,
+        "500_1000": 0.57,
+        "1000_2000": 0.34,
+        "2000_5000": 0.06
       }
     },
     "Y": {
       "time": {
-        "rms_g": 0.05218,
-        "peak_g": 0.21483,
+        "mean_g": -0.006,
+        "rms_acc_g": 0.052,
+        "peak_acc_g": 0.215,
+        "peak_to_peak_acc_g": 0.402,
+        "rms_vel_mm_s": 3.2,
         "crest_factor": 4.12,
         "kurtosis": 2.84
       },
       "freq": {
         "peaks": [
           {
-            "freq_hz": 703.13,
+            "freq_hz": 703.1,
             "amp_g": 0.0186
           },
           {
-            "freq_hz": 605.47,
+            "freq_hz": 605.5,
             "amp_g": 0.0141
           },
           {
-            "freq_hz": 1197.93,
+            "freq_hz": 1197.9,
             "amp_g": 0.0105
           },
           {
-            "freq_hz": 1503.27,
+            "freq_hz": 1503.3,
             "amp_g": 0.0079
           },
           {
-            "freq_hz": 2213.89,
+            "freq_hz": 2213.9,
             "amp_g": 0.0061
           }
         ],
-        "spectral_centroid_hz": 875.42,
+        "spectral_centroid_hz": 875.4,
         "spectral_entropy": 0.438
       },
       "band_energy_ratio": {
-        "0_100": 0.0005,
-        "100_200": 0.0041,
-        "200_400": 0.0318,
-        "400_800": 0.6532,
-        "800_1600": 0.2477,
-        "1600_3200": 0.0516,
-        "3200_5000": 0.0111
+        "0_100": 0.001,
+        "100_500": 0.036,
+        "500_1000": 0.53,
+        "1000_2000": 0.35,
+        "2000_5000": 0.083
       }
     },
     "Z": {
       "time": {
-        "rms_g": 0.09137,
-        "peak_g": 0.42122,
+        "mean_g": 0.982,
+        "rms_acc_g": 0.091,
+        "peak_acc_g": 0.421,
+        "peak_to_peak_acc_g": 0.783,
+        "rms_vel_mm_s": 5.4,
         "crest_factor": 4.61,
         "kurtosis": 3.18
       },
       "freq": {
         "peaks": [
           {
-            "freq_hz": 690.11,
+            "freq_hz": 690.1,
             "amp_g": 0.0367
           },
           {
-            "freq_hz": 598.97,
+            "freq_hz": 599,
             "amp_g": 0.0256
           },
           {
-            "freq_hz": 1302.07,
+            "freq_hz": 1302.1,
             "amp_g": 0.0198
           },
           {
-            "freq_hz": 1797.93,
+            "freq_hz": 1797.9,
             "amp_g": 0.0124
           },
           {
-            "freq_hz": 2604.13,
+            "freq_hz": 2604.1,
             "amp_g": 0.0087
           }
         ],
-        "spectral_centroid_hz": 1042.66,
+        "spectral_centroid_hz": 1042.7,
         "spectral_entropy": 0.395
       },
       "band_energy_ratio": {
-        "0_100": 0.0002,
-        "100_200": 0.0021,
-        "200_400": 0.0204,
-        "400_800": 0.7018,
-        "800_1600": 0.2216,
-        "1600_3200": 0.0469,
-        "3200_5000": 0.0070
+        "0_100": 0,
+        "100_500": 0.022,
+        "500_1000": 0.56,
+        "1000_2000": 0.35,
+        "2000_5000": 0.068
       }
     }
   }

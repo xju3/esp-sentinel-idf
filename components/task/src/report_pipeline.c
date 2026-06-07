@@ -22,6 +22,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 #ifndef REPORT_SN
 #define REPORT_SN "UNKNOWN"
 #endif
@@ -46,7 +50,7 @@
 #error "CONFIG_DSP_MAX_FFT_SIZE must be >= POINTS"
 #endif
 
-#define REPORT_SCHEMA_VERSION 1
+#define REPORT_SCHEMA_VERSION 2
 #define REPORT_SAMPLE_TYPE "normal"
 #define REPORT_FS_HZ 26667.0f
 #define REPORT_POINTS ((uint32_t)POINTS)
@@ -58,6 +62,7 @@
 #define REPORT_FFT_PEAK_COUNT 5
 #define REPORT_FFT_PEAK_MIN_HZ 0.0f
 #define REPORT_FFT_PEAK_MAX_HZ 5000.0f
+#define REPORT_BAND_COUNT 5
 
 static float *s_vib_buffer;
 static float *s_fft_scratch;
@@ -88,8 +93,11 @@ typedef struct {
 } report_peak_t;
 
 typedef struct {
-    float rms_g;
-    float peak_g;
+    float mean_g;
+    float rms_acc_g;
+    float peak_acc_g;
+    float peak_to_peak_acc_g;
+    float rms_vel_mm_s;
     float crest_factor;
     float kurtosis;
 } axis_time_features_t;
@@ -98,7 +106,8 @@ typedef struct {
     report_peak_t peaks[REPORT_FFT_PEAK_COUNT];
     float spectral_centroid_hz;
     float spectral_entropy;
-    float band_ratio[7];
+    float rms_vel_mm_s;
+    float band_ratio[REPORT_BAND_COUNT];
 } axis_freq_features_t;
 
 static const struct {
@@ -107,13 +116,25 @@ static const struct {
     float max_hz;
 } s_bands[] = {
     {"0_100", 0.0f, 100.0f},
-    {"100_200", 100.0f, 200.0f},
-    {"200_400", 200.0f, 400.0f},
-    {"400_800", 400.0f, 800.0f},
-    {"800_1600", 800.0f, 1600.0f},
-    {"1600_3200", 1600.0f, 3200.0f},
-    {"3200_5000", 3200.0f, 5000.0f},
+    {"100_500", 100.0f, 500.0f},
+    {"500_1000", 500.0f, 1000.0f},
+    {"1000_2000", 1000.0f, 2000.0f},
+    {"2000_5000", 2000.0f, 5000.0f},
 };
+
+static double round_to_decimals(double value, int decimals)
+{
+    double scale = 1.0;
+    for (int i = 0; i < decimals; ++i) {
+        scale *= 10.0;
+    }
+    return round(value * scale) / scale;
+}
+
+static cJSON *add_number_rounded(cJSON *object, const char *key, double value, int decimals)
+{
+    return cJSON_AddNumberToObject(object, key, round_to_decimals(value, decimals));
+}
 
 static uint64_t current_epoch_ms_or_zero(void)
 {
@@ -300,31 +321,38 @@ static esp_err_t capture_with_auto_range(capture_attempt_t *attempts,
     return ESP_OK;
 }
 
-static axis_time_features_t compute_time_features(const float *data)
+static axis_time_features_t compute_time_features(const float *ac_data, float mean_g)
 {
     axis_time_features_t f = {0};
-    double sum = 0.0;
     double sum_sq = 0.0;
+    float min_v = ac_data[0];
+    float max_v = ac_data[0];
+    f.mean_g = mean_g;
 
     for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
-        const double v = data[i];
+        const double v = ac_data[i];
         const double av = fabs(v);
-        sum += v;
         sum_sq += v * v;
-        if ((float)av > f.peak_g) {
-            f.peak_g = (float)av;
+        if ((float)av > f.peak_acc_g) {
+            f.peak_acc_g = (float)av;
+        }
+        if (ac_data[i] < min_v) {
+            min_v = ac_data[i];
+        }
+        if (ac_data[i] > max_v) {
+            max_v = ac_data[i];
         }
     }
 
-    const double mean = sum / (double)REPORT_POINTS;
     const double rms_sq = sum_sq / (double)REPORT_POINTS;
-    f.rms_g = (float)sqrt(rms_sq);
-    f.crest_factor = (f.rms_g > 0.0f) ? (f.peak_g / f.rms_g) : 0.0f;
+    f.rms_acc_g = (float)sqrt(rms_sq);
+    f.peak_to_peak_acc_g = max_v - min_v;
+    f.crest_factor = (f.rms_acc_g > 0.0f) ? (f.peak_acc_g / f.rms_acc_g) : 0.0f;
 
     double m2 = 0.0;
     double m4 = 0.0;
     for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
-        const double d = (double)data[i] - mean;
+        const double d = (double)ac_data[i];
         const double d2 = d * d;
         m2 += d2;
         m4 += d2 * d2;
@@ -361,14 +389,8 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     }
     memset(out, 0, sizeof(*out));
 
-    double mean = 0.0;
-    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
-        mean += data[i];
-    }
-    mean /= (double)REPORT_POINTS;
-
-    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
-        s_fft_scratch[i] = data[i] - (float)mean;
+    if (data != s_fft_scratch) {
+        memcpy(s_fft_scratch, data, REPORT_POINTS * sizeof(float));
     }
 
     esp_err_t err = algo_fft_calculate(s_fft_scratch, s_fft_mag, REPORT_POINTS);
@@ -381,7 +403,8 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     double amp_sum = 0.0;
     double weighted_freq_sum = 0.0;
     double energy_sum = 0.0;
-    double band_energy[7] = {0};
+    double vel_rms_sq_sum = 0.0;
+    double band_energy[REPORT_BAND_COUNT] = {0};
 
     for (uint32_t i = 1; i < half; ++i) {
         const float freq_hz = (float)i * bin_hz;
@@ -394,9 +417,12 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
 
         const float amp = s_fft_mag[i];
         const double energy = (double)amp * (double)amp;
+        const double accel_peak_m_s2 = (double)amp * 9.80665;
+        const double vel_peak_m_s = accel_peak_m_s2 / (2.0 * M_PI * (double)freq_hz);
         amp_sum += amp;
         weighted_freq_sum += (double)freq_hz * (double)amp;
         energy_sum += energy;
+        vel_rms_sq_sum += (vel_peak_m_s * vel_peak_m_s) * 0.5;
 
         for (size_t b = 0; b < sizeof(s_bands) / sizeof(s_bands[0]); ++b) {
             const bool in_last = (b == (sizeof(s_bands) / sizeof(s_bands[0])) - 1U) &&
@@ -414,6 +440,7 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     }
 
     out->spectral_centroid_hz = (amp_sum > 0.0) ? (float)(weighted_freq_sum / amp_sum) : 0.0f;
+    out->rms_vel_mm_s = (float)(sqrt(vel_rms_sq_sum) * 1000.0);
     if (energy_sum > 0.0) {
         double entropy = 0.0;
         uint32_t bins = 0;
@@ -438,6 +465,23 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     return ESP_OK;
 }
 
+static void remove_dc_to_buffer(const float *data, float *out, float *out_mean_g)
+{
+    double sum = 0.0;
+    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+        sum += data[i];
+    }
+
+    const float mean = (float)(sum / (double)REPORT_POINTS);
+    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+        out[i] = data[i] - mean;
+    }
+
+    if (out_mean_g) {
+        *out_mean_g = mean;
+    }
+}
+
 static cJSON *add_analysis_config(void)
 {
     cJSON *cfg = cJSON_CreateObject();
@@ -445,8 +489,9 @@ static cJSON *add_analysis_config(void)
         return NULL;
     }
     cJSON_AddNumberToObject(cfg, "fft_peak_count", REPORT_FFT_PEAK_COUNT);
-    cJSON_AddNumberToObject(cfg, "fft_peak_min_hz", REPORT_FFT_PEAK_MIN_HZ);
-    cJSON_AddNumberToObject(cfg, "fft_peak_max_hz", REPORT_FFT_PEAK_MAX_HZ);
+    add_number_rounded(cfg, "fft_peak_min_hz", REPORT_FFT_PEAK_MIN_HZ, 1);
+    add_number_rounded(cfg, "fft_peak_max_hz", REPORT_FFT_PEAK_MAX_HZ, 1);
+    cJSON_AddBoolToObject(cfg, "dc_removed", true);
 
     cJSON *bands = cJSON_AddArrayToObject(cfg, "band_energy_ranges_hz");
     if (!bands) {
@@ -460,8 +505,8 @@ static cJSON *add_analysis_config(void)
             return NULL;
         }
         cJSON_AddStringToObject(band, "key", s_bands[i].key);
-        cJSON_AddNumberToObject(band, "min_hz", s_bands[i].min_hz);
-        cJSON_AddNumberToObject(band, "max_hz", s_bands[i].max_hz);
+        add_number_rounded(band, "min_hz", s_bands[i].min_hz, 1);
+        add_number_rounded(band, "max_hz", s_bands[i].max_hz, 1);
         cJSON_AddItemToArray(bands, band);
     }
     return cfg;
@@ -489,13 +534,13 @@ static cJSON *add_quality(const capture_attempt_t *attempts, size_t attempt_coun
         cJSON_AddNumberToObject(item, "range_g", a->range_g);
         cJSON_AddBoolToObject(item, "accepted", a->accepted);
         cJSON_AddStringToObject(item, "reason", a->accepted ? "ok" : "clipped");
-        cJSON_AddNumberToObject(item, "clip_threshold_g", (float)a->range_g * REPORT_CLIP_THRESHOLD_RATIO);
+        add_number_rounded(item, "clip_threshold_g", (float)a->range_g * REPORT_CLIP_THRESHOLD_RATIO, 3);
         cJSON *axes = cJSON_AddObjectToObject(item, "axes");
         for (int axis = 0; axis < 3; ++axis) {
             cJSON *q = cJSON_CreateObject();
-            cJSON_AddNumberToObject(q, "max_abs_g", a->axes[axis].max_abs_g);
+            add_number_rounded(q, "max_abs_g", a->axes[axis].max_abs_g, 3);
             cJSON_AddNumberToObject(q, "clip_count", a->axes[axis].clip_count);
-            cJSON_AddNumberToObject(q, "clip_ratio", a->axes[axis].clip_ratio);
+            add_number_rounded(q, "clip_ratio", a->axes[axis].clip_ratio, 6);
             cJSON_AddItemToObject(axes, axis_names[axis], q);
         }
         cJSON_AddItemToArray(arr, item);
@@ -507,10 +552,13 @@ static cJSON *add_quality(const capture_attempt_t *attempts, size_t attempt_coun
 static void add_time_features(cJSON *axis, const axis_time_features_t *f)
 {
     cJSON *time = cJSON_AddObjectToObject(axis, "time");
-    cJSON_AddNumberToObject(time, "rms_g", f->rms_g);
-    cJSON_AddNumberToObject(time, "peak_g", f->peak_g);
-    cJSON_AddNumberToObject(time, "crest_factor", f->crest_factor);
-    cJSON_AddNumberToObject(time, "kurtosis", f->kurtosis);
+    add_number_rounded(time, "mean_g", f->mean_g, 3);
+    add_number_rounded(time, "rms_acc_g", f->rms_acc_g, 3);
+    add_number_rounded(time, "peak_acc_g", f->peak_acc_g, 3);
+    add_number_rounded(time, "peak_to_peak_acc_g", f->peak_to_peak_acc_g, 3);
+    add_number_rounded(time, "rms_vel_mm_s", f->rms_vel_mm_s, 2);
+    add_number_rounded(time, "crest_factor", f->crest_factor, 2);
+    add_number_rounded(time, "kurtosis", f->kurtosis, 2);
 }
 
 static void add_freq_features(cJSON *axis, const axis_freq_features_t *f)
@@ -519,16 +567,16 @@ static void add_freq_features(cJSON *axis, const axis_freq_features_t *f)
     cJSON *peaks = cJSON_AddArrayToObject(freq, "peaks");
     for (int i = 0; i < REPORT_FFT_PEAK_COUNT; ++i) {
         cJSON *peak = cJSON_CreateObject();
-        cJSON_AddNumberToObject(peak, "freq_hz", f->peaks[i].freq_hz);
-        cJSON_AddNumberToObject(peak, "amp_g", f->peaks[i].amp_g);
+        add_number_rounded(peak, "freq_hz", f->peaks[i].freq_hz, 1);
+        add_number_rounded(peak, "amp_g", f->peaks[i].amp_g, 4);
         cJSON_AddItemToArray(peaks, peak);
     }
-    cJSON_AddNumberToObject(freq, "spectral_centroid_hz", f->spectral_centroid_hz);
-    cJSON_AddNumberToObject(freq, "spectral_entropy", f->spectral_entropy);
+    add_number_rounded(freq, "spectral_centroid_hz", f->spectral_centroid_hz, 1);
+    add_number_rounded(freq, "spectral_entropy", f->spectral_entropy, 3);
 
     cJSON *bands = cJSON_AddObjectToObject(axis, "band_energy_ratio");
     for (size_t i = 0; i < sizeof(s_bands) / sizeof(s_bands[0]); ++i) {
-        cJSON_AddNumberToObject(bands, s_bands[i].key, f->band_ratio[i]);
+        add_number_rounded(bands, s_bands[i].key, f->band_ratio[i], 3);
     }
 }
 
@@ -541,13 +589,17 @@ static esp_err_t add_axis_features(cJSON *root)
     }
 
     for (int axis = 0; axis < 3; ++axis) {
-        const float *data = s_vib_buffer + REPORT_POINTS * (uint32_t)axis;
-        axis_time_features_t time_features = compute_time_features(data);
+        const float *raw_data = s_vib_buffer + REPORT_POINTS * (uint32_t)axis;
+        float mean_g = 0.0f;
+        remove_dc_to_buffer(raw_data, s_fft_scratch, &mean_g);
+
+        axis_time_features_t time_features = compute_time_features(s_fft_scratch, mean_g);
         axis_freq_features_t freq_features = {0};
-        esp_err_t err = compute_freq_features(data, &freq_features);
+        esp_err_t err = compute_freq_features(s_fft_scratch, &freq_features);
         if (err != ESP_OK) {
             return err;
         }
+        time_features.rms_vel_mm_s = freq_features.rms_vel_mm_s;
 
         cJSON *axis_obj = cJSON_AddObjectToObject(axes, axis_names[axis]);
         add_time_features(axis_obj, &time_features);
@@ -573,9 +625,9 @@ static char *build_report_json(uint64_t ts_ms,
 
     cJSON_AddNumberToObject(root, "schema_version", REPORT_SCHEMA_VERSION);
     cJSON_AddStringToObject(root, "sn", REPORT_SN);
-    cJSON_AddNumberToObject(root, "ts_ms", (double)ts_ms);
+    add_number_rounded(root, "ts_ms", (double)ts_ms, 0);
     if (temperature_valid) {
-        cJSON_AddNumberToObject(root, "temperature_c", temperature_c);
+        add_number_rounded(root, "temperature_c", temperature_c, 1);
     } else {
         cJSON_AddNullToObject(root, "temperature_c");
     }
