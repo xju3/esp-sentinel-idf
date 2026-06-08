@@ -6,6 +6,7 @@
 #include "drv_t1820b.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "http_proxy.h"
 #include "logger.h"
 #include "sdkconfig.h"
 
@@ -668,18 +669,81 @@ static char *build_report_json(uint64_t ts_ms,
 
 static void log_report_json(const char *json)
 {
+    return;
+    // if (!json) {
+    //     return;
+    // }
+
+    // const size_t len = strlen(json);
+    // LOG_INFOF("Report JSON begin, len=%u", (unsigned)len);
+    // for (size_t i = 0; i < len; i += 256U) {
+    //     const size_t remaining = len - i;
+    //     const size_t chunk = remaining > 256U ? 256U : remaining;
+    //     LOG_INFOF("%.*s", (int)chunk, json + i);
+    // }
+    // LOG_INFO("Report JSON end");
+}
+
+static esp_err_t post_report_json(const char *json)
+{
     if (!json) {
-        return;
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (g_user_config.api_host[0] == '\0') {
+        LOG_ERROR("Cannot upload report JSON: api_host is empty");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    const size_t len = strlen(json);
-    LOG_INFOF("Report JSON begin, len=%u", (unsigned)len);
-    for (size_t i = 0; i < len; i += 256U) {
-        const size_t remaining = len - i;
-        const size_t chunk = remaining > 256U ? 256U : remaining;
-        LOG_INFOF("%.*s", (int)chunk, json + i);
+    char *url = malloc(256);
+    if (!url) {
+        return ESP_ERR_NO_MEM;
     }
-    LOG_INFO("Report JSON end");
+    snprintf(url, 256, "http://%s/api/v1/sensors/data", g_user_config.api_host);
+    // LOG_INFOF("Uploading report JSON to %s", url);
+
+    char *response = NULL;
+    esp_err_t err = http_proxy_post_json(url, json, &response);
+    free(url);
+    if (err != ESP_OK) {
+        LOG_WARNF("Report JSON upload failed: %s", esp_err_to_name(err));
+        free(response);
+        return err;
+    }
+
+    if (!response) {
+        LOG_WARN("Report JSON upload failed: empty server response");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_Parse(response);
+    if (!root) {
+        LOG_WARNF("Report JSON upload failed: invalid server response: %s", response);
+        free(response);
+        return ESP_FAIL;
+    }
+
+    const cJSON *code = cJSON_GetObjectItemCaseSensitive(root, "code");
+    if (!cJSON_IsNumber(code) || code->valueint != 0) {
+        const cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+        LOG_WARNF("Report JSON upload rejected: code=%d, message=%s",
+                  cJSON_IsNumber(code) ? code->valueint : -1,
+                  cJSON_IsString(message) ? message->valuestring : "");
+        cJSON_Delete(root);
+        free(response);
+        return ESP_FAIL;
+    }
+
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    const cJSON *path = cJSON_IsObject(data) ? cJSON_GetObjectItemCaseSensitive(data, "path") : NULL;
+    if (cJSON_IsString(path)) {
+        LOG_INFOF("Report JSON upload completed, path=%s", path->valuestring);
+    } else {
+        LOG_INFO("Report JSON upload completed");
+    }
+
+    cJSON_Delete(root);
+    free(response);
+    return ESP_OK;
 }
 
 esp_err_t report_pipeline_run(const char *task_id)
@@ -720,7 +784,8 @@ esp_err_t report_pipeline_run(const char *task_id)
     }
 
     log_report_json(json);
+    err = post_report_json(json);
 
     free(json);
-    return ESP_OK;
+    return err;
 }

@@ -303,7 +303,7 @@ esp_err_t drv_lis2dh12_init(void)
         vTaskDelay(pdMS_TO_TICKS(LIS2DH12_SLEEP_TIME));
     }
 
-    LOG_DEBUGF("WHO_AM_I: 0x%02x", who_am_i);
+    // LOG_DEBUGF("WHO_AM_I: 0x%02x", who_am_i);
     if (who_am_i != LIS2DH12_WHO_AM_I_VAL)
     {
         LOG_ERRORF("WHO_AM_I check failed. Got 0x%02x, expected 0x%02x", who_am_i, LIS2DH12_WHO_AM_I_VAL);
@@ -320,7 +320,7 @@ esp_err_t drv_lis2dh12_init(void)
         return ret;
     }
 
-    LOG_DEBUG("LIS2DH12 initialized successfully");
+    // LOG_DEBUG("LIS2DH12 initialized successfully");
     s_lis2dh12_initialized = true;
     return ESP_OK;
 }

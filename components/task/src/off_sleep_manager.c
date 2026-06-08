@@ -2,6 +2,7 @@
 #include "bsp_board.h"
 #include "off_sleep_manager.h"
 
+#include "config_manager.h"
 #include "drv_iis3dwb.h"
 #include "logger.h"
 #include "machine_state.h"
@@ -9,8 +10,8 @@
 #include "task_daq.h"
 #include "task_fft.h"
 #include "wom_lis2dh12.h"
-#include "mqtt_proxy.h" // 用于调用 mqtt_client_stop 关闭网络
-#include "task_mqtt_message.h" // 引入同步拉取接口
+#include "bsp_4g.h"
+#include "task_http_message.h" // 引入同步拉取接口
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -79,12 +80,12 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
     }
 
     // 分析流水线排空后，阻塞拉取云端任务并处理。
-    mqtt_pending_tasks_result_t task_result = mqtt_message_process_pending_tasks();
-    if (task_result == MQTT_PENDING_TASKS_NONE)
+    http_pending_tasks_result_t task_result = http_message_process_pending_tasks();
+    if (task_result == HTTP_PENDING_TASKS_NONE)
     {
         LOG_INFO("No pending cloud tasks. Proceeding to sleep.");
     }
-    else if (task_result == MQTT_PENDING_TASKS_KEEP_4G)
+    else if (task_result == HTTP_PENDING_TASKS_KEEP_4G)
     {
         LOG_INFO("Cloud tasks used 4G. Shutting down transport before sleep.");
     }
@@ -94,7 +95,10 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
     }
 
     LOG_INFO("All tasks processed. Shutting down transport before OFF sleep...");
-    (void)mqtt_client_stop();
+    if (g_user_config.network == 1)
+    {
+        (void)shutdown_4g_network();
+    }
 
     ret = off_sleep_prepare_capture_path();
     if (ret != ESP_OK)

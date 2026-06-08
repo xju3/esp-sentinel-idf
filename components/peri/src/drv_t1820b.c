@@ -336,7 +336,7 @@ esp_err_t drv_t1820b_init(void)
         return ESP_OK;
     }
 
-    LOG_DEBUG("Initializing T1820B temperature sensor...");
+    // LOG_DEBUG("Initializing T1820B temperature sensor...");
 
     esp_err_t ret = gpio_set_direction(T1820B_PIN, GPIO_MODE_INPUT_OUTPUT_OD);
     if (ret != ESP_OK)
@@ -365,7 +365,7 @@ esp_err_t drv_t1820b_init(void)
         return ret;
     }
 
-    LOG_DEBUG("T1820B initialized successfully");
+    // LOG_DEBUG("T1820B initialized successfully");
     return ESP_OK;
 }
 
@@ -398,7 +398,7 @@ esp_err_t drv_t1820b_set_resolution(t1820b_resolution_t resolution)
         temp_cfg == scratchpad[T1820B_TEMP_CFG_INDEX])
     {
         s_current_resolution = resolution;
-        LOG_DEBUGF("T1820B averaging profile already matches compatibility level %d", 9 + resolution);
+        // LOG_DEBUGF("T1820B averaging profile already matches compatibility level %d", 9 + resolution);
         return ESP_OK;
     }
 

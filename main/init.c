@@ -6,8 +6,6 @@
 #include "drv_iis3dwb.h"
 #include "drv_t1820b.h"
 #include "logger.h"
-#include "mqtt_proxy.h"
-#include "data_dispatcher.h"
 #include "task_daq.h"
 #include "off_sleep_manager.h"
 #include "wom_lis2dh12.h"
@@ -63,13 +61,6 @@ esp_err_t start_local_services()
     esp_err_t err = ESP_OK;
 
     init_sensors();
-
-    err = data_dispatcher_start();
-    if (err != ESP_OK)
-    {
-        LOG_ERROR("Data dispatcher initialization failed.");
-        return err;
-    }
 
     err = enable_tasks();
     if (err != ESP_OK)

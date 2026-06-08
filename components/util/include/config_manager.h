@@ -64,7 +64,6 @@ extern "C"
         int32_t rpm;                           // geater than 600 and less than 10000
         user_wifi_config_t wifi;
         int8_t network;
-        char mqtt_host[LEN_MAX_HOST];          // MQTT server name or IP for data reporting
         char api_host[LEN_MAX_HOST];           // HTTP API server name or IP
         int16_t battery;
         bool ble;

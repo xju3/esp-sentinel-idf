@@ -48,7 +48,7 @@ esp_err_t config_manager_init(void)
             return err; // 返回具体的错误码，而不是 ESP_FAIL
         }
     }
-    LOG_INFO("system storage mounted.");
+    // LOG_INFO("system storage mounted.");
 
     // 挂载 user 分区（允许自动格式化）
     if (!fsu_is_user_mounted())
@@ -60,7 +60,7 @@ esp_err_t config_manager_init(void)
             return err; // 返回具体的错误码，而不是 ESP_FAIL
         }
     }
-    LOG_INFO("user storage mounted.");
+    // LOG_INFO("user storage mounted.");
     return ESP_OK;
 }
 
@@ -73,12 +73,6 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
     }
 
     const cJSON *item = NULL;
-    item = cJSON_GetObjectItemCaseSensitive(root, "mqtt_host");
-    if (cJSON_IsString(item))
-    {
-        safe_copy(cfg->mqtt_host, sizeof(cfg->mqtt_host), item->valuestring);
-    }
-
     item = cJSON_GetObjectItemCaseSensitive(root, "api_host");
     if (cJSON_IsString(item))
     {
@@ -217,7 +211,7 @@ static void log_json_chunks(const char *prefix, const char *json, size_t len)
 
     if (prefix)
     {
-        LOG_DEBUG(prefix);
+        // LOG_DEBUG(prefix);
     }
 
     for (size_t i = 0; i < len; i += CONFIG_LOG_CHUNK)
@@ -352,7 +346,6 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     }
 
     cJSON_AddNumberToObject(root, "months", cfg->months);
-    cJSON_AddStringToObject(root, "mqtt_host", cfg->mqtt_host);
     cJSON_AddStringToObject(root, "api_host", cfg->api_host);
     cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
     cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);

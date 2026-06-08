@@ -8,15 +8,53 @@
 #include "report_pipeline.h"
 #include "esp_sleep.h"
 #include "esp_err.h"
-#include <time.h>
+#include "esp_timer.h"
+#include <sys/time.h>
 
-// 允许唤醒时间的误差窗口（秒），应对系统唤醒启动和NTP同步耗时
-#define WAKEUP_TOLERANCE_SEC 120
+// 允许唤醒时间的误差窗口，应对系统唤醒启动和NTP同步耗时
+#define WAKEUP_TOLERANCE_MS 120000LL
 
 // 使用 RTC_DATA_ATTR 确保在 Deep Sleep 期间调度数据不丢失 (掉电重启才会重置)
-RTC_DATA_ATTR static time_t s_next_patrol_time = 0;
-RTC_DATA_ATTR static time_t s_next_diagnosis_time = 0;
+RTC_DATA_ATTR static int64_t s_next_patrol_ms = 0;
+RTC_DATA_ATTR static int64_t s_next_diagnosis_ms = 0;
 RTC_DATA_ATTR static bool s_is_cold_boot = true;
+
+static int64_t scheduler_now_ms(void)
+{
+    struct timeval tv = {0};
+    gettimeofday(&tv, NULL);
+    return ((int64_t)tv.tv_sec * 1000LL) + ((int64_t)tv.tv_usec / 1000LL);
+}
+
+static int64_t scheduler_boot_epoch_ms(int64_t now_ms)
+{
+    int64_t uptime_ms = esp_timer_get_time() / 1000LL;
+    if (uptime_ms <= 0 || uptime_ms > now_ms)
+    {
+        return now_ms;
+    }
+    return now_ms - uptime_ms;
+}
+
+static int64_t scheduler_advance_after_due_ms(int64_t scheduled_ms, int64_t period_ms, int64_t now_ms)
+{
+    if (period_ms <= 0)
+    {
+        return scheduled_ms;
+    }
+
+    if (scheduled_ms <= 0)
+    {
+        scheduled_ms = now_ms;
+    }
+
+    do
+    {
+        scheduled_ms += period_ms;
+    } while (scheduled_ms <= now_ms);
+
+    return scheduled_ms;
+}
 
 /**
  * @brief 从深度睡眠唤醒后调用的 DAQ 评估与执行入口
@@ -24,13 +62,16 @@ RTC_DATA_ATTR static bool s_is_cold_boot = true;
  */
 esp_err_t daq_scheduler_execute(void)
 {
-    time_t now = time(NULL);
+    int64_t now_ms = scheduler_now_ms();
 
-    // 如果是首次上电/电池耗尽冷启动，初始化下次执行时间为当前时间(立即执行)
+    // 如果是首次上电/电池耗尽冷启动，初始化本轮计划时间为本次启动起点。
+    // 后续下一次计划时间按“计划时间 + 周期”推进，避免把启动、联网、
+    // 采集和上传耗时累计进周期造成长期漂移。
     if (s_is_cold_boot) {
         LOG_INFO("Cold boot detected. Initializing DAQ schedule.");
-        s_next_patrol_time = now;
-        s_next_diagnosis_time = now;
+        const int64_t boot_epoch_ms = scheduler_boot_epoch_ms(now_ms);
+        s_next_patrol_ms = boot_epoch_ms;
+        s_next_diagnosis_ms = boot_epoch_ms;
         s_is_cold_boot = false;
     }
 
@@ -38,8 +79,8 @@ esp_err_t daq_scheduler_execute(void)
     bool patrol_enabled = (g_user_config.patrol > 0);
     bool diagnosis_enabled = (g_user_config.diagnosis > 0);
 
-    const bool run_patrol = patrol_enabled && (now >= s_next_patrol_time - WAKEUP_TOLERANCE_SEC);
-    const bool run_diagnosis = diagnosis_enabled && (now >= s_next_diagnosis_time - WAKEUP_TOLERANCE_SEC);
+    const bool run_patrol = patrol_enabled && (now_ms >= s_next_patrol_ms - WAKEUP_TOLERANCE_MS);
+    const bool run_diagnosis = diagnosis_enabled && (now_ms >= s_next_diagnosis_ms - WAKEUP_TOLERANCE_MS);
     const bool run_report = run_patrol || run_diagnosis;
 
     esp_err_t err = ESP_OK;
@@ -50,10 +91,14 @@ esp_err_t daq_scheduler_execute(void)
         err = report_pipeline_run(NULL);
 
         if (run_patrol) {
-            s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
+            s_next_patrol_ms = scheduler_advance_after_due_ms(s_next_patrol_ms,
+                                                              (int64_t)g_user_config.patrol * 60LL * 1000LL,
+                                                              now_ms);
         }
         if (run_diagnosis) {
-            s_next_diagnosis_time = now + (time_t)(g_user_config.diagnosis * 60);
+            s_next_diagnosis_ms = scheduler_advance_after_due_ms(s_next_diagnosis_ms,
+                                                                 (int64_t)g_user_config.diagnosis * 60LL * 1000LL,
+                                                                 now_ms);
         }
     } else {
         LOG_INFO("Woke up but no report task scheduled to run right now.");
@@ -61,11 +106,15 @@ esp_err_t daq_scheduler_execute(void)
 
     // If one schedule was never initialized because the matching task is disabled,
     // keep it away from the past before it is re-enabled by a config update.
-    if (diagnosis_enabled && s_next_diagnosis_time <= 0) {
-        s_next_diagnosis_time = now + (time_t)(g_user_config.diagnosis * 60);
+    if (diagnosis_enabled && s_next_diagnosis_ms <= 0) {
+        s_next_diagnosis_ms = scheduler_advance_after_due_ms(now_ms,
+                                                             (int64_t)g_user_config.diagnosis * 60LL * 1000LL,
+                                                             now_ms);
     }
-    if (patrol_enabled && s_next_patrol_time <= 0) {
-        s_next_patrol_time = now + (time_t)(g_user_config.patrol * 60);
+    if (patrol_enabled && s_next_patrol_ms <= 0) {
+        s_next_patrol_ms = scheduler_advance_after_due_ms(now_ms,
+                                                          (int64_t)g_user_config.patrol * 60LL * 1000LL,
+                                                          now_ms);
     }
 
     return err;
@@ -76,8 +125,8 @@ esp_err_t daq_scheduler_execute(void)
  */
 uint64_t daq_scheduler_get_sleep_time_us(void)
 {
-    time_t now = time(NULL);
-    time_t next_wake = 0;
+    int64_t now_ms = scheduler_now_ms();
+    int64_t next_wake_ms = 0;
 
     bool patrol_enabled = (g_user_config.patrol > 0);
     bool diagnosis_enabled = (g_user_config.diagnosis > 0);
@@ -86,20 +135,19 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
         // 所有任务均被禁用，返回 0 代表不需要定时唤醒
         return 0; 
     } else if (patrol_enabled && diagnosis_enabled) {
-        next_wake = (s_next_patrol_time < s_next_diagnosis_time) ? s_next_patrol_time : s_next_diagnosis_time;
+        next_wake_ms = (s_next_patrol_ms < s_next_diagnosis_ms) ? s_next_patrol_ms : s_next_diagnosis_ms;
     } else if (patrol_enabled) {
-        next_wake = s_next_patrol_time;
+        next_wake_ms = s_next_patrol_ms;
     } else {
-        next_wake = s_next_diagnosis_time;
+        next_wake_ms = s_next_diagnosis_ms;
     }
 
     // 防止因为逻辑误差导致过去的时间，做下边界保护 (1毫秒后重新评估)
-    if (next_wake <= now) {
+    if (next_wake_ms <= now_ms) {
         return 1000ULL; 
     }
 
-    uint64_t sleep_us = (uint64_t)(next_wake - now) * 1000000ULL;
-    return sleep_us;
+    return (uint64_t)(next_wake_ms - now_ms) * 1000ULL;
 }
 
 // ====================================================================

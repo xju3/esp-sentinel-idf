@@ -18,7 +18,7 @@ extern "C"
     {
         uint8_t *data;      // 二进制数据指针
         size_t len;         // 数据长度
-        char topic[128];    // MQTT topic
+        char topic[128];    // Legacy transport topic
     } binary_msg_t;
 
     // Legacy initialization marker used by older call sites for readiness checks.
