@@ -4,7 +4,7 @@
 #include "config_manager.h"
 #include "drv_lis2dh12.h"
 #include "drv_iis3dwb.h"
-#include "drv_t1820b.h"
+#include "drv_ds18b20.h"
 #include "logger.h"
 #include "task_daq.h"
 #include "off_sleep_manager.h"
@@ -21,7 +21,7 @@ static void init_sensors()
 {
     drv_lis2dh12_init();
     drv_iis3dwb_init();
-    drv_t1820b_init();
+    drv_ds18b20_init();
 }
 
 static esp_err_t enable_tasks()

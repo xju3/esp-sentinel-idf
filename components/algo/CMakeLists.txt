@@ -14,5 +14,5 @@ idf_component_register(
         "include"
 
     REQUIRES
-        esp-dsp
+        esp-dsp util
 )

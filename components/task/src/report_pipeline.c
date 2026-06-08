@@ -3,7 +3,7 @@
 #include "algo_fft.h"
 #include "config_manager.h"
 #include "daq_iis3dwb.h"
-#include "drv_t1820b.h"
+#include "drv_ds18b20.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "http_proxy.h"
@@ -755,8 +755,8 @@ esp_err_t report_pipeline_run(const char *task_id)
 
     const uint64_t ts_ms = current_epoch_ms_or_zero();
     float temperature_c = 0.0f;
-    const bool temperature_valid = (g_t1820b_initialized &&
-                                    drv_t1820b_read_temperature(&temperature_c) == ESP_OK);
+    const bool temperature_valid = (g_ds18b20_initialized &&
+                                    drv_ds18b20_read_temperature(&temperature_c) == ESP_OK);
 
     capture_attempt_t attempts[4] = {0};
     size_t attempt_count = 0;

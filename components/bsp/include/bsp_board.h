@@ -48,7 +48,7 @@ extern "C" {
 #define BOARD_GPIO_4G_RESET_N      GPIO_NUM_48
 
 /* 1-Wire temperature sensor */
-#define BOARD_GPIO_T1820B_DQ       GPIO_NUM_16
+#define BOARD_GPIO_DS18B20_DQ      GPIO_NUM_16
 
 #ifdef __cplusplus
 }
