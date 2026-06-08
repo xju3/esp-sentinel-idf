@@ -133,9 +133,7 @@ static esp_err_t iis3dwb_hold_sdo_low_during_bootstrap(void)
     if (ret != ESP_OK)
         return ret;
 
-    LOG_INFOF("IIS3DWB bootstrap: hold SDO/MISO(GPIO%d) low for %d ms",
-              IIS3DWB_PIN_NUM_SDO,
-              IIS3DWB_SPI_BOOTSTRAP_HOLD_MS);
+    // LOG_INFOF("IIS3DWB bootstrap: hold SDO/MISO(GPIO%d) low for %d ms", IIS3DWB_PIN_NUM_SDO, IIS3DWB_SPI_BOOTSTRAP_HOLD_MS);
     vTaskDelay(pdMS_TO_TICKS(IIS3DWB_SPI_BOOTSTRAP_HOLD_MS));
 
     gpio_config_t release_cfg = {
@@ -150,8 +148,7 @@ static esp_err_t iis3dwb_hold_sdo_low_during_bootstrap(void)
         return ret;
 
     uint32_t settle_ms = iis3dwb_post_release_settle_ms();
-    LOG_INFOF("IIS3DWB bootstrap: release SDO/MISO and wait %lu ms before SPI probe",
-              (unsigned long)settle_ms);
+    // LOG_INFOF("IIS3DWB bootstrap: release SDO/MISO and wait %lu ms before SPI probe", (unsigned long)settle_ms);
     vTaskDelay(pdMS_TO_TICKS(settle_ms));
     return ESP_OK;
 }
@@ -229,11 +226,11 @@ static esp_err_t iis3dwb_probe_identity(void)
             return ret;
     }
 
-    LOG_INFOF("IIS3DWB WHO_AM_I x3 @ %d Hz: 0x%02x 0x%02x 0x%02x",
-              IIS3DWB_SPI_PROBE_HZ,
-              who_am_i[0],
-              who_am_i[1],
-              who_am_i[2]);
+    // LOG_INFOF("IIS3DWB WHO_AM_I x3 @ %d Hz: 0x%02x 0x%02x 0x%02x",
+    //           IIS3DWB_SPI_PROBE_HZ,
+    //           who_am_i[0],
+    //           who_am_i[1],
+    //           who_am_i[2]);
 
     for (size_t i = 0; i < 3; ++i)
     {
@@ -296,15 +293,15 @@ static esp_err_t iis3dwb_log_config_readback(iis3dwb_fs_t fs)
     if (ret != ESP_OK)
         return ret;
 
-    LOG_INFOF("IIS3DWB config readback(fs=%u): CTRL1_XL=0x%02x CTRL3_C=0x%02x CTRL4_C=0x%02x FIFO1=0x%02x FIFO2=0x%02x FIFO3=0x%02x FIFO4=0x%02x",
-              (unsigned int)fs,
-              ctrl1,
-              ctrl3,
-              ctrl4,
-              fifo1,
-              fifo2,
-              fifo3,
-              fifo4);
+    // LOG_INFOF("IIS3DWB config readback(fs=%u): CTRL1_XL=0x%02x CTRL3_C=0x%02x CTRL4_C=0x%02x FIFO1=0x%02x FIFO2=0x%02x FIFO3=0x%02x FIFO4=0x%02x",
+    //           (unsigned int)fs,
+    //           ctrl1,
+    //           ctrl3,
+    //           ctrl4,
+    //           fifo1,
+    //           fifo2,
+    //           fifo3,
+    //           fifo4);
     return ESP_OK;
 }
 
@@ -347,10 +344,10 @@ static esp_err_t iis3dwb_log_fifo_runtime_state(void)
     if (ret != ESP_OK)
         return ret;
 
-    LOG_INFOF("IIS3DWB FIFO status: STATUS1=0x%02x STATUS2=0x%02x TAG=0x%02x",
-              fifo_status1,
-              fifo_status2,
-              fifo_sample[0]);
+    // LOG_INFOF("IIS3DWB FIFO status: STATUS1=0x%02x STATUS2=0x%02x TAG=0x%02x",
+    //           fifo_status1,
+    //           fifo_status2,
+    //           fifo_sample[0]);
     return ESP_OK;
 }
 
@@ -484,7 +481,7 @@ static void iis3dwb_dma_worker_task(void *arg)
                 iis3dwb_unpack_fifo(raw, dst, DMA_CHUNK_SAMPLES);
                 if (!s_dma_capture_logged)
                 {
-                    LOG_INFOF("IIS3DWB DMA/FIFO capture success: first chunk %u samples", DMA_CHUNK_SAMPLES);
+                    // LOG_INFOF("IIS3DWB DMA/FIFO capture success: first chunk %u samples", DMA_CHUNK_SAMPLES);
                     s_dma_capture_logged = true;
                 }
                 if (s_data_cb_ctx)

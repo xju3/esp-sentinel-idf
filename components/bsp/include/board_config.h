@@ -22,10 +22,6 @@
 #define BOARD_WIFI_STA_PASSWORD            "hen6n6c7"
 #define BOARD_WIFI_STA_MAX_RETRY           5
 #define BOARD_WIFI_STA_TIMEOUT_MS          20000
-#define BOARD_MQTT_KEEPALIVE_SEC           120
-#define BOARD_MQTT_RECONNECT_TIMEOUT_MS    10000
-#define BOARD_4G_MQTT_PORT                 1883
-#define BOARD_4G_MQTT_CLIENT_ID            "sentinel-pcb-4g"
 #define BOARD_4G_KEEP_POWER_ON_AFTER_TEST  1
 
 #define BOARD_GPIO_BATTERY_ADC             GPIO_NUM_2

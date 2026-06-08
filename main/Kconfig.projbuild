@@ -66,15 +66,6 @@ config SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC
       Before entering WoM light sleep after low-RMS OFF detection, the device
       waits up to this many seconds for queued reports to flush successfully.
 
-config SENTINEL_NETWORK_BRINGUP_TIMEOUT_SEC
-    int "Timeout for network and MQTT bring-up before sending (seconds)"
-    range 1 300
-    default 90
-    help
-      When dispatcher needs to send but MQTT is offline, it will bring up WiFi
-      STA or 4G according to user configuration and wait up to this many
-      seconds for MQTT to become ready.
-
 config SENTINEL_CAP_READY_DELTA_MV
     int "Super-cap ready delta threshold (mV)"
     range 10 1000

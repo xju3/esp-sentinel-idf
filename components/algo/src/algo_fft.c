@@ -10,16 +10,16 @@
 #include "dsps_fft2r.h"
 #include "dsps_math.h"
 #include "dsps_wind_hann.h"
+#include "logger.h"
 
-static const char *TAG = "ALGO_FFT";
 static bool s_fft_initialized = false;
 static StaticSemaphore_t s_fft_lock_buf;
 static SemaphoreHandle_t s_fft_lock = NULL;
 static StaticSemaphore_t s_fft_peaks_lock_buf;
 static SemaphoreHandle_t s_fft_peaks_lock = NULL;
 
-// 最大支持 4096 点 FFT（与 CONFIG_DSP_MAX_FFT_SIZE=4096 一致）
-#define MAX_FFT_SIZE 4096
+// Match the ESP-DSP lookup table size selected in sdkconfig.
+#define MAX_FFT_SIZE CONFIG_DSP_MAX_FFT_SIZE
 EXT_RAM_BSS_ATTR static float s_fft_scratch[MAX_FFT_SIZE] __attribute__((aligned(16)));
 EXT_RAM_BSS_ATTR static float s_fft_mag_x[MAX_FFT_SIZE / 2];
 EXT_RAM_BSS_ATTR static float s_fft_mag_y[MAX_FFT_SIZE / 2];
@@ -93,7 +93,7 @@ esp_err_t algo_fft_init(void)
     if (s_fft_lock == NULL) {
         s_fft_lock = xSemaphoreCreateMutexStatic(&s_fft_lock_buf);
         if (s_fft_lock == NULL) {
-            ESP_LOGE(TAG, "Failed to create FFT mutex");
+            LOG_ERROR("Failed to create FFT mutex");
             return ESP_ERR_NO_MEM;
         }
     }
@@ -106,9 +106,9 @@ esp_err_t algo_fft_init(void)
     esp_err_t ret = dsps_fft2r_init_fc32(NULL, MAX_FFT_SIZE);
     if (ret == ESP_OK) {
         s_fft_initialized = true;
-        ESP_LOGI(TAG, "FFT tables initialized");
+        // LOG_DEBUG("FFT tables initialized");
     } else {
-        ESP_LOGE(TAG, "Failed to init FFT tables: %d", ret);
+        LOG_ERRORF("Failed to init FFT tables: %d", ret);
     }
     return ret;
 }
@@ -195,12 +195,12 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
 
     // 检查 n 是否为 2 的幂次方
     if ((n & (n - 1)) != 0) {
-        ESP_LOGE(TAG, "FFT size must be power of 2, got %lu", n);
+        LOG_ERRORF("FFT size must be power of 2, got %lu", n);
         return ESP_ERR_INVALID_ARG;
     }
 
     if (n > MAX_FFT_SIZE) {
-        ESP_LOGE(TAG, "FFT size exceeds static scratch buffer, got %lu > %d", n, MAX_FFT_SIZE);
+        LOG_ERRORF("FFT size exceeds static scratch buffer, got %lu > %d", n, MAX_FFT_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -210,7 +210,7 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
     }
 
     if (xSemaphoreTake(s_fft_lock, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to take FFT mutex");
+        LOG_ERROR("Failed to take FFT mutex");
         return ESP_ERR_TIMEOUT;
     }
 
@@ -337,13 +337,13 @@ esp_err_t algo_fft_calculate_peaks(
     if (s_fft_peaks_lock == NULL) {
         s_fft_peaks_lock = xSemaphoreCreateMutexStatic(&s_fft_peaks_lock_buf);
         if (s_fft_peaks_lock == NULL) {
-            ESP_LOGE(TAG, "Failed to create FFT peaks mutex");
+            LOG_ERROR("Failed to create FFT peaks mutex");
             return ESP_ERR_NO_MEM;
         }
     }
 
     if (xSemaphoreTake(s_fft_peaks_lock, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to take FFT peaks mutex");
+        LOG_ERROR("Failed to take FFT peaks mutex");
         return ESP_ERR_TIMEOUT;
     }
 

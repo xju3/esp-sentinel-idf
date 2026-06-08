@@ -13,10 +13,11 @@ extern "C" {
 #endif
 esp_err_t init_ppp_4g(cb_communication_channel_established cb);
 esp_err_t shutdown_ppp_4g(void);
-esp_err_t init_4g_mqtt(cb_communication_channel_established cb);
-esp_err_t bsp_4g_mqtt_disconnect(void);
-esp_err_t shutdown_4g_mqtt(void);
-esp_err_t bsp_4g_mqtt_publish(const char *topic, const uint8_t *data, size_t len);
+esp_err_t init_4g_network(cb_communication_channel_established cb);
+esp_err_t shutdown_4g_network(void);
+esp_err_t bsp_4g_http_get(const char *url, char **out_response);
+esp_err_t bsp_4g_http_post_json(const char *url, const char *payload, char **out_response);
+esp_err_t bsp_4g_http_put(const char *url, const char *payload);
 
 #ifdef __cplusplus
 }

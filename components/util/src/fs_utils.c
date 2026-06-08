@@ -34,8 +34,7 @@ static esp_err_t mount_spiffs(const char *label, const char *base_path, int max_
     size_t total = 0;
     size_t used = 0;
     if (esp_spiffs_info(label, &total, &used) == ESP_OK) {
-        LOG_INFOF("SPIFFS '%s' mounted at '%s' (used %u / total %u)",
-                  label, base_path, (unsigned)used, (unsigned)total);
+        // LOG_INFOF("SPIFFS '%s' mounted at '%s' (used %u / total %u)", label, base_path, (unsigned)used, (unsigned)total);
     }
     return ESP_OK;
 }
