@@ -13,6 +13,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <sys/param.h>
 #include <stdbool.h>
@@ -60,6 +61,32 @@ static bool s_module_network_ready = false;
 static char s_modem_response[MODEM_RESP_BUF_SIZE];
 static volatile bool s_at_cmd_active = false;
 static SemaphoreHandle_t s_at_mutex = NULL;
+
+static int64_t days_from_civil(int year, int month, int day)
+{
+    year -= month <= 2;
+    const int era = (year >= 0 ? year : year - 399) / 400;
+    const unsigned yoe = (unsigned)(year - era * 400);
+    const unsigned month_adjusted = (unsigned)(month + (month > 2 ? -3 : 9));
+    const unsigned doy = (153 * month_adjusted + 2) / 5 + (unsigned)day - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return (int64_t)era * 146097 + (int64_t)doe - 719468;
+}
+
+static time_t utc_epoch_from_modem_time(
+    int year,
+    int month,
+    int day,
+    int hour,
+    int min,
+    int sec)
+{
+    const int full_year = 2000 + year;
+    const int64_t days = days_from_civil(full_year, month, day);
+    const int64_t utc_seconds =
+        days * 86400 + (int64_t)hour * 3600 + (int64_t)min * 60 + sec;
+    return (time_t)utc_seconds;
+}
 
 static void ensure_at_mutex(void)
 {
@@ -306,6 +333,7 @@ static esp_err_t modem_gpio_init(void)
 }
 
 static esp_err_t modem_read_response(char *response, size_t response_size, uint32_t timeout_ms);
+static esp_err_t modem_uart_init(void);
 
 // ================= 新增：通过 4G 基站或内部 NTP 获取时间并同步给 ESP32 =================
 esp_err_t bsp_4g_sync_time(void)
@@ -317,6 +345,20 @@ esp_err_t bsp_4g_sync_time(void)
     esp_err_t err = ESP_FAIL;
     s_at_cmd_active = true;
 
+    err = modem_gpio_init();
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("4G GPIO init failed before time sync: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
+    err = modem_uart_init();
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("4G UART init failed before time sync: %s", esp_err_to_name(err));
+        goto cleanup;
+    }
+
     // 发送 AT+CCLK? 查询模块当前时间 (格式: +CCLK: "24/06/15,12:30:45+32")
     uart_flush_input(UART_PORT_NUM);
     uart_write_bytes(UART_PORT_NUM, "AT+CCLK?\r\n", 10);
@@ -325,36 +367,66 @@ esp_err_t bsp_4g_sync_time(void)
     if (err == ESP_OK)
     {
         int year, month, day, hour, min, sec;
+        int tz_quarters = 0;
         char *line = strstr(response, "+CCLK: \"");
-        // 解析时间，忽略末尾的时区标识
-        if (line && sscanf(line, "+CCLK: \"%d/%d/%d,%d:%d:%d", &year, &month, &day, &hour, &min, &sec) >= 6)
+        int parsed = 0;
+        if (line)
         {
-            if (year >= 24)
-            { // 确保时间大于 2024 年，排除模块自身的默认初始时间 1980/2004 等
-                struct tm tm_time = {0};
-                tm_time.tm_year = year + 100; // AT 返回 24，代表 2024。tm_year 是从 1900 算起，所以 +100
-                tm_time.tm_mon = month - 1;   // 月份 0-11
-                tm_time.tm_mday = day;
-                tm_time.tm_hour = hour;
-                tm_time.tm_min = min;
-                tm_time.tm_sec = sec;
+            parsed = sscanf(
+                line,
+                "+CCLK: \"%d/%d/%d,%d:%d:%d%d",
+                &year,
+                &month,
+                &day,
+                &hour,
+                &min,
+                &sec,
+                &tz_quarters);
+        }
 
-                time_t t = mktime(&tm_time);
+        if (parsed >= 6)
+        {
+            if (year >= 24 && month >= 1 && month <= 12 && day >= 1 && day <= 31 &&
+                hour >= 0 && hour <= 23 && min >= 0 && min <= 59 && sec >= 0 && sec <= 60)
+            { // 确保时间大于 2024 年，排除模块自身的默认初始时间 1980/2004 等
+                time_t t = utc_epoch_from_modem_time(
+                    year,
+                    month,
+                    day,
+                    hour,
+                    min,
+                    sec);
 
                 struct timeval tv = {.tv_sec = t, .tv_usec = 0};
                 settimeofday(&tv, NULL); // 强制修改 ESP32 的硬件 RTC 系统时间
 
-                LOG_DEBUGF("Time synced from 4G Base Station: 20%02d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, min, sec);
+                LOG_DEBUGF(
+                    "Time synced from 4G Base Station: 20%02d-%02d-%02d %02d:%02d:%02d tz_quarters=%d",
+                    year,
+                    month,
+                    day,
+                    hour,
+                    min,
+                    sec,
+                    parsed >= 7 ? tz_quarters : 0);
                 err = ESP_OK;
             }
             else
             {
-                LOG_WARNF("4G time not updated yet (Year 20%02d). Retry needed.", year);
+                LOG_WARNF(
+                    "4G time not updated yet or invalid (20%02d-%02d-%02d %02d:%02d:%02d). Retry needed.",
+                    year,
+                    month,
+                    day,
+                    hour,
+                    min,
+                    sec);
                 err = ESP_FAIL;
             }
         }
     }
 
+cleanup:
     s_at_cmd_active = false;
     xSemaphoreGive(s_at_mutex);
     return err;
@@ -365,6 +437,8 @@ static esp_err_t modem_uart_init(void)
     {
         return ESP_OK;
     }
+
+    (void)uart_driver_delete(UART_PORT_NUM);
 
     const uart_config_t config = {
         .baud_rate = MODEM_UART_BAUD_RATE,
@@ -381,7 +455,7 @@ static esp_err_t modem_uart_init(void)
                                         0,
                                         NULL,
                                         0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    if (err != ESP_OK)
     {
         return err;
     }
@@ -1607,7 +1681,11 @@ esp_err_t bsp_4g_http_put(const char *url, const char *payload)
 {
     ensure_at_mutex();
     xSemaphoreTake(s_at_mutex, portMAX_DELAY);
-    esp_err_t err = bsp_4g_http_put_internal(url, payload);
+    esp_err_t err = init_4g_network_internal(NULL);
+    if (err == ESP_OK)
+    {
+        err = bsp_4g_http_put_internal(url, payload);
+    }
     xSemaphoreGive(s_at_mutex);
     return err;
 }
@@ -1616,7 +1694,11 @@ esp_err_t bsp_4g_http_post_json(const char *url, const char *payload, char **out
 {
     ensure_at_mutex();
     xSemaphoreTake(s_at_mutex, portMAX_DELAY);
-    esp_err_t err = bsp_4g_http_post_json_internal(url, payload, out_response);
+    esp_err_t err = init_4g_network_internal(NULL);
+    if (err == ESP_OK)
+    {
+        err = bsp_4g_http_post_json_internal(url, payload, out_response);
+    }
     xSemaphoreGive(s_at_mutex);
     return err;
 }
@@ -1625,7 +1707,11 @@ esp_err_t bsp_4g_http_get(const char *url, char **out_response)
 {
     ensure_at_mutex();
     xSemaphoreTake(s_at_mutex, portMAX_DELAY);
-    esp_err_t err = bsp_4g_http_get_internal(url, out_response);
+    esp_err_t err = init_4g_network_internal(NULL);
+    if (err == ESP_OK)
+    {
+        err = bsp_4g_http_get_internal(url, out_response);
+    }
     xSemaphoreGive(s_at_mutex);
     return err;
 }
