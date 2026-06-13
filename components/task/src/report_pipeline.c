@@ -9,6 +9,7 @@
 #include "http_proxy.h"
 #include "logger.h"
 #include "sdkconfig.h"
+#include "bsp_4g.h"
 
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -771,6 +772,12 @@ esp_err_t report_pipeline_run(const char *task_id)
                                   &accepted);
     if (err != ESP_OK) {
         return err;
+    }
+
+    // 提前阻塞等待网络就绪，以便把后台真实的 4G 驻网耗时也计算进 duration_ms 中
+    // 这样如果 4G 信号极差导致连网卡了数十秒，服务器也能通过解析 JSON 准确感知
+    if (g_user_config.network == 1) {
+        init_4g_network(NULL);
     }
 
     // 获取从本次唤醒起，到目前生成报告为止的精准工作耗时（毫秒）

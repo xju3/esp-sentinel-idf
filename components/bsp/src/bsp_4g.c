@@ -13,6 +13,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_sleep.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/param.h>
@@ -289,6 +290,9 @@ static void modem_copy_cgpaddr_ip(const char *response, char *ip_addr, size_t ip
 
 static esp_err_t modem_gpio_init(void)
 {
+    // 如果之前休眠时锁定了引脚状态，下一次初始化前必须先解除锁定
+    gpio_hold_dis(MODEM_PWR_EN_PIN);
+
     const gpio_config_t power_cfg = {
         .pin_bit_mask = 1ULL << MODEM_PWR_EN_PIN,
         .mode = GPIO_MODE_INPUT_OUTPUT,
@@ -1082,6 +1086,21 @@ static esp_err_t shutdown_4g_network_internal(void)
     (void)modem_shutdown_gracefully(s_at_ready);
     (void)modem_power_disable();
     modem_uart_deinit();
+
+    // 重置相关引脚为默认高阻态，防止深度睡眠期间对已断电的 4G 模块产生电流倒灌泄漏
+    gpio_reset_pin(MODEM_UART_TX_PIN);
+    gpio_reset_pin(MODEM_UART_RX_PIN);
+    gpio_reset_pin(MODEM_PWRKEY_PIN);
+    gpio_reset_pin(MODEM_STATUS_PIN);
+    gpio_reset_pin(MODEM_NET_STATUS_PIN);
+
+    // 锁定电源使能引脚，使其在进入深度睡眠后依然强制输出断电状态（低电平），
+    // 防止悬空导致外部电源开关管(LDO/MOSFET)微导通，彻底消除随机漏电。
+    gpio_hold_en(MODEM_PWR_EN_PIN);
+    
+    // 开启全局深睡 GPIO 保持，确保上面的 hold_en 在 Deep Sleep 期间依然生效
+    gpio_deep_sleep_hold_en();
+
     s_at_ready = false;
     s_module_network_ready = false;
     return ESP_OK;
