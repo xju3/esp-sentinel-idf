@@ -617,7 +617,8 @@ static char *build_report_json(uint64_t ts_ms,
                                const capture_attempt_t *attempts,
                                size_t attempt_count,
                                bool accepted,
-                               const char *task_id)
+                               const char *task_id,
+                               uint32_t duration_ms)
 {
     cJSON *root = cJSON_CreateObject();
     if (!root) {
@@ -638,6 +639,7 @@ static char *build_report_json(uint64_t ts_ms,
     cJSON_AddNumberToObject(root, "points", REPORT_POINTS);
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
     cJSON_AddStringToObject(root, "sample_type", REPORT_SAMPLE_TYPE);
+    cJSON_AddNumberToObject(root, "duration_ms", duration_ms);
 
     cJSON *analysis_cfg = add_analysis_config();
     if (!analysis_cfg) {
@@ -771,6 +773,9 @@ esp_err_t report_pipeline_run(const char *task_id)
         return err;
     }
 
+    // 获取从本次唤醒起，到目前生成报告为止的精准工作耗时（毫秒）
+    uint32_t duration_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
     char *json = build_report_json(ts_ms,
                                    temperature_c,
                                    temperature_valid,
@@ -778,7 +783,8 @@ esp_err_t report_pipeline_run(const char *task_id)
                                    attempts,
                                    attempt_count,
                                    accepted,
-                                   task_id);
+                                   task_id,
+                                   duration_ms);
     if (!json) {
         return ESP_ERR_NO_MEM;
     }

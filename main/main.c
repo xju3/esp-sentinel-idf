@@ -186,7 +186,7 @@ void app_main(void)
 
     if (sleep_time_us > 0)
     {
-        LOG_INFOF("All tasks finished. Entering deep sleep for %llu seconds...", sleep_time_us / 1000000ULL);
+        LOG_INFOF("All tasks finished. Entering deep sleep for %llu ms...", sleep_time_us / 1000ULL);
         esp_sleep_enable_timer_wakeup(sleep_time_us);
     }
     else
