@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "http_proxy.h"
 #include "logger.h"
+#include "report_upload_cache.h"
 #include "sdkconfig.h"
 #include "bsp_4g.h"
 
@@ -687,8 +688,35 @@ static void log_report_json(const char *json)
     // LOG_INFO("Report JSON end");
 }
 
-static esp_err_t post_report_json(const char *json)
+static void log_upload_response_tasks(const cJSON *data)
 {
+    if (!cJSON_IsArray(data)) {
+        LOG_INFO("Report JSON upload completed");
+        return;
+    }
+
+    const int task_count = cJSON_GetArraySize(data);
+    LOG_INFOF("Report JSON upload completed, returned_tasks=%d", task_count);
+
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, data)
+    {
+        const cJSON *task_id = cJSON_GetObjectItemCaseSensitive(item, "id");
+        const cJSON *action = cJSON_GetObjectItemCaseSensitive(item, "action");
+        const cJSON *val = cJSON_GetObjectItemCaseSensitive(item, "val");
+        if (cJSON_IsString(task_id) && cJSON_IsNumber(action)) {
+            LOG_INFOF("Returned task: id=%s, action=%d, val=%d",
+                      task_id->valuestring,
+                      action->valueint,
+                      cJSON_IsNumber(val) ? val->valueint : 0);
+        }
+    }
+}
+
+static esp_err_t send_report_json_once(const char *json, void *ctx)
+{
+    (void)ctx;
+
     if (!json) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -737,15 +765,30 @@ static esp_err_t post_report_json(const char *json)
     }
 
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-    const cJSON *path = cJSON_IsObject(data) ? cJSON_GetObjectItemCaseSensitive(data, "path") : NULL;
-    if (cJSON_IsString(path)) {
-        LOG_INFOF("Report JSON upload completed, path=%s", path->valuestring);
-    } else {
-        LOG_INFO("Report JSON upload completed");
-    }
+    log_upload_response_tasks(data);
 
     cJSON_Delete(root);
     free(response);
+    return ESP_OK;
+}
+
+static esp_err_t post_report_json(const char *json)
+{
+    esp_err_t err = send_report_json_once(json, NULL);
+    if (err != ESP_OK) {
+        esp_err_t save_err = report_upload_cache_save_failed(json);
+        if (save_err != ESP_OK) {
+            LOG_ERRORF("Report JSON upload failed and local save failed: upload=%s save=%s",
+                       esp_err_to_name(err),
+                       esp_err_to_name(save_err));
+        }
+        return err;
+    }
+
+    esp_err_t retry_err = report_upload_cache_flush(send_report_json_once, NULL);
+    if (retry_err != ESP_OK) {
+        LOG_WARNF("Some cached report JSON files were not uploaded: %s", esp_err_to_name(retry_err));
+    }
     return ESP_OK;
 }
 
