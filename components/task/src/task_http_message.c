@@ -6,6 +6,7 @@
 #include "task_ota.h"
 #include "http_proxy.h"
 #include "report_pipeline.h"
+#include "server_report_task_scheduler.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,10 +86,10 @@ http_pending_tasks_result_t http_message_process_pending_tasks(void)
                     int val = cJSON_IsNumber(val_item) ? val_item->valueint : 0;
                     const char *task_id = task_id_item->valuestring;
                     found_task = true;
-                    LOG_INFOF("Executing task synchronously: id=%s, action=%d, val=%d", task_id, action, val);
+                    LOG_INFOF("Processing server task: id=%s, action=%d, val=%d", task_id, action, val);
 
-                    const bool is_report_action = ((action > 10 && action < 20) || (action > 20 && action < 30));
-                    if (action < 10 || is_report_action)
+                    const bool is_repeated_report_action = (action >= 10 && action < 100);
+                    if (action < 10)
                     {
                         keep_4g_required = true;
                     }
@@ -115,15 +116,9 @@ http_pending_tasks_result_t http_message_process_pending_tasks(void)
                     {
                         LOG_DEBUGF("发送设备状态至服务器, 包含电量, 4G信号强度, CPU温度, val=%d", val);
                     }
-                    else if (action > 10 && action < 20)
+                    else if (is_repeated_report_action)
                     {
-                        LOG_DEBUGF("Executing unified report task for former low-frequency action, val=%d.", val);
-                        (void)report_pipeline_run(task_id);
-                    }
-                    else if (action > 20 && action < 30)
-                    {
-                        LOG_DEBUGF("Executing unified report task for former high-frequency action, val=%d.", val);
-                        (void)report_pipeline_run(task_id);
+                        (void)server_report_task_schedule(task_id, action, val);
                     }
                     else if (s_action_handler != NULL)
                     {

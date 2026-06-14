@@ -9,6 +9,7 @@ idf_component_register(
         "src/daq_worker.c" 
         "src/report_pipeline.c"
         "src/report_upload_cache.c"
+        "src/server_report_task_scheduler.c"
         "src/wom_lis2dh12.c"
         "src/off_sleep_manager.c"
         "src/task_stash.c"

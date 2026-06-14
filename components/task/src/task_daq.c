@@ -6,12 +6,14 @@
 #include "config_manager.h"
 #include "logger.h"
 #include "report_pipeline.h"
+#include "server_report_task_scheduler.h"
 #include "esp_sleep.h"
 #include "esp_err.h"
 #include "esp_timer.h"
 
 // 容许提前唤醒的宽容度 (防止硬件定时器一点点抖动导致错过判断)
 #define WAKEUP_TOLERANCE_US 2000000LL
+#define IMMEDIATE_WAKEUP_US 1000000LL
 
 // 使用 RTC 内存维护相对倒计时，彻底隔绝 NTP 服务器挂钟时间的跳变
 RTC_DATA_ATTR static int64_t s_patrol_left_us = 0;
@@ -42,6 +44,7 @@ esp_err_t daq_scheduler_execute(void)
         // 唤醒后，扣减上次设定的睡眠时长，推动相对倒计时
         s_patrol_left_us -= s_last_sleep_us;
         s_diagnosis_left_us -= s_last_sleep_us;
+        server_report_task_on_wake(s_last_sleep_us);
     }
 
     // 检查配置，>0 代表任务启用
@@ -62,8 +65,16 @@ esp_err_t daq_scheduler_execute(void)
     esp_err_t err = ESP_OK;
 
     if (s_ran_patrol || s_ran_diagnosis) {
+        server_report_task_clear("normal report due");
         LOG_INFO("Executing unified normal report pipeline...");
         err = report_pipeline_run(NULL);
+    } else if (server_report_task_is_due()) {
+        char task_id[64] = {0};
+        if (server_report_task_copy_due_id(task_id, sizeof(task_id))) {
+            LOG_INFOF("Executing scheduled server report task: id=%s", task_id);
+            err = report_pipeline_run(task_id);
+            server_report_task_mark_attempted(task_id);
+        }
     } else {
         LOG_INFO("Woke up but no report task scheduled to run right now.");
     }
@@ -88,6 +99,16 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
     // 2. 将之前剩余的倒计时，继续扣减掉本次的工作耗时
     s_patrol_left_us -= exec_time_us;
     s_diagnosis_left_us -= exec_time_us;
+    server_report_task_after_work(exec_time_us);
+
+    const bool normal_overdue_after_work =
+        (!s_ran_patrol && patrol_enabled && s_patrol_left_us <= 0) ||
+        (!s_ran_diagnosis && diagnosis_enabled && s_diagnosis_left_us <= 0);
+    if (normal_overdue_after_work) {
+        server_report_task_clear("normal report overdue after server task");
+        s_last_sleep_us = IMMEDIATE_WAKEUP_US;
+        return (uint64_t)IMMEDIATE_WAKEUP_US;
+    }
 
     // 3. 对刚执行过的任务满血复活，将透支的时间从下一个完整周期里扣除
     if (patrol_enabled && s_ran_patrol) {
@@ -120,20 +141,34 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
         next_sleep_us = s_diagnosis_left_us;
         min_period_us = d_period_us;
     } else {
+        next_sleep_us = -1;
+        min_period_us = 0;
+    }
+
+    if (server_report_task_is_active()) {
+        const int64_t server_left_us = server_report_task_left_us();
+        if (server_left_us <= 0) {
+            next_sleep_us = IMMEDIATE_WAKEUP_US;
+        } else if (next_sleep_us < 0 || server_left_us < next_sleep_us) {
+            next_sleep_us = server_left_us;
+        }
+    }
+
+    if (next_sleep_us < 0) {
         s_last_sleep_us = 0;
-        return 0; // 全被禁用，无限休眠
+        return 0; // 全被禁用，且无服务器任务，无限休眠
     }
 
     // 6. 核心需求：如果任务执行太久导致连带把其它周期的剩余时间扣光了(变负数)，
     // 则按需求睡眠时间等于配置最短周期，且立刻刷新各任务锚点防止连带唤醒。
     if (next_sleep_us <= 0) {
-        next_sleep_us = min_period_us;
+        next_sleep_us = (min_period_us > 0) ? min_period_us : IMMEDIATE_WAKEUP_US;
         if (patrol_enabled) s_patrol_left_us = p_period_us;
         if (diagnosis_enabled) s_diagnosis_left_us = d_period_us;
     }
 
     // 7. 防护：防止由于周期动态缩小等边缘配置跳变导致极大的睡眠时间
-    if (next_sleep_us > min_period_us) {
+    if (min_period_us > 0 && next_sleep_us > min_period_us) {
         next_sleep_us = min_period_us;
     }
 

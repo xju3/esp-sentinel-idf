@@ -10,6 +10,7 @@
 #include "logger.h"
 #include "report_upload_cache.h"
 #include "sdkconfig.h"
+#include "server_report_task_scheduler.h"
 #include "bsp_4g.h"
 
 #include "cJSON.h"
@@ -124,6 +125,10 @@ static const struct {
     {"1000_2000", 1000.0f, 2000.0f},
     {"2000_5000", 2000.0f, 5000.0f},
 };
+
+typedef struct {
+    bool accept_server_tasks;
+} report_upload_ctx_t;
 
 static double round_to_decimals(double value, int decimals)
 {
@@ -688,7 +693,7 @@ static void log_report_json(const char *json)
     // LOG_INFO("Report JSON end");
 }
 
-static void log_upload_response_tasks(const cJSON *data)
+static void handle_upload_response_tasks(const cJSON *data, bool accept_server_tasks)
 {
     if (!cJSON_IsArray(data)) {
         LOG_INFO("Report JSON upload completed");
@@ -711,11 +716,16 @@ static void log_upload_response_tasks(const cJSON *data)
                       cJSON_IsNumber(val) ? val->valueint : 0);
         }
     }
+
+    if (accept_server_tasks) {
+        (void)server_report_task_schedule_from_response(data);
+    }
 }
 
 static esp_err_t send_report_json_once(const char *json, void *ctx)
 {
-    (void)ctx;
+    const report_upload_ctx_t *upload_ctx = (const report_upload_ctx_t *)ctx;
+    const bool accept_server_tasks = upload_ctx && upload_ctx->accept_server_tasks;
 
     if (!json) {
         return ESP_ERR_INVALID_ARG;
@@ -765,16 +775,19 @@ static esp_err_t send_report_json_once(const char *json, void *ctx)
     }
 
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-    log_upload_response_tasks(data);
+    handle_upload_response_tasks(data, accept_server_tasks);
 
     cJSON_Delete(root);
     free(response);
     return ESP_OK;
 }
 
-static esp_err_t post_report_json(const char *json)
+static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
 {
-    esp_err_t err = send_report_json_once(json, NULL);
+    report_upload_ctx_t upload_ctx = {
+        .accept_server_tasks = accept_server_tasks,
+    };
+    esp_err_t err = send_report_json_once(json, &upload_ctx);
     if (err != ESP_OK) {
         esp_err_t save_err = report_upload_cache_save_failed(json);
         if (save_err != ESP_OK) {
@@ -785,7 +798,10 @@ static esp_err_t post_report_json(const char *json)
         return err;
     }
 
-    esp_err_t retry_err = report_upload_cache_flush(send_report_json_once, NULL);
+    report_upload_ctx_t retry_ctx = {
+        .accept_server_tasks = false,
+    };
+    esp_err_t retry_err = report_upload_cache_flush(send_report_json_once, &retry_ctx);
     if (retry_err != ESP_OK) {
         LOG_WARNF("Some cached report JSON files were not uploaded: %s", esp_err_to_name(retry_err));
     }
@@ -840,7 +856,7 @@ esp_err_t report_pipeline_run(const char *task_id)
     }
 
     log_report_json(json);
-    err = post_report_json(json);
+    err = post_report_json(json, task_id == NULL || task_id[0] == '\0');
 
     free(json);
     return err;
