@@ -155,7 +155,6 @@ void app_main(void)
     // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
     // LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");
     check_and_report_ota_status();
-    http_message_process_pending_tasks();
 
     // --- 修复：给后台网络及对时任务留出存活窗口 ---
     if (is_hot_wakeup)

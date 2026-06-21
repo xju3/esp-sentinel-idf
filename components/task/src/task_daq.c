@@ -65,17 +65,25 @@ esp_err_t daq_scheduler_execute(void)
 
     esp_err_t err = ESP_OK;
 
+    bool task_executed = false;
+
     if (s_is_wom_wakeup) {
         LOG_INFO("Executing WoM wakeup report pipeline...");
         err = report_pipeline_run("0");
         s_is_wom_wakeup = false;
+        task_executed = true;
     }
 
     if (s_ran_patrol || s_ran_diagnosis) {
         server_report_task_clear("normal report due");
         LOG_INFO("Executing unified normal report pipeline...");
         err = report_pipeline_run(NULL);
-    } else if (server_report_task_is_due()) {
+        task_executed = true;
+    }
+
+    // Execute any server tasks that are due (either from previous deep sleep schedule, 
+    // or newly received from the HTTP response of the report_pipeline_run above).
+    while (server_report_task_is_due()) {
         char task_id[64] = {0};
         if (server_report_task_copy_due_id(task_id, sizeof(task_id))) {
             LOG_INFOF("Executing scheduled server report task: id=%s", task_id);
@@ -86,8 +94,13 @@ esp_err_t daq_scheduler_execute(void)
                 err = report_pipeline_run(task_id);
             }
             server_report_task_mark_attempted(task_id);
+            task_executed = true;
+        } else {
+            break;
         }
-    } else {
+    }
+
+    if (!task_executed) {
         LOG_INFO("Woke up but no report task scheduled to run right now.");
     }
 

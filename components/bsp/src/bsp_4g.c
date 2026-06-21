@@ -1238,9 +1238,9 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
     const char *httpget_line = strstr(response, "+QHTTPGET:");
     if (httpget_line && sscanf(httpget_line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) == 3)
     {
-        if (qerr == 0 && qstatus == 200 && qlen > 0)
+        if (qerr == 0 && qlen > 0)
         {
-            // 4. 从模块内部提取 JSON 数据
+            // 4. 从模块内部提取 JSON 数据 (即便不是 200 也要读出来看看报错详情)
             uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
             err = wait_for_connect_stream_safe(5000);
             if (err == ESP_OK)
@@ -1268,7 +1268,21 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
                     free(body);
                     err = ESP_FAIL;
                 }
+
+                if (qstatus != 200 && received == qlen && body)
+                {
+                    LOG_WARNF("HTTP GET returned %d. Response body: %s", qstatus, body);
+                    if (*out_response != body) {
+                        free(body);
+                    }
+                    err = ESP_FAIL;
+                }
             }
+        }
+        else if (qerr == 0 && qstatus == 200)
+        {
+            // content_len == 0
+            err = ESP_OK;
         }
         else
         {
@@ -1563,6 +1577,8 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
     int req_len = snprintf(req_header, 512,
                            "%s %s HTTP/1.1\r\n"
                            "Host: %s\r\n"
+                           "User-Agent: Sentinel/1.0\r\n"
+                           "Accept: */*\r\n"
                            "Content-Type: application/json\r\n"
                            "Content-Length: %d\r\n"
                            "Connection: close\r\n\r\n",
@@ -1605,10 +1621,10 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
             char *line = strstr(response, "+QHTTPPOST:");
             if (line && sscanf(line, "+QHTTPPOST: %d,%d,%d", &qerr, &qstatus, &qlen) >= 2)
             {
-                if (qerr == 0 && (qstatus >= 200 && qstatus < 300))
+                if (qerr == 0 && qlen > 0)
                 {
                     err = ESP_OK;
-                    if (out_response && qlen > 0)
+                    if (out_response || qstatus != 200)
                     {
                         uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
                         err = wait_for_connect_stream_safe(5000);
@@ -1630,17 +1646,42 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
                             }
                             if (body && received == qlen)
                             {
-                                *out_response = body;
-                                modem_read_response(response, MODEM_RESP_BUF_SIZE, 3000);
                                 err = ESP_OK;
                             }
                             else
                             {
                                 free(body);
+                                body = NULL;
                                 err = ESP_FAIL;
                             }
+
+                            if (body)
+                            {
+                                if (qstatus != 200 && qstatus != 201)
+                                {
+                                    LOG_WARNF("HTTP POST returned %d. Response body: %s", qstatus, body);
+                                    if (out_response) *out_response = body;
+                                    else free(body);
+                                    err = ESP_FAIL;
+                                }
+                                else
+                                {
+                                    if (out_response) *out_response = body;
+                                    else free(body);
+                                    err = ESP_OK;
+                                }
+                            }
+                            modem_read_response(response, MODEM_RESP_BUF_SIZE, 3000);
+                        }
+                        else
+                        {
+                            err = ESP_FAIL;
                         }
                     }
+                }
+                else if (qerr == 0 && (qstatus == 200 || qstatus == 201))
+                {
+                    err = ESP_OK;
                 }
                 else
                 {
