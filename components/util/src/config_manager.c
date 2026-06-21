@@ -104,6 +104,18 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         cfg->report = (int32_t)item->valueint;
     }
 
+    item = cJSON_GetObjectItemCaseSensitive(root, "report_points");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->report_points = (int16_t)item->valueint;
+    }
+
+    item = cJSON_GetObjectItemCaseSensitive(root, "report_range");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->report_range = (int16_t)item->valueint;
+    }
+
     item = cJSON_GetObjectItemCaseSensitive(root, "months");
     if (cJSON_IsNumber(item))
     {
@@ -350,6 +362,8 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
     cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
     cJSON_AddNumberToObject(root, "report", cfg->report);
+    cJSON_AddNumberToObject(root, "report_points", cfg->report_points);
+    cJSON_AddNumberToObject(root, "report_range", cfg->report_range);
     cJSON_AddNumberToObject(root, "battery", cfg->battery);
     cJSON_AddNumberToObject(root, "rpm", cfg->rpm);
     cJSON_AddNumberToObject(root, "network", cfg->network);

@@ -6,9 +6,11 @@
     },
     "rpm": 1480,
     "api_host": "139.9.50.7",
-    "patrol": 1,
+    "patrol": 5,
     "diagnosis": 1440,
     "report": 1,
+    "report_points": 4096,
+    "report_range": 2,
     "network": 1,
     "wifi": {
         "ssid": "CU_Up3k",

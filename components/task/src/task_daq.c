@@ -24,6 +24,7 @@ RTC_DATA_ATTR static bool s_is_cold_boot = true;
 // 本次运行中，哪些任务被触发执行了
 static bool s_ran_patrol = false;
 static bool s_ran_diagnosis = false;
+static bool s_is_wom_wakeup = false;
 
 /**
  * @brief 从深度睡眠唤醒后调用的 DAQ 评估与执行入口
@@ -64,6 +65,12 @@ esp_err_t daq_scheduler_execute(void)
 
     esp_err_t err = ESP_OK;
 
+    if (s_is_wom_wakeup) {
+        LOG_INFO("Executing WoM wakeup report pipeline...");
+        err = report_pipeline_run("0");
+        s_is_wom_wakeup = false;
+    }
+
     if (s_ran_patrol || s_ran_diagnosis) {
         server_report_task_clear("normal report due");
         LOG_INFO("Executing unified normal report pipeline...");
@@ -72,7 +79,12 @@ esp_err_t daq_scheduler_execute(void)
         char task_id[64] = {0};
         if (server_report_task_copy_due_id(task_id, sizeof(task_id))) {
             LOG_INFOF("Executing scheduled server report task: id=%s", task_id);
-            err = report_pipeline_run(task_id);
+            report_pipeline_options_t options = {0};
+            if (server_report_task_copy_due_options(&options)) {
+                err = report_pipeline_run_with_options(task_id, &options);
+            } else {
+                err = report_pipeline_run(task_id);
+            }
             server_report_task_mark_attempted(task_id);
         }
     } else {
@@ -212,5 +224,12 @@ bool task_daq_periodic_enabled(void)
 
 esp_err_t task_daq_trigger_patrol_now(void)
 {
+    s_patrol_left_us = 0;
+    return ESP_OK;
+}
+
+esp_err_t task_daq_trigger_wom_patrol(void)
+{
+    s_is_wom_wakeup = true;
     return ESP_OK;
 }

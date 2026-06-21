@@ -1,3 +1,9 @@
+/*
+ * =====================================================================================
+ * @note This file is currently EXCLUDED from project compilation.
+ *       It is retained for historical reference and is no longer part of the active build.
+ * =====================================================================================
+ */
 #ifndef TASK_KURTOSIS_H
 #define TASK_KURTOSIS_H
 

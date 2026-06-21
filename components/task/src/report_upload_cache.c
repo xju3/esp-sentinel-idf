@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <dirent.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define REPORT_UPLOAD_CACHE_MAX_FILES 1024
 #define REPORT_UPLOAD_CACHE_PATH_LEN 48
@@ -40,6 +43,10 @@ esp_err_t report_upload_cache_save_failed(const char *json)
     for (size_t i = 0; i < REPORT_UPLOAD_CACHE_MAX_FILES; ++i) {
         char path[REPORT_UPLOAD_CACHE_PATH_LEN];
         cache_path_for_slot(i, path, sizeof(path));
+        if (i % 16 == 0) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+
         if (fsu_file_exists(path)) {
             continue;
         }
@@ -71,12 +78,22 @@ esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender, void *c
     }
 
     esp_err_t first_err = ESP_OK;
-    for (size_t i = 0; i < REPORT_UPLOAD_CACHE_MAX_FILES; ++i) {
-        char path[REPORT_UPLOAD_CACHE_PATH_LEN];
-        cache_path_for_slot(i, path, sizeof(path));
-        if (!fsu_file_exists(path)) {
+
+    DIR *dir = opendir("/user");
+    if (!dir) {
+        LOG_WARNF("Cannot open /user directory for cache flush");
+        return ESP_FAIL;
+    }
+
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        // We are looking for files like "report_retry_X.json"
+        if (strncmp(ent->d_name, "report_retry_", 13) != 0) {
             continue;
         }
+
+        char path[300];
+        snprintf(path, sizeof(path), "/user/%s", ent->d_name);
 
         size_t len = 0;
         char *json = fsu_read_file_alloc(path, &len);
@@ -107,5 +124,6 @@ esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender, void *c
         }
     }
 
+    closedir(dir);
     return first_err;
 }

@@ -23,6 +23,7 @@ esp_err_t start_wom_lis2dh12_listener();
 esp_err_t wom_lis2dh12_enable(void);
 esp_err_t wom_lis2dh12_disable(void);
 esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void);
+esp_err_t wom_lis2dh12_enable_deep_sleep_wakeup(void);
 
 /**
  * @brief Manual check for WoM triggers after sleep wakeup.

@@ -11,12 +11,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "task_status_report.h"
 
 #ifndef REPORT_SN
 #define REPORT_SN "UNKNOWN"
 #endif
 
 static http_task_action_handler_t s_action_handler = NULL;
+
+static int task_val_to_int(const cJSON *val_item)
+{
+    if (cJSON_IsNumber(val_item)) {
+        return val_item->valueint;
+    }
+    if (cJSON_IsString(val_item) && val_item->valuestring) {
+        return (int)strtol(val_item->valuestring, NULL, 10);
+    }
+    return 0;
+}
+
+static const char *task_val_to_string(const cJSON *val_item)
+{
+    if (cJSON_IsString(val_item)) {
+        return val_item->valuestring;
+    }
+    return "";
+}
 
 static esp_err_t execute_config_update_sync(const char *task_id)
 {
@@ -52,103 +72,85 @@ static esp_err_t execute_config_update_sync(const char *task_id)
     return ret;
 }
 
-http_pending_tasks_result_t http_message_process_pending_tasks(void)
+http_pending_tasks_result_t http_message_process_task_array(const cJSON *task_array)
 {
-    char url[256];
-    char *json_response = NULL;
+    if (!cJSON_IsArray(task_array)) {
+        return HTTP_PENDING_TASKS_NONE;
+    }
+
     bool found_task = false;
     bool keep_4g_required = false;
     bool transport_shutdown = false;
 
-    // 1. 组装拉取任务列表的 URL（去掉硬编码的 :3090 端口，由 g_user_config.api_host 统一管理）
-    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/tasks/%s", g_user_config.api_host, REPORT_SN);
-    // LOG_INFOF("Polling pending tasks from: %s", url);
+    int task_count = cJSON_GetArraySize(task_array);
+    LOG_INFOF("Found %d pending tasks", task_count);
 
-    // 2. 通过 http_proxy 获取 JSON 响应
-    if (http_proxy_get(url, &json_response) == ESP_OK && json_response != NULL)
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, task_array)
     {
-        cJSON *root = cJSON_Parse(json_response);
-        if (cJSON_IsArray(root))
+        const cJSON *action_item = cJSON_GetObjectItemCaseSensitive(item, "action");
+        const cJSON *task_id_item = cJSON_GetObjectItemCaseSensitive(item, "id");
+        const cJSON *val_item = cJSON_GetObjectItemCaseSensitive(item, "val");
+
+        if (cJSON_IsNumber(action_item) && cJSON_IsString(task_id_item))
         {
-            int task_count = cJSON_GetArraySize(root);
-            LOG_INFOF("Found %d pending tasks", task_count);
+            int action = action_item->valueint;
+            int val = task_val_to_int(val_item);
+            const char *val_str = task_val_to_string(val_item);
+            const char *task_id = task_id_item->valuestring;
+            found_task = true;
+            LOG_INFOF("Processing server task: id=%s, action=%d, val=%d", task_id, action, val);
 
-            cJSON *item = NULL;
-            cJSON_ArrayForEach(item, root)
+            const bool is_repeated_report_action =
+                (action >= 10 && action < 100) || (action >= 1000 && action < 3000);
+            if (action < 10)
             {
-                const cJSON *action_item = cJSON_GetObjectItemCaseSensitive(item, "action");
-                const cJSON *task_id_item = cJSON_GetObjectItemCaseSensitive(item, "id");
-                const cJSON *val_item = cJSON_GetObjectItemCaseSensitive(item, "val");
-
-                if (cJSON_IsNumber(action_item) && cJSON_IsString(task_id_item))
+                keep_4g_required = true;
+            }
+            else if (!transport_shutdown)
+            {
+                LOG_INFOF("Action %d does not require 4G. Shutting down 4G before local task execution.", action);
+                if (g_user_config.network == 1)
                 {
-                    int action = action_item->valueint;
-                    int val = cJSON_IsNumber(val_item) ? val_item->valueint : 0;
-                    const char *task_id = task_id_item->valuestring;
-                    found_task = true;
-                    LOG_INFOF("Processing server task: id=%s, action=%d, val=%d", task_id, action, val);
-
-                    const bool is_repeated_report_action = (action >= 10 && action < 100);
-                    if (action < 10)
-                    {
-                        keep_4g_required = true;
-                    }
-                    else if (!transport_shutdown)
-                    {
-                        LOG_INFOF("Action %d does not require 4G. Shutting down 4G before local task execution.", action);
-                        if (g_user_config.network == 1)
-                        {
-                            (void)shutdown_4g_network();
-                        }
-                        transport_shutdown = true;
-                    }
-
-                    if (action == 1)
-                    {
-                        (void)execute_config_update_sync(task_id);
-                    }
-                    else if (action == 2)
-                    {
-                        LOG_DEBUG("Update firmware by OTA. Processing synchronously...");
-                        execute_ota_update_sync(task_id);
-                    }
-                    else if (action == 3)
-                    {
-                        LOG_DEBUGF("发送设备状态至服务器, 包含电量, 4G信号强度, CPU温度, val=%d", val);
-                    }
-                    else if (is_repeated_report_action)
-                    {
-                        (void)server_report_task_schedule(task_id, action, val);
-                    }
-                    else if (s_action_handler != NULL)
-                    {
-                        (void)s_action_handler(action, task_id);
-                    }
-                    else
-                    {
-                        LOG_WARNF("No handler registered for action=%d", action);
-                    }
+                    (void)shutdown_4g_network();
                 }
+                transport_shutdown = true;
+            }
+
+            if (action == 0)
+            {
+                LOG_DEBUG("Update firmware by OTA. Processing synchronously...");
+                execute_ota_update_from_url_sync(task_id, val_str);
+            }
+            else if (action == 1)
+            {
+                (void)execute_config_update_sync(task_id);
+            }
+            else if (action == 2)
+            {
+                task_status_report_execute(task_id);
+            }
+            else if (is_repeated_report_action)
+            {
+                (void)server_report_task_schedule(task_id, action, val);
+            }
+            else if (s_action_handler != NULL)
+            {
+                (void)s_action_handler(action, task_id);
+            }
+            else
+            {
+                LOG_WARNF("No handler registered for action=%d", action);
             }
         }
-        else
-        {
-            LOG_DEBUG("No pending tasks found or invalid format.");
-        }
-        cJSON_Delete(root);
-        free(json_response);
-    }
-    else
-    {
-        LOG_WARN("Failed to fetch pending tasks from server");
     }
 
-    if (!found_task)
-    {
+    if (!found_task) {
         return HTTP_PENDING_TASKS_NONE;
     }
     return keep_4g_required ? HTTP_PENDING_TASKS_KEEP_4G : HTTP_PENDING_TASKS_CAN_SHUTDOWN_4G;
 }
+
 
 esp_err_t start_http_message_task(void)
 {

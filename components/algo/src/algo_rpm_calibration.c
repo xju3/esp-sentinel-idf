@@ -1,3 +1,9 @@
+/*
+ * =====================================================================================
+ * @note This file is currently EXCLUDED from project compilation.
+ *       It is retained for historical reference and is no longer part of the active build.
+ * =====================================================================================
+ */
 #include "algo_rpm_calibration.h"
 #include "algo_fft.h"
 #include "esp_heap_caps.h"

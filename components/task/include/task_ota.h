@@ -8,6 +8,8 @@ extern "C" {
 #endif
 
 void execute_ota_update_sync(const char *task_id);
+void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url);
+void check_and_report_ota_status(void);
 
 #ifdef __cplusplus
 }

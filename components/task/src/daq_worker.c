@@ -1,3 +1,9 @@
+/*
+ * =====================================================================================
+ * @note This file is currently EXCLUDED from project compilation.
+ *       It is retained for historical reference and is no longer part of the active build.
+ * =====================================================================================
+ */
 #include "daq_worker.h"
 #include "drv_iis3dwb.h"
 #include "daq_iis3dwb.h"

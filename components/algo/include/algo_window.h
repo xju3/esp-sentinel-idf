@@ -1,3 +1,9 @@
+/*
+ * =====================================================================================
+ * @note This file is currently EXCLUDED from project compilation.
+ *       It is retained for historical reference and is no longer part of the active build.
+ * =====================================================================================
+ */
 #ifndef ALGO_WINDOW_H
 #define ALGO_WINDOW_H
 
