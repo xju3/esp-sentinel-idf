@@ -43,7 +43,7 @@
 #define MODEM_POWER_ENABLE_LEVEL 1
 #define MODEM_POWER_DISABLE_LEVEL 0
 #define MODEM_POWER_SETTLE_MS 100
-#define MODEM_PULSE_PWRKEY_MS 600
+#define MODEM_PULSE_PWRKEY_MS 50
 #define MODEM_BOOT_TIMEOUT_MS 15000
 #define MODEM_SIM_TIMEOUT_MS 10000
 #define MODEM_REG_TIMEOUT_MS 60000
@@ -811,7 +811,7 @@ static esp_err_t modem_shutdown_gracefully(bool at_ready)
     if (at_ready)
     {
         (void)uart_flush_input(UART_PORT_NUM);
-        static const char shutdown_cmd[] = "AT+QPOWD=1\r\n";
+        static const char shutdown_cmd[] = "AT+CPOF\r\n";
         int written = uart_write_bytes(UART_PORT_NUM, shutdown_cmd, sizeof(shutdown_cmd) - 1);
         if (written >= 0)
         {
@@ -828,7 +828,7 @@ static esp_err_t modem_shutdown_gracefully(bool at_ready)
     if (modem_status_is_on())
     {
         LOG_WARNF("Forcing shutdown via PWRKEY...");
-        (void)modem_pulse_low_active_line(MODEM_PWRKEY_PIN, 700);
+        (void)modem_pulse_low_active_line(MODEM_PWRKEY_PIN, 2600);
         (void)modem_wait_for_status_level(0, 5000);
     }
 
@@ -1115,10 +1115,10 @@ esp_err_t shutdown_4g_network(void)
     return err;
 }
 
-// 流式安全读取直到 CONNECT\r\n（防止把固件二进制头部误吃掉）
-static esp_err_t wait_for_connect_stream_safe(uint32_t timeout_ms)
+// 流式安全读取直到 DOWNLOAD\r\n（防止把固件二进制头部误吃掉）
+static esp_err_t wait_for_download_stream_safe(uint32_t timeout_ms)
 {
-    const char *target = "CONNECT\r\n";
+    const char *target = "DOWNLOAD\r\n";
     int match_idx = 0;
     int target_len = strlen(target);
     int64_t deadline = esp_timer_get_time() + timeout_ms * 1000LL;
@@ -1147,29 +1147,18 @@ static esp_err_t wait_for_connect_stream_safe(uint32_t timeout_ms)
     return ESP_ERR_TIMEOUT;
 }
 
-static void append_uart_response_until_line_end(char *response, size_t response_size, uint32_t timeout_ms)
+static esp_err_t wait_for_newline_stream_safe(uint32_t timeout_ms)
 {
-    if (response == NULL || response_size == 0)
-        return;
-
-    int64_t deadline = deadline_after_ms(timeout_ms);
+    int64_t deadline = esp_timer_get_time() + timeout_ms * 1000LL;
     while (esp_timer_get_time() < deadline)
     {
-        size_t used = strlen(response);
-        if (used > 0 && response[used - 1] == '\n')
-            return;
-        if (used >= response_size - 1)
-            return;
-
-        int read_len = uart_read_bytes(UART_PORT_NUM,
-                                       response + used,
-                                       response_size - used - 1,
-                                       pdMS_TO_TICKS(20));
-        if (read_len > 0)
+        uint8_t c;
+        if (uart_read_bytes(UART_PORT_NUM, &c, 1, pdMS_TO_TICKS(10)) > 0)
         {
-            response[used + read_len] = '\0';
+            if (c == '\n') return ESP_OK;
         }
     }
+    return ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
@@ -1180,123 +1169,114 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
     if (!s_at_ready)
         return ESP_ERR_INVALID_STATE;
 
-    char cmd[128];
     char *response = calloc(1, MODEM_HTTP_RESP_BUF_SIZE);
     if (!response)
         return ESP_ERR_NO_MEM;
-    int url_len = strlen(url);
     esp_err_t err = ESP_OK;
-
-    err = modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
-    if (err != ESP_OK || !modem_response_is_ok(response))
-    {
-        err = err != ESP_OK ? err : ESP_FAIL;
-        goto cleanup;
-    }
-
-    err = modem_send_command("AT+QHTTPCFG=\"responseheader\",0", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
-    if (err != ESP_OK || !modem_response_is_ok(response))
-    {
-        err = err != ESP_OK ? err : ESP_FAIL;
-        goto cleanup;
-    }
 
     // 互斥锁定：HTTP 事务期间独占串口数据
     s_at_cmd_active = true;
 
-    // 1. 设置 URL 长度
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", url_len);
-    uart_flush_input(UART_PORT_NUM);
-    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-    err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "CONNECT", 5000);
-    if (err != ESP_OK)
-    {
-        goto cleanup;
-    }
+    // 1. Initialize HTTP Service
+    modem_send_command("AT+HTTPINIT", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
 
-    // 2. 发送实际 URL
-    uart_write_bytes(UART_PORT_NUM, url, url_len);
-    err = modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 5000);
+    // 2. Set URL
+    char *cmd = malloc(1024);
+    if (!cmd) { err = ESP_ERR_NO_MEM; goto cleanup; }
+    snprintf(cmd, 1024, "AT+HTTPPARA=\"URL\",\"%s\"\r\n", url);
+    err = modem_send_command(cmd, response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+    free(cmd);
     if (err != ESP_OK || !modem_response_is_ok(response))
     {
         err = err != ESP_OK ? err : ESP_FAIL;
         goto cleanup;
     }
 
-    // 3. 触发模块发起底层 HTTP GET 请求
-    uart_write_bytes(UART_PORT_NUM, "AT+QHTTPGET=80\r\n", 16);
-    // 请求可能耗时很长，给 40 秒超时
-    err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "+QHTTPGET:", 40000);
-    if (err != ESP_OK)
+    // 3. Trigger HTTP GET request
+    err = modem_send_command("AT+HTTPACTION=0", response, MODEM_HTTP_RESP_BUF_SIZE, 40000);
+    if (err == ESP_OK)
     {
-        goto cleanup;
-    }
-    append_uart_response_until_line_end(response, MODEM_HTTP_RESP_BUF_SIZE, 1000);
-
-    // 解析 QHTTPGET: err, status, len
-    int qerr = -1, qstatus = -1, qlen = 0;
-    const char *httpget_line = strstr(response, "+QHTTPGET:");
-    if (httpget_line && sscanf(httpget_line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) == 3)
-    {
-        if (qerr == 0 && qlen > 0)
+        int64_t qdeadline = esp_timer_get_time() + 40000000;
+        while (strstr(response, "+HTTPACTION:") == NULL && esp_timer_get_time() < qdeadline)
         {
-            // 4. 从模块内部提取 JSON 数据 (即便不是 200 也要读出来看看报错详情)
-            uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
-            err = wait_for_connect_stream_safe(5000);
+            int rlen = strlen(response);
+            if (rlen >= MODEM_HTTP_RESP_BUF_SIZE - 1) break;
+            int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_HTTP_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
+            if (r > 0) response[rlen + r] = '\0';
+        }
+    }
+
+    // Parse HTTPACTION: method, status, len
+    int qmethod = -1, qstatus = -1, qlen = 0;
+    const char *httpget_line = strstr(response, "+HTTPACTION:");
+    if (httpget_line && sscanf(httpget_line, "+HTTPACTION: %d,%d,%d", &qmethod, &qstatus, &qlen) == 3)
+    {
+        if (qlen > 0)
+        {
+            // 4. Extract data from module
+            char cmd_read[32];
+            snprintf(cmd_read, sizeof(cmd_read), "AT+HTTPREAD=0,%d\r\n", qlen);
+            uart_write_bytes(UART_PORT_NUM, cmd_read, strlen(cmd_read));
+            
+            err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "+HTTPREAD:", 5000);
             if (err == ESP_OK)
             {
-                char *body = calloc(1, qlen + 1);
-                int received = 0;
-                int64_t start_us = esp_timer_get_time();
-                while (body && received < qlen)
+                err = wait_for_newline_stream_safe(5000);
+                if (err == ESP_OK)
                 {
-                    int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
-                    if (r > 0)
-                        received += r;
-                    if ((esp_timer_get_time() - start_us) > 15000000)
-                        break; // 防止死等，15秒超时
-                }
-                if (received == qlen)
-                {
-                    *out_response = body;
-                    // 读取完毕后模块通常还会吐出 OK 和 +QHTTPREAD:0，这里主动读取清空
-                    modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 3000);
-                    err = ESP_OK;
-                }
-                else
-                {
-                    free(body);
-                    err = ESP_FAIL;
-                }
-
-                if (qstatus != 200 && received == qlen && body)
-                {
-                    LOG_WARNF("HTTP GET returned %d. Response body: %s", qstatus, body);
-                    if (*out_response != body) {
-                        free(body);
+                    char *body = calloc(1, qlen + 1);
+                    int received = 0;
+                    int64_t start_us = esp_timer_get_time();
+                    while (body && received < qlen)
+                    {
+                        int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
+                        if (r > 0)
+                            received += r;
+                        if ((esp_timer_get_time() - start_us) > 15000000)
+                            break; // 15s timeout
                     }
-                    err = ESP_FAIL;
+                    if (received == qlen)
+                    {
+                        *out_response = body;
+                        // Read trailing OK
+                        modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 3000);
+                        err = ESP_OK;
+                    }
+                    else
+                    {
+                        free(body);
+                        err = ESP_FAIL;
+                    }
+
+                    if (qstatus != 200 && received == qlen && body)
+                    {
+                        LOG_WARNF("HTTP GET returned %d. Response body: %s", qstatus, body);
+                        if (*out_response != body) {
+                            free(body);
+                        }
+                        err = ESP_FAIL;
+                    }
                 }
             }
         }
-        else if (qerr == 0 && qstatus == 200)
+        else if (qstatus == 200)
         {
-            // content_len == 0
             err = ESP_OK;
         }
         else
         {
-            LOG_WARNF("HTTP GET failed: AT_err=%d, HTTP_status=%d, content_len=%d", qerr, qstatus, qlen);
+            LOG_WARNF("HTTP GET failed: status=%d, len=%d", qstatus, qlen);
             err = ESP_FAIL;
         }
     }
     else
     {
-        LOG_WARNF("Unexpected QHTTPGET response: %s", response);
+        LOG_WARNF("Unexpected HTTPACTION response: %s", response);
         err = ESP_FAIL;
     }
 
 cleanup:
+    modem_send_command("AT+HTTPTERM", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
     free(response);
     s_at_cmd_active = false;
     return err;
@@ -1309,38 +1289,18 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
     if (!s_at_ready)
         return ESP_ERR_INVALID_STATE;
 
-    // 解析出 host 和 path 用于手动构造 Header
-    const char *proto_end = strstr(url, "://");
-    const char *host_start = proto_end ? proto_end + 3 : url;
-    const char *path_start = strchr(host_start, '/');
-    char host[128] = {0};
-    char path[256] = {0};
-
-    if (path_start)
-    {
-        int host_len = path_start - host_start;
-        if (host_len > 127)
-            host_len = 127;
-        strncpy(host, host_start, host_len);
-        strncpy(path, path_start, sizeof(path) - 1);
-    }
-    else
-    {
-        strncpy(host, host_start, sizeof(host) - 1);
-        strcpy(path, "/");
-    }
-
     s_at_cmd_active = true;
-    char cmd[256];
-    char response[MODEM_RESP_BUF_SIZE];
+    char *response = malloc(MODEM_RESP_BUF_SIZE);
+    if (!response) {
+        s_at_cmd_active = false;
+        return ESP_ERR_NO_MEM;
+    }
     esp_err_t err = ESP_OK;
-
-    // 1. 临时开启 AT+QHTTP 自定义 Header 能力
-    modem_send_command("AT+QHTTPCFG=\"requestheader\",1", response, sizeof(response), 2000);
 
     char *ota_buf = malloc(4096);
     if (!ota_buf)
     {
+        free(response);
         s_at_cmd_active = false;
         return ESP_ERR_NO_MEM;
     }
@@ -1349,7 +1309,7 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
     int chunk_size = 4096;
     int retry_count = 0;
 
-    LOG_DEBUGF("Starting 4G Chunked OTA from MinIO: %s", host);
+    LOG_DEBUGF("Starting 4G Chunked OTA from URL: %s", url);
 
     while (offset < fw_size)
     {
@@ -1358,139 +1318,140 @@ static esp_err_t bsp_4g_ota_download_and_write_internal(const char *url, int fw_
             end = fw_size - 1;
         int expect_len = end - offset + 1;
 
-        // 设置目标 URL
-        snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", (int)strlen(url));
-        uart_flush_input(UART_PORT_NUM);
-        uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-        err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
-        if (err != ESP_OK)
-        {
-            if (++retry_count > 3)
-                break;
-            continue;
+        modem_send_command("AT+HTTPTERM", response, MODEM_RESP_BUF_SIZE, 2000);
+        modem_send_command("AT+HTTPINIT", response, MODEM_RESP_BUF_SIZE, 2000);
+
+        char *url_cmd = malloc(1024);
+        if (url_cmd) {
+            snprintf(url_cmd, 1024, "AT+HTTPPARA=\"URL\",\"%s\"\r\n", url);
+            err = modem_send_command(url_cmd, response, MODEM_RESP_BUF_SIZE, 5000);
+            free(url_cmd);
+        } else {
+            err = ESP_ERR_NO_MEM;
+            break;
         }
 
-        uart_write_bytes(UART_PORT_NUM, url, strlen(url));
-        err = modem_read_response(response, sizeof(response), 5000);
         if (err != ESP_OK || !modem_response_is_ok(response))
         {
-            if (++retry_count > 3)
-                break;
+            if (++retry_count > 3) break;
             continue;
         }
 
-        // 处理鉴权 Header
-        char auth_header[128] = {0};
-        if (access_key && access_key[0] != '\0')
-        {
-            snprintf(auth_header, sizeof(auth_header), "Authorization: %s\r\n", access_key);
-        }
-
-        // 构造含有 Range 的 HTTP GET 请求头
-        char req_header[512];
-        int req_len = snprintf(req_header, sizeof(req_header),
-                               "GET %s HTTP/1.1\r\n"
-                               "Host: %s\r\n"
-                               "%s"
-                               "Range: bytes=%d-%d\r\n"
-                               "Connection: keep-alive\r\n\r\n",
-                               path, host, auth_header, offset, end);
-
-        snprintf(cmd, sizeof(cmd), "AT+QHTTPGET=80,%d\r\n", req_len);
-        uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-        err = modem_read_until_pattern(response, sizeof(response), "CONNECT", 5000);
-        if (err != ESP_OK)
-        {
-            if (++retry_count > 3)
-                break;
-            continue;
-        }
-
-        uart_write_bytes(UART_PORT_NUM, req_header, req_len);
-
-        // 等待 MinIO 响应 206 Partial Content (或者200)
-        err = modem_read_until_pattern(response, sizeof(response), "+QHTTPGET:", 20000);
-        if (err != ESP_OK)
-        {
-            if (++retry_count > 3)
-                break;
-            continue;
-        }
-
-        int64_t qdeadline = esp_timer_get_time() + 1000000;
-        while (strchr(response, '\n') == NULL && esp_timer_get_time() < qdeadline)
-        {
-            int rlen = strlen(response);
-            int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
-            if (r > 0)
-                response[rlen + r] = '\0';
-        }
-
-        int qerr = -1, qstatus = -1, qlen = 0;
-        char *line = strstr(response, "+QHTTPGET:");
-        if (line && sscanf(line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) >= 2)
-        {
-            if (qerr != 0 || (qstatus != 206 && qstatus != 200))
-            {
-                LOG_ERRORF("MinIO range req rejected: err=%d, status=%d", qerr, qstatus);
-                err = ESP_FAIL;
-                if (++retry_count > 3)
-                    break;
-                continue;
+        char *user_data_cmd = malloc(512);
+        if (user_data_cmd) {
+            if (access_key && access_key[0] != '\0') {
+                snprintf(user_data_cmd, 512, "AT+HTTPPARA=\"USERDATA\",\"Range: bytes=%d-%d\r\nAuthorization: %s\r\n\"\r\n", offset, end, access_key);
+            } else {
+                snprintf(user_data_cmd, 512, "AT+HTTPPARA=\"USERDATA\",\"Range: bytes=%d-%d\r\n\"\r\n", offset, end);
             }
+            uart_flush_input(UART_PORT_NUM);
+            uart_write_bytes(UART_PORT_NUM, user_data_cmd, strlen(user_data_cmd));
+            err = modem_read_response(response, MODEM_RESP_BUF_SIZE, 5000);
+            free(user_data_cmd);
+        } else {
+            err = ESP_ERR_NO_MEM;
+            break;
         }
 
-        // 准备读取本块二进制数据
-        uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
-        err = wait_for_connect_stream_safe(5000);
+        if (err != ESP_OK || !modem_response_is_ok(response))
+        {
+            if (++retry_count > 3) break;
+            continue;
+        }
+
+        err = modem_send_command("AT+HTTPACTION=0", response, MODEM_RESP_BUF_SIZE, 40000);
         if (err == ESP_OK)
         {
-            int received = 0;
-            int64_t start_us = esp_timer_get_time();
-            while (received < expect_len)
+            int64_t qdeadline = esp_timer_get_time() + 40000000;
+            while (strstr(response, "+HTTPACTION:") == NULL && esp_timer_get_time() < qdeadline)
             {
-                int r = uart_read_bytes(UART_PORT_NUM, ota_buf + received, expect_len - received, pdMS_TO_TICKS(100));
-                if (r > 0)
-                    received += r;
-                if ((esp_timer_get_time() - start_us) > 15000000)
-                {
-                    err = ESP_ERR_TIMEOUT;
-                    break;
-                }
+                int rlen = strlen(response);
+                if (rlen >= MODEM_RESP_BUF_SIZE - 1) break;
+                int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
+                if (r > 0) response[rlen + r] = '\0';
             }
-            if (received == expect_len)
-            {
-                // ★ 极其关键的一步：边读边写进入 Flash
-                if (esp_ota_write(update_handle, ota_buf, expect_len) != ESP_OK)
-                {
-                    LOG_ERROR("OTA Write to Flash failed");
-                    err = ESP_FAIL;
-                    break;
-                }
-                offset += expect_len;
-                retry_count = 0;
-                LOG_DEBUGF("OTA Progress: %d / %d bytes (%.1f%%)", offset, fw_size, (float)offset * 100.0 / fw_size);
 
-                // 清除剩余的 OK 回复
-                modem_read_response(response, sizeof(response), 2000);
+            int qmethod = -1, qstatus = -1, qlen = 0;
+            char *line = strstr(response, "+HTTPACTION:");
+            if (line && sscanf(line, "+HTTPACTION: %d,%d,%d", &qmethod, &qstatus, &qlen) >= 2)
+            {
+                if (qstatus != 206 && qstatus != 200)
+                {
+                    LOG_ERRORF("OTA range req rejected: status=%d", qstatus);
+                    err = ESP_FAIL;
+                    if (++retry_count > 3) break;
+                    continue;
+                }
+
+                if (qlen > 0)
+                {
+                    char cmd_read[32];
+                    snprintf(cmd_read, sizeof(cmd_read), "AT+HTTPREAD=0,%d\r\n", qlen);
+                    uart_write_bytes(UART_PORT_NUM, cmd_read, strlen(cmd_read));
+                    
+                    err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "+HTTPREAD:", 5000);
+                    if (err == ESP_OK)
+                    {
+                        err = wait_for_newline_stream_safe(5000);
+                        if (err == ESP_OK)
+                        {
+                            int received = 0;
+                            int64_t start_us = esp_timer_get_time();
+                            while (received < expect_len)
+                            {
+                                int r = uart_read_bytes(UART_PORT_NUM, ota_buf + received, expect_len - received, pdMS_TO_TICKS(100));
+                                if (r > 0) received += r;
+                                if ((esp_timer_get_time() - start_us) > 15000000)
+                                {
+                                    err = ESP_ERR_TIMEOUT;
+                                    break;
+                                }
+                            }
+                            if (received == expect_len)
+                            {
+                                if (esp_ota_write(update_handle, ota_buf, expect_len) != ESP_OK)
+                                {
+                                    LOG_ERROR("OTA Write to Flash failed");
+                                    err = ESP_FAIL;
+                                    break;
+                                }
+                                offset += expect_len;
+                                retry_count = 0;
+                                LOG_DEBUGF("OTA Progress: %d / %d bytes (%.1f%%)", offset, fw_size, (float)offset * 100.0 / fw_size);
+
+                                modem_read_response(response, MODEM_RESP_BUF_SIZE, 2000);
+                            }
+                            else
+                            {
+                                err = ESP_FAIL;
+                                if (++retry_count > 3) break;
+                            }
+                        }
+                        else
+                        {
+                            if (++retry_count > 3) break;
+                        }
+                    }
+                    else
+                    {
+                        if (++retry_count > 3) break;
+                    }
+                }
             }
             else
             {
-                err = ESP_FAIL;
-                if (++retry_count > 3)
-                    break;
+                if (++retry_count > 3) break;
             }
         }
         else
         {
-            if (++retry_count > 3)
-                break;
+            if (++retry_count > 3) break;
         }
     }
 
     free(ota_buf);
-    // 恢复标准 Header 设置，以免影响后续的其他普通网络请求
-    modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, sizeof(response), 2000);
+    modem_send_command("AT+HTTPTERM", response, MODEM_RESP_BUF_SIZE, 2000);
+    free(response);
     s_at_cmd_active = false;
 
     return (offset >= fw_size) ? ESP_OK : ESP_FAIL;
@@ -1508,211 +1469,131 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
     if (!s_at_ready)
         return ESP_ERR_INVALID_STATE;
 
-    const char *proto_end = strstr(url, "://");
-    const char *host_start = proto_end ? proto_end + 3 : url;
-    const char *path_start = strchr(host_start, '/');
-    char host[128] = {0};
-    char path[256] = {0};
-
-    if (path_start)
-    {
-        int host_len = path_start - host_start;
-        if (host_len > 127)
-            host_len = 127;
-        strncpy(host, host_start, host_len);
-        strncpy(path, path_start, sizeof(path) - 1);
-    }
-    else
-    {
-        strncpy(host, host_start, sizeof(host) - 1);
-        strcpy(path, "/");
-    }
+    char *response = calloc(1, MODEM_HTTP_RESP_BUF_SIZE);
+    if (!response)
+        return ESP_ERR_NO_MEM;
+    esp_err_t err = ESP_OK;
 
     s_at_cmd_active = true;
-    char cmd[64];
-    char *response = calloc(1, MODEM_RESP_BUF_SIZE);
-    char *req_header = malloc(512);
-    esp_err_t err = ESP_OK;
-    if (!response || !req_header)
-    {
-        free(response);
-        free(req_header);
-        s_at_cmd_active = false;
-        return ESP_ERR_NO_MEM;
-    }
 
-    err = modem_send_command("AT+QHTTPCFG=\"requestheader\",1", response, MODEM_RESP_BUF_SIZE, 2000);
+    modem_send_command("AT+HTTPINIT", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+
+    char *cmd = malloc(1024);
+    if (!cmd) { err = ESP_ERR_NO_MEM; goto cleanup; }
+    snprintf(cmd, 1024, "AT+HTTPPARA=\"URL\",\"%s\"\r\n", url);
+    err = modem_send_command(cmd, response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+    free(cmd);
     if (err != ESP_OK || !modem_response_is_ok(response))
     {
-        LOG_WARNF("HTTP %s requestheader config failed: %s", method, response[0] ? response : esp_err_to_name(err));
         err = err != ESP_OK ? err : ESP_FAIL;
         goto cleanup;
     }
-    s_at_cmd_active = true;
 
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", (int)strlen(url));
-    uart_flush_input(UART_PORT_NUM);
-    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
-    if (modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "CONNECT", 5000) == ESP_OK)
+    err = modem_send_command("AT+HTTPPARA=\"CONTENT\",\"application/json\"", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+    if (err != ESP_OK || !modem_response_is_ok(response))
     {
-        uart_write_bytes(UART_PORT_NUM, url, strlen(url));
-        (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
-        err = modem_read_response(response, MODEM_RESP_BUF_SIZE, 5000);
+        err = err != ESP_OK ? err : ESP_FAIL;
+        goto cleanup;
+    }
+
+    int payload_len = strlen(payload);
+    snprintf(response, MODEM_HTTP_RESP_BUF_SIZE, "AT+HTTPDATA=%d,10000\r\n", payload_len);
+    uart_flush_input(UART_PORT_NUM);
+    uart_write_bytes(UART_PORT_NUM, response, strlen(response));
+    
+    err = wait_for_download_stream_safe(5000);
+    if (err == ESP_OK)
+    {
+        uart_write_bytes(UART_PORT_NUM, payload, payload_len);
+        err = modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 10000);
         if (err != ESP_OK || !modem_response_is_ok(response))
         {
-            LOG_WARNF("HTTP %s URL set failed: %s", method, response[0] ? response : esp_err_to_name(err));
             err = err != ESP_OK ? err : ESP_FAIL;
             goto cleanup;
         }
     }
     else
     {
-        LOG_WARNF("HTTP %s URL prompt failed: %s", method, response[0] ? response : "(none)");
-        err = ESP_FAIL;
         goto cleanup;
     }
 
-    int payload_len = strlen(payload);
-    int req_len = snprintf(req_header, 512,
-                           "%s %s HTTP/1.1\r\n"
-                           "Host: %s\r\n"
-                           "User-Agent: Sentinel/1.0\r\n"
-                           "Accept: */*\r\n"
-                           "Content-Type: application/json\r\n"
-                           "Content-Length: %d\r\n"
-                           "Connection: close\r\n\r\n",
-                           method, path, host, payload_len);
-    if (req_len < 0 || req_len >= 512)
+    int action = 1; // POST
+    if (strcmp(method, "PUT") == 0) action = 4; // PUT
+    if (strcmp(method, "DELETE") == 0) action = 3;
+
+    snprintf(response, MODEM_HTTP_RESP_BUF_SIZE, "AT+HTTPACTION=%d\r\n", action);
+    uart_flush_input(UART_PORT_NUM);
+    uart_write_bytes(UART_PORT_NUM, response, strlen(response));
+    err = modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+
+    if (err == ESP_OK)
     {
-        err = ESP_ERR_INVALID_SIZE;
-        goto cleanup;
-    }
-
-    int total_len = req_len + payload_len;
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=%d,80,80\r\n", total_len);
-    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
-
-    if (modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "CONNECT", MODEM_HTTP_POST_CONNECT_TIMEOUT_MS) == ESP_OK)
-    {
-        uart_write_bytes(UART_PORT_NUM, req_header, req_len);
-        uart_write_bytes(UART_PORT_NUM, payload, payload_len);
-        (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(5000));
-
-        err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "+QHTTPPOST:", 15000);
-        if (err == ESP_OK)
+        int64_t qdeadline = esp_timer_get_time() + 40000000;
+        while (strstr(response, "+HTTPACTION:") == NULL && esp_timer_get_time() < qdeadline)
         {
-            int64_t qdeadline = esp_timer_get_time() + 1000000;
-            while (strchr(response, '\n') == NULL && esp_timer_get_time() < qdeadline)
-            {
-                int rlen = strlen(response);
-                if (rlen >= MODEM_RESP_BUF_SIZE - 1)
-                    break;
-                int r = uart_read_bytes(UART_PORT_NUM,
-                                        response + rlen,
-                                        MODEM_RESP_BUF_SIZE - rlen - 1,
-                                        pdMS_TO_TICKS(10));
-                if (r > 0)
-                    response[rlen + r] = '\0';
-            }
+            int rlen = strlen(response);
+            if (rlen >= MODEM_HTTP_RESP_BUF_SIZE - 1) break;
+            int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_HTTP_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
+            if (r > 0) response[rlen + r] = '\0';
+        }
 
-            int qerr = -1, qstatus = -1, qlen = 0;
-            char *line = strstr(response, "+QHTTPPOST:");
-            if (line && sscanf(line, "+QHTTPPOST: %d,%d,%d", &qerr, &qstatus, &qlen) >= 2)
+        int qmethod = -1, qstatus = -1, qlen = 0;
+        char *line = strstr(response, "+HTTPACTION:");
+        if (line && sscanf(line, "+HTTPACTION: %d,%d,%d", &qmethod, &qstatus, &qlen) >= 2)
+        {
+            if (qlen > 0 && out_response)
             {
-                if (qerr == 0 && qlen > 0)
+                char cmd_read[32];
+                snprintf(cmd_read, sizeof(cmd_read), "AT+HTTPREAD=0,%d\r\n", qlen);
+                uart_write_bytes(UART_PORT_NUM, cmd_read, strlen(cmd_read));
+                
+                err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "+HTTPREAD:", 5000);
+                if (err == ESP_OK)
                 {
-                    err = ESP_OK;
-                    if (out_response || qstatus != 200)
+                    err = wait_for_newline_stream_safe(5000);
+                    if (err == ESP_OK)
                     {
-                        uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
-                        err = wait_for_connect_stream_safe(5000);
-                        if (err == ESP_OK)
+                        char *body = calloc(1, qlen + 1);
+                        int received = 0;
+                        int64_t start_us = esp_timer_get_time();
+                        while (body && received < qlen)
                         {
-                            char *body = calloc(1, qlen + 1);
-                            int received = 0;
-                            int64_t start_us = esp_timer_get_time();
-                            while (body && received < qlen)
-                            {
-                                int r = uart_read_bytes(UART_PORT_NUM,
-                                                        body + received,
-                                                        qlen - received,
-                                                        pdMS_TO_TICKS(100));
-                                if (r > 0)
-                                    received += r;
-                                if ((esp_timer_get_time() - start_us) > 15000000)
-                                    break;
-                            }
-                            if (body && received == qlen)
-                            {
-                                err = ESP_OK;
-                            }
-                            else
-                            {
-                                free(body);
-                                body = NULL;
-                                err = ESP_FAIL;
-                            }
-
-                            if (body)
-                            {
-                                if (qstatus != 200 && qstatus != 201)
-                                {
-                                    LOG_WARNF("HTTP POST returned %d. Response body: %s", qstatus, body);
-                                    if (out_response) *out_response = body;
-                                    else free(body);
-                                    err = ESP_FAIL;
-                                }
-                                else
-                                {
-                                    if (out_response) *out_response = body;
-                                    else free(body);
-                                    err = ESP_OK;
-                                }
-                            }
-                            modem_read_response(response, MODEM_RESP_BUF_SIZE, 3000);
+                            int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
+                            if (r > 0) received += r;
+                            if ((esp_timer_get_time() - start_us) > 15000000) break;
+                        }
+                        if (received == qlen)
+                        {
+                            *out_response = body;
+                            modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 3000);
+                            err = ESP_OK;
                         }
                         else
                         {
+                            free(body);
                             err = ESP_FAIL;
                         }
                     }
                 }
-                else if (qerr == 0 && (qstatus == 200 || qstatus == 201))
-                {
-                    err = ESP_OK;
-                }
-                else
-                {
-                    LOG_WARNF("HTTP %s failed: AT_err=%d, HTTP_status=%d, content_len=%d",
-                              method,
-                              qerr,
-                              qstatus,
-                              qlen);
-                    err = ESP_FAIL;
-                }
+            }
+            if (qstatus >= 200 && qstatus < 300)
+            {
+                err = ESP_OK;
             }
             else
             {
-                LOG_WARNF("Unexpected QHTTPPOST response: %s", response);
+                LOG_WARNF("HTTP %s failed with status %d", method, qstatus);
                 err = ESP_FAIL;
             }
         }
         else
         {
-            LOG_WARNF("HTTP %s result wait failed: %s", method, esp_err_to_name(err));
+            err = ESP_FAIL;
         }
-    }
-    else
-    {
-        LOG_WARNF("HTTP %s payload prompt failed: %s", method, response[0] ? response : "(none)");
-        err = ESP_FAIL;
     }
 
 cleanup:
-    modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, MODEM_RESP_BUF_SIZE, 2000);
-    free(req_header);
+    modem_send_command("AT+HTTPTERM", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
     free(response);
     s_at_cmd_active = false;
     return err;
@@ -1821,136 +1702,123 @@ static esp_err_t bsp_4g_http_post_binary_internal(const char *url, const char *t
     if (out_response) *out_response = NULL;
     if (!s_at_ready) return ESP_ERR_INVALID_STATE;
 
-    const char *proto_end = strstr(url, "://");
-    const char *host_start = proto_end ? proto_end + 3 : url;
-    const char *path_start = strchr(host_start, '/');
-    char host[128] = {0};
-    char path[256] = {0};
-
-    if (path_start) {
-        int host_len = path_start - host_start;
-        if (host_len > 127) host_len = 127;
-        strncpy(host, host_start, host_len);
-        strncpy(path, path_start, sizeof(path) - 1);
-    } else {
-        strncpy(host, host_start, sizeof(host) - 1);
-        strcpy(path, "/");
-    }
-
     s_at_cmd_active = true;
-    char cmd[64];
     char *response = calloc(1, MODEM_RESP_BUF_SIZE);
-    char *req_header = malloc(512);
-    esp_err_t err = ESP_OK;
-    if (!response || !req_header) {
-        free(response);
-        free(req_header);
+    if (!response) {
         s_at_cmd_active = false;
         return ESP_ERR_NO_MEM;
     }
+    esp_err_t err = ESP_OK;
 
-    err = modem_send_command("AT+QHTTPCFG=\"requestheader\",1", response, MODEM_RESP_BUF_SIZE, 2000);
-    if (err != ESP_OK || !modem_response_is_ok(response)) {
-        LOG_WARNF("HTTP POST config failed: %s", response[0] ? response : esp_err_to_name(err));
+    modem_send_command("AT+HTTPINIT", response, MODEM_RESP_BUF_SIZE, 2000);
+
+    char *cmd = malloc(1024);
+    if (!cmd) { err = ESP_ERR_NO_MEM; goto cleanup; }
+    snprintf(cmd, 1024, "AT+HTTPPARA=\"URL\",\"%s\"\r\n", url);
+    err = modem_send_command(cmd, response, MODEM_RESP_BUF_SIZE, 2000);
+    free(cmd);
+    if (err != ESP_OK || !modem_response_is_ok(response))
+    {
         err = err != ESP_OK ? err : ESP_FAIL;
         goto cleanup;
     }
-    s_at_cmd_active = true;
 
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", (int)strlen(url));
+    err = modem_send_command("AT+HTTPPARA=\"CONTENT\",\"application/octet-stream\"", response, MODEM_RESP_BUF_SIZE, 2000);
+    if (err != ESP_OK || !modem_response_is_ok(response))
+    {
+        err = err != ESP_OK ? err : ESP_FAIL;
+        goto cleanup;
+    }
+
+    if (task_id && task_id[0] != '\0') {
+        char user_data_cmd[128];
+        snprintf(user_data_cmd, sizeof(user_data_cmd), "AT+HTTPPARA=\"USERDATA\",\"Task-Id: %s\r\n\"\r\n", task_id);
+        uart_flush_input(UART_PORT_NUM);
+        uart_write_bytes(UART_PORT_NUM, user_data_cmd, strlen(user_data_cmd));
+        modem_read_response(response, MODEM_RESP_BUF_SIZE, 2000);
+    }
+
+    snprintf(response, MODEM_RESP_BUF_SIZE, "AT+HTTPDATA=%u,30000\r\n", (unsigned)total_payload_len);
     uart_flush_input(UART_PORT_NUM);
-    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
-    if (modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "CONNECT", 5000) == ESP_OK) {
-        uart_write_bytes(UART_PORT_NUM, url, strlen(url));
-        (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
-        err = modem_read_response(response, MODEM_RESP_BUF_SIZE, 5000);
-        if (err != ESP_OK || !modem_response_is_ok(response)) {
+    uart_write_bytes(UART_PORT_NUM, response, strlen(response));
+    
+    err = wait_for_download_stream_safe(10000);
+    if (err == ESP_OK)
+    {
+        err = payload_cb(cb_ctx);
+        if (err != ESP_OK) goto cleanup;
+
+        err = modem_read_response(response, MODEM_RESP_BUF_SIZE, 30000);
+        if (err != ESP_OK || !modem_response_is_ok(response))
+        {
             err = err != ESP_OK ? err : ESP_FAIL;
             goto cleanup;
         }
-    } else {
-        err = ESP_FAIL;
+    }
+    else
+    {
         goto cleanup;
     }
 
-    int req_len = snprintf(req_header, 512,
-                           "POST %s HTTP/1.1\r\n"
-                           "Host: %s\r\n"
-                           "Content-Type: application/octet-stream\r\n"
-                           "Content-Length: %u\r\n"
-                           "Task-Id: %s\r\n"
-                           "Connection: close\r\n\r\n",
-                           path, host, (unsigned)total_payload_len, task_id ? task_id : "");
-    if (req_len < 0 || req_len >= 512) {
-        err = ESP_ERR_INVALID_SIZE;
-        goto cleanup;
-    }
-
-    int total_len = req_len + total_payload_len;
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=%d,120,120\r\n", total_len);
-    uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
-    (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
-
-    if (modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "CONNECT", MODEM_HTTP_POST_CONNECT_TIMEOUT_MS) == ESP_OK) {
-        uart_write_bytes(UART_PORT_NUM, req_header, req_len);
-        err = payload_cb(cb_ctx);
-        if (err != ESP_OK) {
-            goto cleanup;
+    err = modem_send_command("AT+HTTPACTION=1", response, MODEM_RESP_BUF_SIZE, 60000);
+    if (err == ESP_OK)
+    {
+        int64_t qdeadline = esp_timer_get_time() + 60000000;
+        while (strstr(response, "+HTTPACTION:") == NULL && esp_timer_get_time() < qdeadline)
+        {
+            int rlen = strlen(response);
+            if (rlen >= MODEM_RESP_BUF_SIZE - 1) break;
+            int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
+            if (r > 0) response[rlen + r] = '\0';
         }
-        (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(20000));
 
-        err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "+QHTTPPOST:", 30000);
-        if (err == ESP_OK) {
-            int64_t qdeadline = esp_timer_get_time() + 1000000;
-            while (strchr(response, '\n') == NULL && esp_timer_get_time() < qdeadline) {
-                int rlen = strlen(response);
-                if (rlen >= MODEM_RESP_BUF_SIZE - 1) break;
-                int r = uart_read_bytes(UART_PORT_NUM, response + rlen, MODEM_RESP_BUF_SIZE - rlen - 1, pdMS_TO_TICKS(10));
-                if (r > 0) response[rlen + r] = '\0';
-            }
-
-            int qerr = -1, qstatus = -1, qlen = 0;
-            char *line = strstr(response, "+QHTTPPOST:");
-            if (line && sscanf(line, "+QHTTPPOST: %d,%d,%d", &qerr, &qstatus, &qlen) >= 2) {
-                if (qerr == 0 && (qstatus >= 200 && qstatus < 300)) {
-                    err = ESP_OK;
-                    if (out_response && qlen > 0) {
-                        uart_write_bytes(UART_PORT_NUM, "AT+QHTTPREAD=80\r\n", 17);
-                        err = wait_for_connect_stream_safe(5000);
-                        if (err == ESP_OK) {
-                            char *body = calloc(1, qlen + 1);
-                            int received = 0;
-                            int64_t start_us = esp_timer_get_time();
-                            while (body && received < qlen) {
-                                int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
-                                if (r > 0) received += r;
-                                if ((esp_timer_get_time() - start_us) > 15000000) break;
-                            }
-                            if (body && received == qlen) {
-                                *out_response = body;
-                                modem_read_response(response, MODEM_RESP_BUF_SIZE, 3000);
-                                err = ESP_OK;
-                            } else {
-                                free(body);
-                                err = ESP_FAIL;
-                            }
+        int qmethod = -1, qstatus = -1, qlen = 0;
+        char *line = strstr(response, "+HTTPACTION:");
+        if (line && sscanf(line, "+HTTPACTION: %d,%d,%d", &qmethod, &qstatus, &qlen) >= 2)
+        {
+            if (qlen > 0 && out_response)
+            {
+                char cmd_read[32];
+                snprintf(cmd_read, sizeof(cmd_read), "AT+HTTPREAD=0,%d\r\n", qlen);
+                uart_write_bytes(UART_PORT_NUM, cmd_read, strlen(cmd_read));
+                
+                err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "+HTTPREAD:", 5000);
+                if (err == ESP_OK)
+                {
+                    err = wait_for_newline_stream_safe(5000);
+                    if (err == ESP_OK)
+                    {
+                        char *body = calloc(1, qlen + 1);
+                        int received = 0;
+                        int64_t start_us = esp_timer_get_time();
+                        while (body && received < qlen)
+                        {
+                            int r = uart_read_bytes(UART_PORT_NUM, body + received, qlen - received, pdMS_TO_TICKS(100));
+                            if (r > 0) received += r;
+                            if ((esp_timer_get_time() - start_us) > 15000000) break;
+                        }
+                        if (received == qlen)
+                        {
+                            *out_response = body;
+                            modem_read_response(response, MODEM_RESP_BUF_SIZE, 3000);
+                            err = ESP_OK;
+                        }
+                        else
+                        {
+                            free(body);
+                            err = ESP_FAIL;
                         }
                     }
-                } else {
-                    err = ESP_FAIL;
                 }
-            } else {
-                err = ESP_FAIL;
             }
+            if (qstatus >= 200 && qstatus < 300) err = ESP_OK;
+            else err = ESP_FAIL;
         }
-    } else {
-        err = ESP_FAIL;
+        else err = ESP_FAIL;
     }
 
 cleanup:
-    modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, MODEM_RESP_BUF_SIZE, 2000);
-    free(req_header);
+    modem_send_command("AT+HTTPTERM", response, MODEM_RESP_BUF_SIZE, 2000);
     free(response);
     s_at_cmd_active = false;
     return err;
