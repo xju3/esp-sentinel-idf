@@ -9,63 +9,53 @@
   "points": 4096,
   "task_id": "",
   "sample_type": "normal",
-  "analysis_config": {
-    "fft_peak_count": 5,
-    "fft_peak_min_hz": 0,
-    "fft_peak_max_hz": 5000,
-    "dc_removed": true,
-    "band_energy_ranges_hz": [
-      {
-        "key": "0_100",
-        "min_hz": 0,
-        "max_hz": 100
-      },
-      {
-        "key": "100_500",
-        "min_hz": 100,
-        "max_hz": 500
-      },
-      {
-        "key": "500_1000",
-        "min_hz": 500,
-        "max_hz": 1000
-      },
-      {
-        "key": "1000_2000",
-        "min_hz": 1000,
-        "max_hz": 2000
-      },
-      {
-        "key": "2000_5000",
-        "min_hz": 2000,
-        "max_hz": 5000
-      }
-    ]
-  },
   "quality": {
-    "status": "ok",
-    "auto_range": false,
+    "status": 0,
+    "auto_range": true,
     "attempts": [
       {
         "range_g": 2,
-        "accepted": true,
-        "reason": "ok",
+        "accepted": false,
+        "reason": "clipped",
         "clip_threshold_g": 1.96,
-        "stats": {
+        "axes": {
           "X": {
-            "max_abs_g": 0.179,
-            "clip_count": 0,
-            "clip_ratio": 0
+            "max_abs_g": 1.99,
+            "clip_count": 12,
+            "clip_ratio": 0.0029
           },
           "Y": {
-            "max_abs_g": 0.066,
+            "max_abs_g": 0.81,
             "clip_count": 0,
-            "clip_ratio": 0
+            "clip_ratio": 0.0
           },
           "Z": {
-            "max_abs_g": 0.996,
+            "max_abs_g": 1.98,
+            "clip_count": 6,
+            "clip_ratio": 0.0015
+          }
+        }
+      },
+      {
+        "range_g": 4,
+        "accepted": true,
+        "reason": "ok",
+        "clip_threshold_g": 3.92,
+        "axes": {
+          "X": {
+            "max_abs_g": 2.31,
             "clip_count": 0,
-            "clip_ratio": 0
+            "clip_ratio": 0.0
+          },
+          "Y": {
+            "max_abs_g": 0.84,
+            "clip_count": 0,
+            "clip_ratio": 0.0
+          },
+          "Z": {
+            "max_abs_g": 2.05,
+            "clip_count": 0,
+            "clip_ratio": 0.0
           }
         }
       }

@@ -65,6 +65,7 @@
 #define REPORT_CAPTURE_GUARD_MS 120U
 #define REPORT_DMA_CHUNK_SIZE 512
 #define REPORT_CLIP_THRESHOLD_RATIO 0.98f
+#define REPORT_CLIP_TOLERANCE_RATIO 0.001f
 #define REPORT_FFT_PEAK_COUNT 5
 #define REPORT_FFT_PEAK_MIN_HZ 0.0f
 #define REPORT_FFT_PEAK_MAX_HZ 5000.0f
@@ -293,7 +294,7 @@ static void evaluate_clip_quality(uint16_t range_g, capture_attempt_t *attempt)
         }
 
         q->clip_ratio = (float)q->clip_count / (float)s_active_points;
-        if (q->clip_count > 0U) {
+        if (q->clip_ratio > REPORT_CLIP_TOLERANCE_RATIO) {
             attempt->clipped = true;
         }
     }
@@ -537,68 +538,40 @@ static void remove_dc_to_buffer(const float *data, float *out, float *out_mean_g
     }
 }
 
-static cJSON *add_analysis_config(void)
-{
-    cJSON *cfg = cJSON_CreateObject();
-    if (!cfg) {
-        return NULL;
-    }
-    cJSON_AddNumberToObject(cfg, "fft_peak_count", REPORT_FFT_PEAK_COUNT);
-    add_number_rounded(cfg, "fft_peak_min_hz", REPORT_FFT_PEAK_MIN_HZ, 1);
-    add_number_rounded(cfg, "fft_peak_max_hz", REPORT_FFT_PEAK_MAX_HZ, 1);
-    cJSON_AddBoolToObject(cfg, "dc_removed", true);
-
-    cJSON *bands = cJSON_AddArrayToObject(cfg, "band_energy_ranges_hz");
-    if (!bands) {
-        cJSON_Delete(cfg);
-        return NULL;
-    }
-    for (size_t i = 0; i < sizeof(s_bands) / sizeof(s_bands[0]); ++i) {
-        cJSON *band = cJSON_CreateObject();
-        if (!band) {
-            cJSON_Delete(cfg);
-            return NULL;
-        }
-        cJSON_AddStringToObject(band, "key", s_bands[i].key);
-        add_number_rounded(band, "min_hz", s_bands[i].min_hz, 1);
-        add_number_rounded(band, "max_hz", s_bands[i].max_hz, 1);
-        cJSON_AddItemToArray(bands, band);
-    }
-    return cfg;
-}
-
 static cJSON *add_quality(const capture_attempt_t *attempts, size_t attempt_count, bool accepted)
 {
     cJSON *quality = cJSON_CreateObject();
     if (!quality) {
         return NULL;
     }
-    cJSON_AddStringToObject(quality, "status", accepted ? "ok" : "clipped_at_max_range");
+    cJSON_AddNumberToObject(quality, "status", accepted ? 0 : 1);
     cJSON_AddBoolToObject(quality, "auto_range", attempt_count > 1U);
 
-    cJSON *arr = cJSON_AddArrayToObject(quality, "attempts");
-    if (!arr) {
-        cJSON_Delete(quality);
-        return NULL;
-    }
-
-    static const char *axis_names[3] = {"X", "Y", "Z"};
-    for (size_t i = 0; i < attempt_count; ++i) {
-        const capture_attempt_t *a = &attempts[i];
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddNumberToObject(item, "range_g", a->range_g);
-        cJSON_AddBoolToObject(item, "accepted", a->accepted);
-        cJSON_AddStringToObject(item, "reason", a->accepted ? "ok" : "clipped");
-        add_number_rounded(item, "clip_threshold_g", (float)a->range_g * REPORT_CLIP_THRESHOLD_RATIO, 3);
-        cJSON *axes = cJSON_AddObjectToObject(item, "axes");
-        for (int axis = 0; axis < 3; ++axis) {
-            cJSON *q = cJSON_CreateObject();
-            add_number_rounded(q, "max_abs_g", a->axes[axis].max_abs_g, 3);
-            cJSON_AddNumberToObject(q, "clip_count", a->axes[axis].clip_count);
-            add_number_rounded(q, "clip_ratio", a->axes[axis].clip_ratio, 6);
-            cJSON_AddItemToObject(axes, axis_names[axis], q);
+    if (attempt_count > 1U || !accepted) {
+        cJSON *arr = cJSON_AddArrayToObject(quality, "attempts");
+        if (!arr) {
+            cJSON_Delete(quality);
+            return NULL;
         }
-        cJSON_AddItemToArray(arr, item);
+
+        static const char *axis_names[3] = {"X", "Y", "Z"};
+        for (size_t i = 0; i < attempt_count; ++i) {
+            const capture_attempt_t *a = &attempts[i];
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "range_g", a->range_g);
+            cJSON_AddBoolToObject(item, "accepted", a->accepted);
+            cJSON_AddStringToObject(item, "reason", a->accepted ? "ok" : "clipped");
+            add_number_rounded(item, "clip_threshold_g", (float)a->range_g * REPORT_CLIP_THRESHOLD_RATIO, 3);
+            cJSON *axes = cJSON_AddObjectToObject(item, "axes");
+            for (int axis = 0; axis < 3; ++axis) {
+                cJSON *q = cJSON_CreateObject();
+                add_number_rounded(q, "max_abs_g", a->axes[axis].max_abs_g, 3);
+                cJSON_AddNumberToObject(q, "clip_count", a->axes[axis].clip_count);
+                add_number_rounded(q, "clip_ratio", a->axes[axis].clip_ratio, 6);
+                cJSON_AddItemToObject(axes, axis_names[axis], q);
+            }
+            cJSON_AddItemToArray(arr, item);
+        }
     }
 
     return quality;
@@ -694,13 +667,6 @@ static char *build_report_json(uint64_t ts_ms,
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
     cJSON_AddStringToObject(root, "sample_type", REPORT_SAMPLE_TYPE);
     cJSON_AddNumberToObject(root, "duration_ms", duration_ms);
-
-    cJSON *analysis_cfg = add_analysis_config();
-    if (!analysis_cfg) {
-        cJSON_Delete(root);
-        return NULL;
-    }
-    cJSON_AddItemToObject(root, "analysis_config", analysis_cfg);
 
     cJSON *quality = add_quality(attempts, attempt_count, accepted);
     if (!quality) {
