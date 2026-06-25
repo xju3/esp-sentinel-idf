@@ -39,27 +39,8 @@ void task_status_report_execute(const char *task_id)
     }
 
     // 2. Get Battery Voltage
-    adc_oneshot_unit_handle_t adc1_handle;
-    adc_oneshot_unit_init_cfg_t init_config1 = {
-        .unit_id = ADC_UNIT_1,
-    };
-    if (adc_oneshot_new_unit(&init_config1, &adc1_handle) == ESP_OK) {
-        adc_oneshot_chan_cfg_t config = {
-            .bitwidth = ADC_BITWIDTH_DEFAULT,
-            .atten = ADC_ATTEN_DB_12,
-        };
-        // GPIO_NUM_2 is ADC1_CHANNEL_1
-        if (adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_1, &config) == ESP_OK) {
-            int adc_raw = 0;
-            if (adc_oneshot_read(adc1_handle, ADC_CHANNEL_1, &adc_raw) == ESP_OK) {
-                // 12-bit max is 4095. 3.3V reference.
-                voltage = ((float)adc_raw / 4095.0f) * 3.3f * BOARD_ADC_VOLTAGE_SCALE;
-            }
-        }
-        adc_oneshot_del_unit(adc1_handle);
-    } else {
-        LOG_WARN("Failed to initialize ADC for battery voltage");
-    }
+    // Due to hardware/software conflict on GPIO2, we cannot measure the battery voltage here.
+    // Setting voltage to 0.0f to avoid reporting fake sensor power pin voltage.
 
     // 3. Get 4G RSSI
     if (g_user_config.network == 1) {
