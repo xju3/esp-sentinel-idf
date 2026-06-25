@@ -8,7 +8,11 @@
 #include "esp_timer.h"
 #include "http_proxy.h"
 #include "logger.h"
+#include "report_upload_cache.h"
 #include "sdkconfig.h"
+#include "server_report_task_scheduler.h"
+#include "task_http_message.h"
+#include "bsp_4g.h"
 
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -47,15 +51,16 @@
 #error "RANGE must be one of 2, 4, 8, 16"
 #endif
 
-#if CONFIG_DSP_MAX_FFT_SIZE < POINTS
-#error "CONFIG_DSP_MAX_FFT_SIZE must be >= POINTS"
+#if CONFIG_DSP_MAX_FFT_SIZE < 8192
+#error "CONFIG_DSP_MAX_FFT_SIZE must be >= 8192"
 #endif
 
 #define REPORT_SCHEMA_VERSION 2
 #define REPORT_SAMPLE_TYPE "normal"
 #define REPORT_FS_HZ 26667.0f
-#define REPORT_POINTS ((uint32_t)POINTS)
-#define REPORT_REQUESTED_RANGE_G ((uint16_t)RANGE)
+#define REPORT_DEFAULT_POINTS ((uint32_t)POINTS)
+#define REPORT_DEFAULT_RANGE_G ((uint16_t)RANGE)
+#define REPORT_MAX_POINTS 8192U
 #define REPORT_CAPTURE_SKIP_MS 20U
 #define REPORT_CAPTURE_GUARD_MS 120U
 #define REPORT_DMA_CHUNK_SIZE 512
@@ -68,6 +73,8 @@
 static float *s_vib_buffer;
 static float *s_fft_scratch;
 static float *s_fft_mag;
+static uint32_t s_active_points = REPORT_DEFAULT_POINTS;
+static uint16_t s_active_range_g = REPORT_DEFAULT_RANGE_G;
 
 typedef struct {
     uint32_t count;
@@ -123,6 +130,10 @@ static const struct {
     {"2000_5000", 2000.0f, 5000.0f},
 };
 
+typedef struct {
+    bool accept_server_tasks;
+} report_upload_ctx_t;
+
 static double round_to_decimals(double value, int decimals)
 {
     double scale = 1.0;
@@ -177,20 +188,63 @@ static uint16_t next_range(uint16_t range_g)
 
 static uint32_t capture_duration_ms(void)
 {
-    const float capture_ms = ((float)REPORT_POINTS * 1000.0f) / REPORT_FS_HZ;
+    const float capture_ms = ((float)s_active_points * 1000.0f) / REPORT_FS_HZ;
     return (uint32_t)ceilf(capture_ms) + REPORT_CAPTURE_SKIP_MS + REPORT_CAPTURE_GUARD_MS;
+}
+
+static bool report_points_valid(uint32_t points)
+{
+    return points == 4096U || points == 8192U;
+}
+
+static bool report_range_valid(uint16_t range_g)
+{
+    return range_g == 2U || range_g == 4U || range_g == 8U || range_g == 16U;
+}
+
+static uint32_t configured_report_points(void)
+{
+    return report_points_valid((uint32_t)g_user_config.report_points)
+               ? (uint32_t)g_user_config.report_points
+               : REPORT_DEFAULT_POINTS;
+}
+
+static uint16_t configured_report_range_g(void)
+{
+    return report_range_valid((uint16_t)g_user_config.report_range)
+               ? (uint16_t)g_user_config.report_range
+               : REPORT_DEFAULT_RANGE_G;
+}
+
+static esp_err_t apply_report_options(const report_pipeline_options_t *options)
+{
+    const uint32_t points = options ? options->points : configured_report_points();
+    const uint16_t range_g = options ? options->range_g : configured_report_range_g();
+
+    if (!report_points_valid(points)) {
+        LOG_ERRORF("Invalid report points: %lu", (unsigned long)points);
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!report_range_valid(range_g)) {
+        LOG_ERRORF("Invalid report range: %u", (unsigned)range_g);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_active_points = points;
+    s_active_range_g = range_g;
+    return ESP_OK;
 }
 
 static esp_err_t ensure_buffers(void)
 {
     if (!s_vib_buffer) {
-        s_vib_buffer = heap_caps_calloc(REPORT_POINTS * 3U, sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_vib_buffer = heap_caps_calloc(REPORT_MAX_POINTS * 3U, sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (!s_fft_scratch) {
-        s_fft_scratch = heap_caps_malloc(REPORT_POINTS * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_fft_scratch = heap_caps_malloc(REPORT_MAX_POINTS * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (!s_fft_mag) {
-        s_fft_mag = heap_caps_malloc((REPORT_POINTS / 2U) * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_fft_mag = heap_caps_malloc((REPORT_MAX_POINTS / 2U) * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
 
     if (!s_vib_buffer || !s_fft_scratch || !s_fft_mag) {
@@ -207,11 +261,11 @@ static void capture_handler(const imu_raw_data_t *data, size_t count, void *user
         return;
     }
 
-    for (size_t i = 0; i < count && ctx->count < REPORT_POINTS; ++i) {
+    for (size_t i = 0; i < count && ctx->count < s_active_points; ++i) {
         const uint32_t idx = ctx->count++;
         s_vib_buffer[idx] = (float)data[i].x * ctx->lsb_to_g;
-        s_vib_buffer[REPORT_POINTS + idx] = (float)data[i].y * ctx->lsb_to_g;
-        s_vib_buffer[REPORT_POINTS * 2U + idx] = (float)data[i].z * ctx->lsb_to_g;
+        s_vib_buffer[s_active_points + idx] = (float)data[i].y * ctx->lsb_to_g;
+        s_vib_buffer[s_active_points * 2U + idx] = (float)data[i].z * ctx->lsb_to_g;
     }
     ctx->raw_count += (uint32_t)count;
 }
@@ -224,11 +278,11 @@ static void evaluate_clip_quality(uint16_t range_g, capture_attempt_t *attempt)
     attempt->accepted = false;
 
     for (int axis = 0; axis < 3; ++axis) {
-        const float *data = s_vib_buffer + REPORT_POINTS * (uint32_t)axis;
+        const float *data = s_vib_buffer + s_active_points * (uint32_t)axis;
         axis_clip_quality_t *q = &attempt->axes[axis];
         memset(q, 0, sizeof(*q));
 
-        for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+        for (uint32_t i = 0; i < s_active_points; ++i) {
             const float abs_v = fabsf(data[i]);
             if (abs_v > q->max_abs_g) {
                 q->max_abs_g = abs_v;
@@ -238,7 +292,7 @@ static void evaluate_clip_quality(uint16_t range_g, capture_attempt_t *attempt)
             }
         }
 
-        q->clip_ratio = (float)q->clip_count / (float)REPORT_POINTS;
+        q->clip_ratio = (float)q->clip_count / (float)s_active_points;
         if (q->clip_count > 0U) {
             attempt->clipped = true;
         }
@@ -260,7 +314,7 @@ static esp_err_t capture_one_attempt(uint16_t range_g, capture_attempt_t *attemp
     };
     iis3dwb_cfg_t cfg = cfg_for_range(range_g);
 
-    memset(s_vib_buffer, 0, REPORT_POINTS * 3U * sizeof(float));
+    memset(s_vib_buffer, 0, s_active_points * 3U * sizeof(float));
     esp_err_t err = daq_iis3dwb_capture(&cfg,
                                         capture_duration_ms(),
                                         capture_handler,
@@ -270,10 +324,10 @@ static esp_err_t capture_one_attempt(uint16_t range_g, capture_attempt_t *attemp
     if (err != ESP_OK) {
         return err;
     }
-    if (ctx.count < REPORT_POINTS) {
+    if (ctx.count < s_active_points) {
         LOG_ERRORF("Report capture insufficient samples: %lu/%lu",
                    (unsigned long)ctx.count,
-                   (unsigned long)REPORT_POINTS);
+                   (unsigned long)s_active_points);
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -291,7 +345,7 @@ static esp_err_t capture_with_auto_range(capture_attempt_t *attempts,
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint16_t range_g = REPORT_REQUESTED_RANGE_G;
+    uint16_t range_g = s_active_range_g;
     *out_attempt_count = 0;
     *out_final_range = range_g;
     *out_accepted = false;
@@ -302,7 +356,7 @@ static esp_err_t capture_with_auto_range(capture_attempt_t *attempts,
 
         LOG_INFOF("Report capture attempt: range=%ug points=%lu",
                   (unsigned)range_g,
-                  (unsigned long)REPORT_POINTS);
+                  (unsigned long)s_active_points);
         esp_err_t err = capture_one_attempt(range_g, attempt);
         (*out_attempt_count)++;
         *out_final_range = range_g;
@@ -330,7 +384,7 @@ static axis_time_features_t compute_time_features(const float *ac_data, float me
     float max_v = ac_data[0];
     f.mean_g = mean_g;
 
-    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+    for (uint32_t i = 0; i < s_active_points; ++i) {
         const double v = ac_data[i];
         const double av = fabs(v);
         sum_sq += v * v;
@@ -345,21 +399,21 @@ static axis_time_features_t compute_time_features(const float *ac_data, float me
         }
     }
 
-    const double rms_sq = sum_sq / (double)REPORT_POINTS;
+    const double rms_sq = sum_sq / (double)s_active_points;
     f.rms_acc_g = (float)sqrt(rms_sq);
     f.peak_to_peak_acc_g = max_v - min_v;
     f.crest_factor = (f.rms_acc_g > 0.0f) ? (f.peak_acc_g / f.rms_acc_g) : 0.0f;
 
     double m2 = 0.0;
     double m4 = 0.0;
-    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+    for (uint32_t i = 0; i < s_active_points; ++i) {
         const double d = (double)ac_data[i];
         const double d2 = d * d;
         m2 += d2;
         m4 += d2 * d2;
     }
-    m2 /= (double)REPORT_POINTS;
-    m4 /= (double)REPORT_POINTS;
+    m2 /= (double)s_active_points;
+    m4 /= (double)s_active_points;
     f.kurtosis = (m2 > 0.0) ? (float)(m4 / (m2 * m2)) : 0.0f;
     return f;
 }
@@ -391,16 +445,16 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     memset(out, 0, sizeof(*out));
 
     if (data != s_fft_scratch) {
-        memcpy(s_fft_scratch, data, REPORT_POINTS * sizeof(float));
+        memcpy(s_fft_scratch, data, s_active_points * sizeof(float));
     }
 
-    esp_err_t err = algo_fft_calculate(s_fft_scratch, s_fft_mag, REPORT_POINTS);
+    esp_err_t err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_active_points);
     if (err != ESP_OK) {
         return err;
     }
 
-    const uint32_t half = REPORT_POINTS / 2U;
-    const float bin_hz = REPORT_FS_HZ / (float)REPORT_POINTS;
+    const uint32_t half = s_active_points / 2U;
+    const float bin_hz = REPORT_FS_HZ / (float)s_active_points;
     double amp_sum = 0.0;
     double weighted_freq_sum = 0.0;
     double energy_sum = 0.0;
@@ -469,12 +523,12 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
 static void remove_dc_to_buffer(const float *data, float *out, float *out_mean_g)
 {
     double sum = 0.0;
-    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+    for (uint32_t i = 0; i < s_active_points; ++i) {
         sum += data[i];
     }
 
-    const float mean = (float)(sum / (double)REPORT_POINTS);
-    for (uint32_t i = 0; i < REPORT_POINTS; ++i) {
+    const float mean = (float)(sum / (double)s_active_points);
+    for (uint32_t i = 0; i < s_active_points; ++i) {
         out[i] = data[i] - mean;
     }
 
@@ -590,7 +644,7 @@ static esp_err_t add_axis_features(cJSON *root)
     }
 
     for (int axis = 0; axis < 3; ++axis) {
-        const float *raw_data = s_vib_buffer + REPORT_POINTS * (uint32_t)axis;
+        const float *raw_data = s_vib_buffer + s_active_points * (uint32_t)axis;
         float mean_g = 0.0f;
         remove_dc_to_buffer(raw_data, s_fft_scratch, &mean_g);
 
@@ -617,7 +671,8 @@ static char *build_report_json(uint64_t ts_ms,
                                const capture_attempt_t *attempts,
                                size_t attempt_count,
                                bool accepted,
-                               const char *task_id)
+                               const char *task_id,
+                               uint32_t duration_ms)
 {
     cJSON *root = cJSON_CreateObject();
     if (!root) {
@@ -633,11 +688,12 @@ static char *build_report_json(uint64_t ts_ms,
         cJSON_AddNullToObject(root, "temperature_c");
     }
     cJSON_AddNumberToObject(root, "fs_hz", (int)REPORT_FS_HZ);
-    cJSON_AddNumberToObject(root, "requested_range_g", REPORT_REQUESTED_RANGE_G);
+    cJSON_AddNumberToObject(root, "requested_range_g", s_active_range_g);
     cJSON_AddNumberToObject(root, "range_g", final_range_g);
-    cJSON_AddNumberToObject(root, "points", REPORT_POINTS);
+    cJSON_AddNumberToObject(root, "points", s_active_points);
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
     cJSON_AddStringToObject(root, "sample_type", REPORT_SAMPLE_TYPE);
+    cJSON_AddNumberToObject(root, "duration_ms", duration_ms);
 
     cJSON *analysis_cfg = add_analysis_config();
     if (!analysis_cfg) {
@@ -684,8 +740,40 @@ static void log_report_json(const char *json)
     // LOG_INFO("Report JSON end");
 }
 
-static esp_err_t post_report_json(const char *json)
+static void handle_upload_response_tasks(const cJSON *data, bool accept_server_tasks)
 {
+    if (!cJSON_IsArray(data)) {
+        LOG_INFO("Report JSON upload completed");
+        return;
+    }
+
+    const int task_count = cJSON_GetArraySize(data);
+    LOG_INFOF("Report JSON upload completed, returned_tasks=%d", task_count);
+
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, data)
+    {
+        const cJSON *task_id = cJSON_GetObjectItemCaseSensitive(item, "id");
+        const cJSON *action = cJSON_GetObjectItemCaseSensitive(item, "action");
+        const cJSON *val = cJSON_GetObjectItemCaseSensitive(item, "val");
+        if (cJSON_IsString(task_id) && cJSON_IsNumber(action)) {
+            LOG_INFOF("Returned task: id=%s, action=%d, val=%d",
+                      task_id->valuestring,
+                      action->valueint,
+                      cJSON_IsNumber(val) ? val->valueint : 0);
+        }
+    }
+
+    if (accept_server_tasks) {
+        (void)http_message_process_task_array(data);
+    }
+}
+
+static esp_err_t send_report_json_once(const char *json, void *ctx)
+{
+    const report_upload_ctx_t *upload_ctx = (const report_upload_ctx_t *)ctx;
+    const bool accept_server_tasks = upload_ctx && upload_ctx->accept_server_tasks;
+
     if (!json) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -734,21 +822,123 @@ static esp_err_t post_report_json(const char *json)
     }
 
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-    const cJSON *path = cJSON_IsObject(data) ? cJSON_GetObjectItemCaseSensitive(data, "path") : NULL;
-    if (cJSON_IsString(path)) {
-        LOG_INFOF("Report JSON upload completed, path=%s", path->valuestring);
-    } else {
-        LOG_INFO("Report JSON upload completed");
-    }
+    handle_upload_response_tasks(data, accept_server_tasks);
 
     cJSON_Delete(root);
     free(response);
     return ESP_OK;
 }
 
-esp_err_t report_pipeline_run(const char *task_id)
+static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
 {
-    esp_err_t err = ensure_buffers();
+    report_upload_ctx_t upload_ctx = {
+        .accept_server_tasks = accept_server_tasks,
+    };
+    esp_err_t err = send_report_json_once(json, &upload_ctx);
+    if (err != ESP_OK) {
+        esp_err_t save_err = report_upload_cache_save_failed(json);
+        if (save_err != ESP_OK) {
+            LOG_ERRORF("Report JSON upload failed and local save failed: upload=%s save=%s",
+                       esp_err_to_name(err),
+                       esp_err_to_name(save_err));
+        }
+        return err;
+    }
+
+    report_upload_ctx_t retry_ctx = {
+        .accept_server_tasks = false,
+    };
+    esp_err_t retry_err = report_upload_cache_flush(send_report_json_once, &retry_ctx);
+    if (retry_err != ESP_OK) {
+        LOG_WARNF("Some cached report JSON files were not uploaded: %s", esp_err_to_name(retry_err));
+    }
+    return ESP_OK;
+}
+
+typedef struct __attribute__((packed)) {
+    char task_id[16];
+    uint32_t timestamp;
+    uint32_t fft_points;
+    float sample_rate;
+    uint32_t range_g;
+} spectrum_header_t;
+
+typedef struct {
+    const char *task_id;
+    uint64_t ts_ms;
+    uint16_t range_g;
+} spectrum_upload_ctx_t;
+
+static esp_err_t spectrum_payload_cb(void *ctx)
+{
+    spectrum_upload_ctx_t *uctx = (spectrum_upload_ctx_t *)ctx;
+    spectrum_header_t header;
+    memset(&header, 0, sizeof(header));
+    if (uctx->task_id) {
+        strncpy(header.task_id, uctx->task_id, sizeof(header.task_id) - 1);
+    }
+    header.timestamp = (uint32_t)(uctx->ts_ms / 1000);
+    header.fft_points = s_active_points;
+    header.sample_rate = REPORT_FS_HZ;
+    header.range_g = uctx->range_g;
+
+    esp_err_t err = bsp_4g_write_uart(&header, sizeof(header));
+    if (err != ESP_OK) return err;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        float *axis_data = s_vib_buffer + axis * s_active_points;
+        memcpy(s_fft_scratch, axis_data, s_active_points * sizeof(float));
+
+        err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_active_points);
+        if (err != ESP_OK) return err;
+
+        uint32_t mag_bytes = (s_active_points / 2) * sizeof(float);
+        err = bsp_4g_write_uart(s_fft_mag, mag_bytes);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t post_spectrum_binary(const char *task_id, uint64_t ts_ms, uint16_t range_g)
+{
+    if (g_user_config.api_host[0] == '\0') {
+        LOG_ERROR("Cannot upload spectrum: api_host is empty");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char *url = malloc(256);
+    if (!url) return ESP_ERR_NO_MEM;
+    snprintf(url, 256, "http://%s/api/v1/sensors/tasks/%s/fft", g_user_config.api_host, task_id ? task_id : "");
+
+    size_t payload_len = sizeof(spectrum_header_t) + 3 * (s_active_points / 2) * sizeof(float);
+    
+    spectrum_upload_ctx_t ctx = {
+        .task_id = task_id,
+        .ts_ms = ts_ms,
+        .range_g = range_g
+    };
+
+    char *response = NULL;
+    esp_err_t err = bsp_4g_http_post_binary(url, task_id, payload_len, spectrum_payload_cb, &ctx, &response);
+    free(url);
+
+    if (err == ESP_OK) {
+        LOG_INFO("Spectrum binary upload completed");
+    } else {
+        LOG_ERROR("Spectrum binary upload failed");
+    }
+    free(response);
+    return err;
+}
+
+esp_err_t report_pipeline_run_with_options(const char *task_id, const report_pipeline_options_t *options)
+{
+    esp_err_t err = apply_report_options(options);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = ensure_buffers();
     if (err != ESP_OK) {
         return err;
     }
@@ -760,7 +950,7 @@ esp_err_t report_pipeline_run(const char *task_id)
 
     capture_attempt_t attempts[4] = {0};
     size_t attempt_count = 0;
-    uint16_t final_range_g = REPORT_REQUESTED_RANGE_G;
+    uint16_t final_range_g = s_active_range_g;
     bool accepted = false;
     err = capture_with_auto_range(attempts,
                                   sizeof(attempts) / sizeof(attempts[0]),
@@ -771,6 +961,21 @@ esp_err_t report_pipeline_run(const char *task_id)
         return err;
     }
 
+    // 提前阻塞等待网络就绪，以便把后台真实的 4G 驻网耗时也计算进 duration_ms 中
+    // 这样如果 4G 信号极差导致连网卡了数十秒，服务器也能通过解析 JSON 准确感知
+    if (g_user_config.network == 1) {
+        init_4g_network(NULL);
+    }
+
+    if (options && options->upload_spectrum) {
+        LOG_INFOF("Uploading binary spectrum for task %s", task_id ? task_id : "");
+        err = post_spectrum_binary(task_id, ts_ms, final_range_g);
+        return err;
+    }
+
+    // 获取从本次唤醒起，到目前生成报告为止的精准工作耗时（毫秒）
+    uint32_t duration_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+
     char *json = build_report_json(ts_ms,
                                    temperature_c,
                                    temperature_valid,
@@ -778,14 +983,20 @@ esp_err_t report_pipeline_run(const char *task_id)
                                    attempts,
                                    attempt_count,
                                    accepted,
-                                   task_id);
+                                   task_id,
+                                   duration_ms);
     if (!json) {
         return ESP_ERR_NO_MEM;
     }
 
     log_report_json(json);
-    err = post_report_json(json);
+    err = post_report_json(json, task_id == NULL || task_id[0] == '\0');
 
     free(json);
     return err;
+}
+
+esp_err_t report_pipeline_run(const char *task_id)
+{
+    return report_pipeline_run_with_options(task_id, NULL);
 }

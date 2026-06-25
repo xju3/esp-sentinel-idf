@@ -429,6 +429,32 @@ esp_err_t wom_lis2dh12_disable(void)
     return ESP_OK;
 }
 
+esp_err_t wom_lis2dh12_enable_deep_sleep_wakeup(void)
+{
+    esp_err_t ret = drv_lis2dh12_enable_wom(&s_default_wom_cfg);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to enable WoM for deep sleep: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    {
+        uint8_t src = 0;
+        (void)drv_lis2dh12_read_int1_source(&src);
+        (void)drv_lis2dh12_read_int2_source(&src);
+    }
+
+    ret = esp_sleep_enable_ext1_wakeup(1ULL << LIS2DH12_PIN_NUM_INT1, ESP_EXT1_WAKEUP_ANY_HIGH);
+    if (ret != ESP_OK)
+    {
+        LOG_ERRORF("Failed to enable EXT1 wakeup: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    LOG_INFO("WoM deep sleep wakeup enabled on EXT1.");
+    return ESP_OK;
+}
+
 esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
 {
     if (!s_wom_armed)

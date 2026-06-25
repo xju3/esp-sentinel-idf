@@ -16,10 +16,12 @@
 #include "startup_gate.h"
 #include "task_daq.h"
 #include "task_http_message.h"
+#include "task_ota.h"
 #include "drv_iis3dwb.h"
 #include "bsp_4g.h"   // 引入 4G 相关接口
 #include "bsp_wifi.h" // 引入 WiFi 接口
 #include "esp_sntp.h" // 引入 WiFi 原生对时
+#include "wom_lis2dh12.h" // 引入 WoM 接口
 
 // 声明在 bsp_4g.c 中实现的 4G 对时函数
 extern esp_err_t bsp_4g_sync_time(void);
@@ -141,13 +143,18 @@ void app_main(void)
 
     // 3. 执行单次 DAQ 调度决策 (判断当前时间是否需要采集，若需要则阻塞式采集并推入队列)
     // LOG_INFO("Evaluating DAQ schedule after wakeup...");
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1)
+    {
+        LOG_INFO("Wakeup caused by LIS2DH12 WoM! Forcing immediate patrol.");
+        task_daq_trigger_wom_patrol();
+    }
     daq_scheduler_execute();
 
     // LOG_INFO("Report pipeline finished.");
 
     // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
     // LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");
-    http_message_process_pending_tasks();
+    check_and_report_ota_status();
 
     // --- 修复：给后台网络及对时任务留出存活窗口 ---
     if (is_hot_wakeup)
@@ -186,13 +193,16 @@ void app_main(void)
 
     if (sleep_time_us > 0)
     {
-        LOG_INFOF("All tasks finished. Entering deep sleep for %llu seconds...", sleep_time_us / 1000000ULL);
+        LOG_INFOF("All tasks finished. Entering deep sleep for %llu ms...", sleep_time_us / 1000ULL);
         esp_sleep_enable_timer_wakeup(sleep_time_us);
     }
     else
     {
         LOG_INFO("No periodic tasks enabled. Entering infinite deep sleep...");
     }
+
+    // 在进入深睡之前，挂载并启用 LIS2DH12 的外部中断唤醒
+    wom_lis2dh12_enable_deep_sleep_wakeup();
 
     esp_deep_sleep_start();
 }

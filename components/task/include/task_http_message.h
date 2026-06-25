@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "cJSON.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +19,7 @@ typedef enum
     HTTP_PENDING_TASKS_CAN_SHUTDOWN_4G,
 } http_pending_tasks_result_t;
 
-http_pending_tasks_result_t http_message_process_pending_tasks(void);
+http_pending_tasks_result_t http_message_process_task_array(const cJSON *task_array);
 
 esp_err_t start_http_message_task(void);
 esp_err_t http_message_task_submit(const uint8_t *data, size_t len);

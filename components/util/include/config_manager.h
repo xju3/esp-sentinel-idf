@@ -72,6 +72,8 @@ extern "C"
         int16_t patrol;        // minutes between patrols (0 to disable), max value 1440 (24h)
         int16_t diagnosis;     // seconds between detections (must be > 0)
         int16_t report;        // buffered message count threshold before reporting
+        int16_t report_points; // normal report FFT points: 4096 or 8192
+        int16_t report_range;  // normal report requested range: 2, 4, 8, or 16G
         bool is_configured;
     } user_config_t;
 

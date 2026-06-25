@@ -49,7 +49,7 @@ static esp_err_t off_sleep_wait_for_system_idle(void)
     const TickType_t timeout_ticks = pdMS_TO_TICKS(OFF_SLEEP_FFT_IDLE_TIMEOUT_MS);
     const TickType_t start_ticks = xTaskGetTickCount();
 
-    while (!task_daq_is_idle() || !task_fft_is_idle())
+    while (!task_daq_is_idle())
     {
         if ((xTaskGetTickCount() - start_ticks) >= timeout_ticks)
         {
@@ -79,21 +79,7 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void)
         goto rollback;
     }
 
-    // 分析流水线排空后，阻塞拉取云端任务并处理。
-    http_pending_tasks_result_t task_result = http_message_process_pending_tasks();
-    if (task_result == HTTP_PENDING_TASKS_NONE)
-    {
-        LOG_INFO("No pending cloud tasks. Proceeding to sleep.");
-    }
-    else if (task_result == HTTP_PENDING_TASKS_KEEP_4G)
-    {
-        LOG_INFO("Cloud tasks used 4G. Shutting down transport before sleep.");
-    }
-    else
-    {
-        LOG_INFO("Cloud tasks completed without requiring 4G.");
-    }
-
+    LOG_INFO("No pending cloud tasks logic needed here. Proceeding to sleep.");
     LOG_INFO("All tasks processed. Shutting down transport before OFF sleep...");
     if (g_user_config.network == 1)
     {

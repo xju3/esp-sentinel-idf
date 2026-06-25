@@ -1,3 +1,9 @@
+/*
+ * =====================================================================================
+ * @note This file is currently EXCLUDED from project compilation.
+ *       It is retained for historical reference and is no longer part of the active build.
+ * =====================================================================================
+ */
 #include "algo_envelope.h"
 #include "algo_fft.h"
 #include "dsps_biquad.h"

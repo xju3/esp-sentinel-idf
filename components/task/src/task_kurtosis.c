@@ -1,3 +1,9 @@
+/*
+ * =====================================================================================
+ * @note This file is currently EXCLUDED from project compilation.
+ *       It is retained for historical reference and is no longer part of the active build.
+ * =====================================================================================
+ */
 #include "task_kurtosis.h"
 #include "task_stash.h" // for vib_job_t
 #include "algo_kurtosis.h"
