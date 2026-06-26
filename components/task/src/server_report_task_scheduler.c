@@ -7,26 +7,15 @@
 #include <string.h>
 
 #define SERVER_REPORT_TASK_ID_MAX 64
-#define SERVER_REPORT_TASK_MIN_ACTION 10
-#define SERVER_REPORT_TASK_TWO_DIGIT_MAX_ACTION 99
-#define SERVER_REPORT_TASK_PARAM_MIN_ACTION 1000
-#define SERVER_REPORT_TASK_PARAM_MAX_ACTION 2999
-#define SERVER_REPORT_TASK_BASE_POINTS 4096U
+#define SERVER_REPORT_TASK_MIN_ACTION 1
+#define SERVER_REPORT_TASK_MAX_ACTION 99
 
 RTC_DATA_ATTR static bool s_task_active = false;
 RTC_DATA_ATTR static char s_task_id[SERVER_REPORT_TASK_ID_MAX] = {0};
 RTC_DATA_ATTR static int64_t s_task_interval_us = 0;
 RTC_DATA_ATTR static int64_t s_task_left_us = 0;
 RTC_DATA_ATTR static int s_task_remaining = 0;
-RTC_DATA_ATTR static bool s_task_has_options = false;
-RTC_DATA_ATTR static report_pipeline_options_t s_task_options = {0};
-
 static bool s_task_scheduled_this_run = false;
-
-static bool range_valid(uint16_t range_g)
-{
-    return range_g == 2U || range_g == 4U || range_g == 8U || range_g == 16U;
-}
 
 static int json_val_to_int(const cJSON *val)
 {
@@ -42,9 +31,7 @@ static int json_val_to_int(const cJSON *val)
 static bool parse_task_request(const char *task_id,
                                int action,
                                int val,
-                               int *out_interval_min,
-                               report_pipeline_options_t *out_options,
-                               bool *out_has_options)
+                               int *out_interval_min)
 {
     if (!task_id || task_id[0] == '\0') {
         return false;
@@ -54,39 +41,12 @@ static bool parse_task_request(const char *task_id,
     }
 
     const int interval_min = action % 10;
-    bool has_options = false;
-    report_pipeline_options_t options = {0};
-
-    if (action <= SERVER_REPORT_TASK_TWO_DIGIT_MAX_ACTION) {
-        if (interval_min <= 0) {
-            return false;
-        }
-        has_options = false;
-    } else if (action >= SERVER_REPORT_TASK_PARAM_MIN_ACTION &&
-               action <= SERVER_REPORT_TASK_PARAM_MAX_ACTION) {
-        const int points_multiplier = action / 1000;
-        const uint16_t range_g = (uint16_t)((action / 10) % 100);
-        if ((points_multiplier != 1 && points_multiplier != 2) || !range_valid(range_g)) {
-            return false;
-        }
-        options.points = SERVER_REPORT_TASK_BASE_POINTS * (uint32_t)points_multiplier;
-        options.range_g = range_g;
-        if (interval_min == 0) {
-            options.upload_spectrum = true;
-        }
-        has_options = true;
-    } else {
+    if (action > SERVER_REPORT_TASK_MAX_ACTION || interval_min <= 0) {
         return false;
     }
 
     if (out_interval_min) {
         *out_interval_min = interval_min;
-    }
-    if (out_options) {
-        *out_options = options;
-    }
-    if (out_has_options) {
-        *out_has_options = has_options;
     }
     return true;
 }
@@ -125,8 +85,6 @@ void server_report_task_clear(const char *reason)
     s_task_interval_us = 0;
     s_task_left_us = 0;
     s_task_remaining = 0;
-    s_task_has_options = false;
-    memset(&s_task_options, 0, sizeof(s_task_options));
     s_task_scheduled_this_run = false;
 }
 
@@ -146,15 +104,6 @@ bool server_report_task_copy_due_id(char *out_task_id, size_t out_len)
         return false;
     }
     strlcpy(out_task_id, s_task_id, out_len);
-    return true;
-}
-
-bool server_report_task_copy_due_options(report_pipeline_options_t *out_options)
-{
-    if (!out_options || !server_report_task_is_due() || !s_task_has_options) {
-        return false;
-    }
-    *out_options = s_task_options;
     return true;
 }
 
@@ -189,9 +138,7 @@ int64_t server_report_task_left_us(void)
 bool server_report_task_schedule(const char *task_id, int action, int val)
 {
     int interval_min = 0;
-    report_pipeline_options_t options = {0};
-    bool has_options = false;
-    if (!parse_task_request(task_id, action, val, &interval_min, &options, &has_options)) {
+    if (!parse_task_request(task_id, action, val, &interval_min)) {
         LOG_WARNF("Ignoring invalid server report task: id=%s, action=%d, val=%d",
                   task_id ? task_id : "",
                   action,
@@ -199,26 +146,18 @@ bool server_report_task_schedule(const char *task_id, int action, int val)
         return false;
     }
 
-    if (has_options && options.upload_spectrum) {
-        val = 1;
-    }
-
     strlcpy(s_task_id, task_id, sizeof(s_task_id));
     s_task_interval_us = (int64_t)interval_min * 60000000LL;
     s_task_left_us = s_task_interval_us;
     s_task_remaining = val;
-    s_task_has_options = has_options;
-    s_task_options = options;
     s_task_active = true;
     s_task_scheduled_this_run = true;
 
-    LOG_INFOF("Scheduled server report task: id=%s, action=%d, interval_min=%d, count=%d, points=%lu, range=%u",
+    LOG_INFOF("Scheduled server report task: id=%s, action=%d, interval_min=%d, count=%d",
               s_task_id,
               action,
               interval_min,
-              s_task_remaining,
-              has_options ? (unsigned long)s_task_options.points : 0UL,
-              has_options ? (unsigned)s_task_options.range_g : 0U);
+              s_task_remaining);
     return true;
 }
 

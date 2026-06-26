@@ -16,9 +16,6 @@ esp_err_t shutdown_ppp_4g(void);
 esp_err_t init_4g_network(cb_communication_channel_established cb);
 esp_err_t shutdown_4g_network(void);
 esp_err_t bsp_4g_http_get(const char *url, char **out_response);
-typedef esp_err_t (*bsp_4g_http_payload_cb_t)(void *ctx);
-esp_err_t bsp_4g_http_post_binary(const char *url, const char *task_id, size_t total_payload_len, bsp_4g_http_payload_cb_t cb, void *ctx, char **out_response);
-esp_err_t bsp_4g_write_uart(const void *data, size_t len);
 
 esp_err_t bsp_4g_http_post_json(const char *url, const char *payload, char **out_response);
 esp_err_t bsp_4g_http_put(const char *url, const char *payload);

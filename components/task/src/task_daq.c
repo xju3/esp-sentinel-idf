@@ -77,12 +77,7 @@ esp_err_t daq_scheduler_execute(void)
         char task_id[64] = {0};
         if (server_report_task_copy_due_id(task_id, sizeof(task_id))) {
             LOG_INFOF("Executing scheduled server report task: id=%s", task_id);
-            report_pipeline_options_t options = {0};
-            if (server_report_task_copy_due_options(&options)) {
-                err = report_pipeline_run_with_options(task_id, &options);
-            } else {
-                err = report_pipeline_run(task_id);
-            }
+            err = report_pipeline_run(task_id);
             server_report_task_mark_attempted(task_id);
             task_executed = true;
         } else {

@@ -197,10 +197,10 @@ static uint16_t configured_report_range_g(void)
                : 2;
 }
 
-static esp_err_t apply_report_options(const report_pipeline_options_t *options)
+static esp_err_t apply_report_configuration(void)
 {
-    const uint32_t points = options ? options->points : configured_report_points();
-    const uint16_t range_g = options ? options->range_g : configured_report_range_g();
+    const uint32_t points = configured_report_points();
+    const uint16_t range_g = configured_report_range_g();
 
     if (!report_points_valid(points)) {
         LOG_ERRORF("Invalid report points: %lu", (unsigned long)points);
@@ -796,85 +796,9 @@ static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
     return ESP_OK;
 }
 
-typedef struct __attribute__((packed)) {
-    char task_id[16];
-    uint32_t timestamp;
-    uint32_t fft_points;
-    float sample_rate;
-    uint32_t range_g;
-} spectrum_header_t;
-
-typedef struct {
-    const char *task_id;
-    uint64_t ts_ms;
-    uint16_t range_g;
-} spectrum_upload_ctx_t;
-
-static esp_err_t spectrum_payload_cb(void *ctx)
+esp_err_t report_pipeline_run(const char *task_id)
 {
-    spectrum_upload_ctx_t *uctx = (spectrum_upload_ctx_t *)ctx;
-    spectrum_header_t header;
-    memset(&header, 0, sizeof(header));
-    if (uctx->task_id) {
-        strncpy(header.task_id, uctx->task_id, sizeof(header.task_id) - 1);
-    }
-    header.timestamp = (uint32_t)(uctx->ts_ms / 1000);
-    header.fft_points = s_active_points;
-    header.sample_rate = REPORT_FS_HZ;
-    header.range_g = uctx->range_g;
-
-    esp_err_t err = bsp_4g_write_uart(&header, sizeof(header));
-    if (err != ESP_OK) return err;
-
-    for (int axis = 0; axis < 3; ++axis) {
-        float *axis_data = s_vib_buffer + axis * s_active_points;
-        memcpy(s_fft_scratch, axis_data, s_active_points * sizeof(float));
-
-        err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_fft_work_buf, s_active_points);
-        if (err != ESP_OK) return err;
-
-        uint32_t mag_bytes = (s_active_points / 2) * sizeof(float);
-        err = bsp_4g_write_uart(s_fft_mag, mag_bytes);
-        if (err != ESP_OK) return err;
-    }
-    return ESP_OK;
-}
-
-static esp_err_t post_spectrum_binary(const char *task_id, uint64_t ts_ms, uint16_t range_g)
-{
-    if (g_user_config.api_host[0] == '\0') {
-        LOG_ERROR("Cannot upload spectrum: api_host is empty");
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    char *url = malloc(256);
-    if (!url) return ESP_ERR_NO_MEM;
-    snprintf(url, 256, "http://%s/api/v1/sensors/tasks/%s/fft", g_user_config.api_host, task_id ? task_id : "");
-
-    size_t payload_len = sizeof(spectrum_header_t) + 3 * (s_active_points / 2) * sizeof(float);
-    
-    spectrum_upload_ctx_t ctx = {
-        .task_id = task_id,
-        .ts_ms = ts_ms,
-        .range_g = range_g
-    };
-
-    char *response = NULL;
-    esp_err_t err = bsp_4g_http_post_binary(url, task_id, payload_len, spectrum_payload_cb, &ctx, &response);
-    free(url);
-
-    if (err == ESP_OK) {
-        LOG_INFO("Spectrum binary upload completed");
-    } else {
-        LOG_ERROR("Spectrum binary upload failed");
-    }
-    free(response);
-    return err;
-}
-
-esp_err_t report_pipeline_run_with_options(const char *task_id, const report_pipeline_options_t *options)
-{
-    esp_err_t err = apply_report_options(options);
+    esp_err_t err = apply_report_configuration();
     if (err != ESP_OK) {
         return err;
     }
@@ -908,12 +832,6 @@ esp_err_t report_pipeline_run_with_options(const char *task_id, const report_pip
         init_4g_network(NULL);
     }
 
-    if (options && options->upload_spectrum) {
-        LOG_INFOF("Uploading binary spectrum for task %s", task_id ? task_id : "");
-        err = post_spectrum_binary(task_id, ts_ms, final_range_g);
-        return err;
-    }
-
     // 获取从本次唤醒起，到目前生成报告为止的精准工作耗时（毫秒）
     uint32_t duration_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
@@ -935,9 +853,4 @@ esp_err_t report_pipeline_run_with_options(const char *task_id, const report_pip
 
     free(json);
     return err;
-}
-
-esp_err_t report_pipeline_run(const char *task_id)
-{
-    return report_pipeline_run_with_options(task_id, NULL);
 }
