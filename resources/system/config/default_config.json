@@ -6,6 +6,7 @@
     },
     "rpm": 1480,
     "api_host": "139.9.50.7",
+    "target_rev": 20,
     "patrol": 1,
     "diagnosis": 1440,
     "report": 1,
