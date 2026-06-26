@@ -35,34 +35,15 @@
 #define REPORT_SN "UNKNOWN"
 #endif
 
-#ifndef POINTS
-#define POINTS 4096
-#endif
 
-#ifndef RANGE
-#define RANGE 2
-#endif
 
-#if (POINTS != 4096) && (POINTS != 8192)
-#error "POINTS must be 4096 or 8192"
-#endif
-
-#if (RANGE != 2) && (RANGE != 4) && (RANGE != 8) && (RANGE != 16)
-#error "RANGE must be one of 2, 4, 8, 16"
-#endif
-
-#if CONFIG_DSP_MAX_FFT_SIZE < 8192
-#error "CONFIG_DSP_MAX_FFT_SIZE must be >= 8192"
-#endif
 
 #define REPORT_SCHEMA_VERSION 2
 #define REPORT_SAMPLE_TYPE "normal"
 #define REPORT_FS_HZ 26667.0f
-#define REPORT_DEFAULT_POINTS ((uint32_t)POINTS)
-#define REPORT_DEFAULT_RANGE_G ((uint16_t)RANGE)
-#define REPORT_MAX_POINTS 8192U
+#define REPORT_MAX_POINTS MAX_ALLOWED_POINTS
 #define REPORT_CAPTURE_SKIP_MS 20U
-#define REPORT_CAPTURE_GUARD_MS 120U
+#define REPORT_CAPTURE_GUARD_MS 250U
 #define REPORT_DMA_CHUNK_SIZE 512
 #define REPORT_CLIP_THRESHOLD_RATIO 0.98f
 #define REPORT_CLIP_TOLERANCE_RATIO 0.001f
@@ -74,8 +55,9 @@
 static float *s_vib_buffer;
 static float *s_fft_scratch;
 static float *s_fft_mag;
-static uint32_t s_active_points = REPORT_DEFAULT_POINTS;
-static uint16_t s_active_range_g = REPORT_DEFAULT_RANGE_G;
+static float *s_fft_work_buf;
+static uint32_t s_active_points = 4096;
+static uint16_t s_active_range_g = 2;
 
 typedef struct {
     uint32_t count;
@@ -195,7 +177,7 @@ static uint32_t capture_duration_ms(void)
 
 static bool report_points_valid(uint32_t points)
 {
-    return points == 4096U || points == 8192U;
+    return points > 0 && points <= REPORT_MAX_POINTS;
 }
 
 static bool report_range_valid(uint16_t range_g)
@@ -205,16 +187,14 @@ static bool report_range_valid(uint16_t range_g)
 
 static uint32_t configured_report_points(void)
 {
-    return report_points_valid((uint32_t)g_user_config.report_points)
-               ? (uint32_t)g_user_config.report_points
-               : REPORT_DEFAULT_POINTS;
+    return g_user_config.fft_points > 0 ? g_user_config.fft_points : 4096;
 }
 
 static uint16_t configured_report_range_g(void)
 {
-    return report_range_valid((uint16_t)g_user_config.report_range)
-               ? (uint16_t)g_user_config.report_range
-               : REPORT_DEFAULT_RANGE_G;
+    return report_range_valid((uint16_t)g_user_config.range_g)
+               ? (uint16_t)g_user_config.range_g
+               : 2;
 }
 
 static esp_err_t apply_report_options(const report_pipeline_options_t *options)
@@ -238,18 +218,13 @@ static esp_err_t apply_report_options(const report_pipeline_options_t *options)
 
 static esp_err_t ensure_buffers(void)
 {
-    if (!s_vib_buffer) {
-        s_vib_buffer = heap_caps_calloc(REPORT_MAX_POINTS * 3U, sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (!s_fft_scratch) {
-        s_fft_scratch = heap_caps_malloc(REPORT_MAX_POINTS * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
-    if (!s_fft_mag) {
-        s_fft_mag = heap_caps_malloc((REPORT_MAX_POINTS / 2U) * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    }
+    s_vib_buffer = g_user_config.vib_buf;
+    s_fft_scratch = g_user_config.fft_scratch;
+    s_fft_mag = g_user_config.fft_mag;
+    s_fft_work_buf = g_user_config.fft_work_buf;
 
-    if (!s_vib_buffer || !s_fft_scratch || !s_fft_mag) {
-        LOG_ERROR("Report pipeline buffer allocation failed");
+    if (!s_vib_buffer || !s_fft_scratch || !s_fft_mag || !s_fft_work_buf) {
+        LOG_ERROR("Report pipeline buffer not allocated by config_manager");
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -449,7 +424,7 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
         memcpy(s_fft_scratch, data, s_active_points * sizeof(float));
     }
 
-    esp_err_t err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_active_points);
+    esp_err_t err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_fft_work_buf, s_active_points);
     if (err != ESP_OK) {
         return err;
     }
@@ -855,7 +830,7 @@ static esp_err_t spectrum_payload_cb(void *ctx)
         float *axis_data = s_vib_buffer + axis * s_active_points;
         memcpy(s_fft_scratch, axis_data, s_active_points * sizeof(float));
 
-        err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_active_points);
+        err = algo_fft_calculate(s_fft_scratch, s_fft_mag, s_fft_work_buf, s_active_points);
         if (err != ESP_OK) return err;
 
         uint32_t mag_bytes = (s_active_points / 2) * sizeof(float);

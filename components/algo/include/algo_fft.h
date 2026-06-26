@@ -37,14 +37,15 @@ typedef struct __attribute__((packed)) {
 esp_err_t algo_fft_init(void);
 
 /**
- * @brief 对单轴数据执行 FFT 并计算幅值谱 (Amplitude Spectrum)
- * 
- * @param input 输入时域信号 (实数)，长度必须为 n
- * @param output 输出频域幅值 (实数)，长度必须为 n/2
- * @param n FFT 点数 (必须是 2 的幂次方，当前最大支持 4096)
- * @return esp_err_t ESP_OK 成功，其他为错误码
+ * @brief 执行 N 点实数 FFT 并计算单边幅值谱
+ *
+ * @param input  输入时域信号，长度为 n (实数)
+ * @param output 输出幅值谱，长度至少为 n/2 (实数)
+ * @param work_buf 内部计算使用的暂存区，长度必须至少为 n (实数)
+ * @param n      FFT 点数，必须是 2 的幂次方且不能为 0
+ * @return esp_err_t ESP_OK 成功，ESP_ERR_INVALID_ARG 参数错误
  */
-esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n);
+esp_err_t algo_fft_calculate(const float *input, float *output, float *work_buf, uint32_t n);
 
 /**
  * @brief 从三轴幅值谱中提取巡检峰值
@@ -65,24 +66,7 @@ esp_err_t algo_fft_extract_peaks(
     float sample_rate,
     patrol_peak_t *peaks_out);
 
-/**
- * @brief 对三轴振动数据执行 FFT 并提取巡检峰值
- * 
- * @param x_data X轴时域信号
- * @param y_data Y轴时域信号
- * @param z_data Z轴时域信号
- * @param n FFT点数 (必须是2的幂次方)
- * @param sample_rate 采样率 (Hz)
- * @param report 输出报告结构体（填充 sample_rate 与 peaks）
- * @return esp_err_t ESP_OK 成功，其他为错误码
- */
-esp_err_t algo_fft_calculate_peaks(
-    const float *x_data,
-    const float *y_data,
-    const float *z_data,
-    uint32_t n,
-    float sample_rate,
-    patrol_fft_report_t *report);
+
 
 #ifdef __cplusplus
 }

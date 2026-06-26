@@ -18,12 +18,8 @@ if(DEFINED SN)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE REPORT_SN="${SN}")
 endif()
 
-if(DEFINED POINTS)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE POINTS=${POINTS})
-endif()
 
-if(DEFINED RANGE)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE RANGE=${RANGE})
-endif()
+
+
 
 # target_sources(${COMPONENT_LIB} PRIVATE)

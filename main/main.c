@@ -81,7 +81,10 @@ void app_main(void)
     // 1. 初始化基础外设与配置
     init_nvs();
     init_machine_state();
-    ESP_ERROR_CHECK(config_manager_load(&g_user_config));
+    esp_err_t cfg_err = config_manager_load(&g_user_config);
+    if (cfg_err != ESP_OK) {
+        LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
+    }
 
     // 2. 启动本地服务
     ESP_ERROR_CHECK(start_local_services());

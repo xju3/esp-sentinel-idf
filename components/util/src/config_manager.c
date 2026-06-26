@@ -3,9 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "cJSON.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fs_utils.h"
 #include "logger.h"
@@ -31,6 +33,33 @@ static void safe_copy(char *dst, size_t dst_size, const char *src)
     size_t len = strnlen(src, dst_size - 1);
     memcpy(dst, src, len);
     dst[len] = '\0';
+}
+
+static uint32_t next_pow2(uint32_t v)
+{
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    return ++v;
+}
+
+/* 根据 rpm 与 target_rev 计算所需的 FFT 点数（向上取 2^k） */
+static uint32_t calc_fft_points(uint32_t rpm, uint32_t target_rev)
+{
+    const float fs = 26667.0f;               // IIS3DWB 固定采样率
+    float f_rot = rpm / 60.0f;               // 转频 Hz
+    float t_need = target_rev / f_rot;       // 需要的采集时长（秒）
+    uint32_t N_raw = (uint32_t)ceilf(t_need * fs);
+    uint32_t N_pow2 = next_pow2(N_raw);
+    if (N_pow2 > MAX_ALLOWED_POINTS) {
+        LOG_WARNF("Calculated FFT points %lu exceed max %u, clipping",
+                 N_pow2, MAX_ALLOWED_POINTS);
+        N_pow2 = MAX_ALLOWED_POINTS;
+    }
+    return N_pow2;
 }
 
 // 挂载 system/user 分区，为后续读写做准备；user 分区缺省允许自动格式化。
@@ -85,35 +114,26 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root)
         cfg->rpm = (int32_t)item->valueint;
     }
 
+    item = cJSON_GetObjectItemCaseSensitive(root, "target_rev");
+    if (cJSON_IsNumber(item))
+    {
+        cfg->target_rev = (int32_t)item->valueint;
+    }
+    else if (cfg->target_rev == 0)
+    {
+        cfg->target_rev = 20; // default target rev
+    }
+
     item = cJSON_GetObjectItemCaseSensitive(root, "patrol");
     if (cJSON_IsNumber(item))
     {
         cfg->patrol = item->valuedouble;
     }
 
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "diagnosis");
+    item = cJSON_GetObjectItemCaseSensitive(root, "range_g");
     if (cJSON_IsNumber(item))
     {
-        cfg->diagnosis = item->valuedouble;
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "report");
-    if (cJSON_IsNumber(item))
-    {
-        cfg->report = (int32_t)item->valueint;
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "report_points");
-    if (cJSON_IsNumber(item))
-    {
-        cfg->report_points = (int16_t)item->valueint;
-    }
-
-    item = cJSON_GetObjectItemCaseSensitive(root, "report_range");
-    if (cJSON_IsNumber(item))
-    {
-        cfg->report_range = (int16_t)item->valueint;
+        cfg->range_g = (int16_t)item->valueint;
     }
 
     item = cJSON_GetObjectItemCaseSensitive(root, "months");
@@ -301,19 +321,70 @@ esp_err_t config_manager_load(user_config_t *out_cfg)
             LOG_WARN("User config parse failed; using defaults");
             (void)config_manager_log_default_json();
             out_cfg->is_configured = false;
-            g_user_config = *out_cfg;
-            return ESP_OK;
         }
-        // 仅在用户配置解析成功时打印当前用户配置
-        (void)log_config_json(FILE_PATH_CONFIG_USER, "User");
-        g_user_config = *out_cfg;
-        return ESP_OK; // 用户配置成功覆盖
+        else
+        {
+            // 仅在用户配置解析成功时打印当前用户配置
+            (void)log_config_json(FILE_PATH_CONFIG_USER, "User");
+        }
+    }
+    else
+    {
+        // 没有用户配置，保持默认值并标记未配置
+        LOG_INFO("User config not found; using defaults");
+        (void)config_manager_log_default_json();
+        out_cfg->is_configured = false;
+    }
+    // 第三步：验证 RPM，并动态分配内存
+    if (g_user_config.vib_buf)
+    {
+        heap_caps_free(g_user_config.vib_buf);
+        g_user_config.vib_buf = NULL;
+    }
+    if (g_user_config.fft_scratch)
+    {
+        heap_caps_free(g_user_config.fft_scratch);
+        g_user_config.fft_scratch = NULL;
+    }
+    if (g_user_config.fft_mag)
+    {
+        heap_caps_free(g_user_config.fft_mag);
+        g_user_config.fft_mag = NULL;
+    }
+    if (g_user_config.fft_work_buf)
+    {
+        heap_caps_free(g_user_config.fft_work_buf);
+        g_user_config.fft_work_buf = NULL;
     }
 
-    // 没有用户配置，保持默认值并标记未配置
-    LOG_INFO("User config not found; using defaults");
-    (void)config_manager_log_default_json();
-    out_cfg->is_configured = false;
+    if (out_cfg->rpm < MIN_SUPPORTED_RPM) {
+        LOG_ERRORF("RPM %ld < %d - unsupported", out_cfg->rpm, MIN_SUPPORTED_RPM);
+        return ERR_RPM_UNSUPPORTED;
+    }
+
+    uint32_t fft_points = calc_fft_points(out_cfg->rpm, out_cfg->target_rev);
+    out_cfg->fft_points = fft_points;
+
+    out_cfg->vib_buf = heap_caps_calloc(fft_points * 3, sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    out_cfg->fft_scratch = heap_caps_malloc(fft_points * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    out_cfg->fft_mag = heap_caps_calloc(fft_points / 2, sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // 内部工作缓存
+    out_cfg->fft_work_buf = heap_caps_calloc(fft_points, sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    if (!out_cfg->vib_buf || !out_cfg->fft_scratch || !out_cfg->fft_mag || !out_cfg->fft_work_buf)
+    {
+        LOG_ERROR("Failed to allocate DSP buffers in PSRAM");
+        if (out_cfg->vib_buf) heap_caps_free(out_cfg->vib_buf);
+        if (out_cfg->fft_scratch) heap_caps_free(out_cfg->fft_scratch);
+        if (out_cfg->fft_mag) heap_caps_free(out_cfg->fft_mag);
+        if (out_cfg->fft_work_buf) heap_caps_free(out_cfg->fft_work_buf);
+        out_cfg->vib_buf = NULL;
+        out_cfg->fft_scratch = NULL;
+        out_cfg->fft_mag = NULL;
+        out_cfg->fft_work_buf = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
     g_user_config = *out_cfg;
     return ESP_OK;
 }
@@ -360,12 +431,10 @@ esp_err_t config_manager_save_user(const user_config_t *cfg)
     cJSON_AddNumberToObject(root, "months", cfg->months);
     cJSON_AddStringToObject(root, "api_host", cfg->api_host);
     cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
-    cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
-    cJSON_AddNumberToObject(root, "report", cfg->report);
-    cJSON_AddNumberToObject(root, "report_points", cfg->report_points);
-    cJSON_AddNumberToObject(root, "report_range", cfg->report_range);
+    cJSON_AddNumberToObject(root, "range_g", cfg->range_g);
     cJSON_AddNumberToObject(root, "battery", cfg->battery);
     cJSON_AddNumberToObject(root, "rpm", cfg->rpm);
+    cJSON_AddNumberToObject(root, "target_rev", cfg->target_rev);
     cJSON_AddNumberToObject(root, "network", cfg->network);
     cJSON_AddBoolToObject(root, "ble", cfg->ble);
     cJSON_AddBoolToObject(root, "configured", cfg->is_configured);

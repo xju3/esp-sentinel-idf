@@ -29,7 +29,7 @@
 
 #define IIS3DWB_FIFO_SAMPLE_BYTES 7
 
-#define DMA_CHUNK_SAMPLES 128
+#define DMA_CHUNK_SAMPLES 400
 #define DMA_RAW_BYTES (DMA_CHUNK_SAMPLES * IIS3DWB_FIFO_SAMPLE_BYTES)
 
 static SemaphoreHandle_t s_spi_mutex = NULL;
@@ -452,13 +452,15 @@ static void iis3dwb_dma_worker_task(void *arg)
 
     uint8_t ping_pong_flag = 0;
 
+    TickType_t xLastWakeTime = xTaskGetTickCount();
     while (s_stream_running)
     {
         float odr = (s_current_odr_hz > 0.0f) ? s_current_odr_hz : IIS3DWB_ODR_HZ;
         float chunk_ms = ((float)DMA_CHUNK_SAMPLES * 1000.0f) / odr;
-        if (chunk_ms < 1.0f)
-            chunk_ms = 1.0f;
-        vTaskDelay(pdMS_TO_TICKS((uint32_t)ceilf(chunk_ms)));
+        uint32_t delay_ticks = pdMS_TO_TICKS((uint32_t)roundf(chunk_ms));
+        if (delay_ticks == 0) delay_ticks = 1;
+        
+        vTaskDelayUntil(&xLastWakeTime, delay_ticks);
 
         spi_transaction_t *t = (ping_pong_flag == 0) ? &trans[0] : &trans[1];
         ping_pong_flag = !ping_pong_flag;

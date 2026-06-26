@@ -17,13 +17,11 @@
 
 // 使用 RTC 内存维护相对倒计时，彻底隔绝 NTP 服务器挂钟时间的跳变
 RTC_DATA_ATTR static int64_t s_patrol_left_us = 0;
-RTC_DATA_ATTR static int64_t s_diagnosis_left_us = 0;
 RTC_DATA_ATTR static int64_t s_last_sleep_us = 0;
 RTC_DATA_ATTR static bool s_is_cold_boot = true;
 
 // 本次运行中，哪些任务被触发执行了
 static bool s_ran_patrol = false;
-static bool s_ran_diagnosis = false;
 static bool s_is_wom_wakeup = false;
 
 /**
@@ -33,34 +31,26 @@ static bool s_is_wom_wakeup = false;
 esp_err_t daq_scheduler_execute(void)
 {
     s_ran_patrol = false;
-    s_ran_diagnosis = false;
 
     if (s_is_cold_boot) {
         LOG_INFO("Cold boot detected. Initializing relative DAQ schedule.");
         s_patrol_left_us = 0;
-        s_diagnosis_left_us = 0;
         s_last_sleep_us = 0;
         s_is_cold_boot = false;
     } else {
         // 唤醒后，扣减上次设定的睡眠时长，推动相对倒计时
         s_patrol_left_us -= s_last_sleep_us;
-        s_diagnosis_left_us -= s_last_sleep_us;
         server_report_task_on_wake(s_last_sleep_us);
     }
 
     // 检查配置，>0 代表任务启用
     bool patrol_enabled = (g_user_config.patrol > 0);
-    bool diagnosis_enabled = (g_user_config.diagnosis > 0);
 
     // 若禁用，将倒计时置为极大值防止误触发
     if (!patrol_enabled) s_patrol_left_us = INT64_MAX;
-    if (!diagnosis_enabled) s_diagnosis_left_us = INT64_MAX;
 
     if (patrol_enabled && s_patrol_left_us <= WAKEUP_TOLERANCE_US) {
         s_ran_patrol = true;
-    }
-    if (diagnosis_enabled && s_diagnosis_left_us <= WAKEUP_TOLERANCE_US) {
-        s_ran_diagnosis = true;
     }
 
     esp_err_t err = ESP_OK;
@@ -74,7 +64,7 @@ esp_err_t daq_scheduler_execute(void)
         task_executed = true;
     }
 
-    if (s_ran_patrol || s_ran_diagnosis) {
+    if (s_ran_patrol) {
         server_report_task_clear("normal report due");
         LOG_INFO("Executing unified normal report pipeline...");
         err = report_pipeline_run(NULL);
@@ -116,19 +106,15 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
     int64_t exec_time_us = esp_timer_get_time();
 
     bool patrol_enabled = (g_user_config.patrol > 0);
-    bool diagnosis_enabled = (g_user_config.diagnosis > 0);
 
     int64_t p_period_us = (int64_t)g_user_config.patrol * 60000000LL;   // 分钟 -> 微秒
-    int64_t d_period_us = (int64_t)g_user_config.diagnosis * 1000000LL; // 秒 -> 微秒
 
     // 2. 将之前剩余的倒计时，继续扣减掉本次的工作耗时
     s_patrol_left_us -= exec_time_us;
-    s_diagnosis_left_us -= exec_time_us;
     server_report_task_after_work(exec_time_us);
 
     const bool normal_overdue_after_work =
-        (!s_ran_patrol && patrol_enabled && s_patrol_left_us <= 0) ||
-        (!s_ran_diagnosis && diagnosis_enabled && s_diagnosis_left_us <= 0);
+        (!s_ran_patrol && patrol_enabled && s_patrol_left_us <= 0);
     if (normal_overdue_after_work) {
         server_report_task_clear("normal report overdue after server task");
         s_last_sleep_us = IMMEDIATE_WAKEUP_US;
@@ -139,32 +125,20 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
     if (patrol_enabled && s_ran_patrol) {
         s_patrol_left_us += p_period_us;
     }
-    if (diagnosis_enabled && s_ran_diagnosis) {
-        s_diagnosis_left_us += d_period_us;
-    }
 
     // 4. 处理中途通过云端打开的任务，或云端动态缩短了周期的场景
     // 如果剩余时间变成了负数，或者剩余倒计时比当前最新配置的周期还要长，则强制对齐到新周期
     if (patrol_enabled && !s_ran_patrol && (s_patrol_left_us <= 0 || s_patrol_left_us > p_period_us)) {
         s_patrol_left_us = p_period_us;
     }
-    if (diagnosis_enabled && !s_ran_diagnosis && (s_diagnosis_left_us <= 0 || s_diagnosis_left_us > d_period_us)) {
-        s_diagnosis_left_us = d_period_us;
-    }
 
     // 5. 寻找下一次唤醒需要睡眠的最短倒计时
     int64_t next_sleep_us = -1;
     int64_t min_period_us = 0;
 
-    if (patrol_enabled && diagnosis_enabled) {
-        next_sleep_us = (s_patrol_left_us < s_diagnosis_left_us) ? s_patrol_left_us : s_diagnosis_left_us;
-        min_period_us = (p_period_us < d_period_us) ? p_period_us : d_period_us;
-    } else if (patrol_enabled) {
+    if (patrol_enabled) {
         next_sleep_us = s_patrol_left_us;
         min_period_us = p_period_us;
-    } else if (diagnosis_enabled) {
-        next_sleep_us = s_diagnosis_left_us;
-        min_period_us = d_period_us;
     } else {
         next_sleep_us = -1;
         min_period_us = 0;
@@ -189,7 +163,6 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
     if (next_sleep_us <= 0) {
         next_sleep_us = (min_period_us > 0) ? min_period_us : IMMEDIATE_WAKEUP_US;
         if (patrol_enabled) s_patrol_left_us = p_period_us;
-        if (diagnosis_enabled) s_diagnosis_left_us = d_period_us;
     }
 
     // 7. 防护：防止由于周期动态缩小等边缘配置跳变导致极大的睡眠时间

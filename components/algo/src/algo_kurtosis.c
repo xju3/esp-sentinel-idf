@@ -14,7 +14,8 @@
 
 static const char *TAG = "ALGO_KURT";
 
-#define MAX_PROCESS_POINTS 4096
+#include "config_manager.h"
+#define MAX_PROCESS_POINTS MAX_ALLOWED_POINTS
 
 // Use external RAM for large scratch buffer, aligned for SIMD
 EXT_RAM_BSS_ATTR static float s_kurt_scratch[MAX_PROCESS_POINTS] __attribute__((aligned(16)));
@@ -24,7 +25,7 @@ static float process_axis(const float *input, uint32_t len)
     if (!input || len == 0) return 0.0f;
     
     if (len > MAX_PROCESS_POINTS) {
-        ESP_LOGW(TAG, "Input length %lu clipped to %d", len, MAX_PROCESS_POINTS);
+        LOG_WARNF("Input length %lu clipped to %d", len, MAX_PROCESS_POINTS);
         len = MAX_PROCESS_POINTS;
     }
 

@@ -11,6 +11,13 @@ extern "C"
 {
 #endif
 
+#define MIN_SUPPORTED_RPM 600
+#include "sdkconfig.h"
+#define MAX_ALLOWED_POINTS CONFIG_DSP_MAX_FFT_SIZE
+
+#define ERR_RPM_UNSUPPORTED 0x1001
+#define ERR_FFT_OVERFLOW 0x1002
+
 #define LEN_MAX_DEVICE_ID 64
 #define LEN_MAX_DEVICE_NAME 64
 #define LEN_MAX_DEVICE_TYPE 32
@@ -70,10 +77,14 @@ extern "C"
         iso_config_t iso;
         sensor_position_t pos; // 传感器安装方向配置
         int16_t patrol;        // minutes between patrols (0 to disable), max value 1440 (24h)
-        int16_t diagnosis;     // seconds between detections (must be > 0)
-        int16_t report;        // buffered message count threshold before reporting
-        int16_t report_points; // normal report FFT points: 4096 or 8192
-        int16_t report_range;  // normal report requested range: 2, 4, 8, or 16G
+
+        int16_t range_g;       // Range 2, 4, 8, 16
+        int32_t target_rev;    // target revolutions for calculation
+        uint32_t fft_points;   // dynamic fft points calculated based on rpm and target_rev
+        float *vib_buf;        // dynamic PSRAM buffer for 3-axis time domain data (fft_points * 3)
+        float *fft_scratch;    // scratch space for single axis (fft_points)
+        float *fft_mag;        // output magnitude spectrum (fft_points / 2)
+        float *fft_work_buf;   // internal workspace for FFT operations (fft_points)
         bool is_configured;
     } user_config_t;
 

@@ -15,15 +15,9 @@
 static bool s_fft_initialized = false;
 static StaticSemaphore_t s_fft_lock_buf;
 static SemaphoreHandle_t s_fft_lock = NULL;
-static StaticSemaphore_t s_fft_peaks_lock_buf;
-static SemaphoreHandle_t s_fft_peaks_lock = NULL;
 
-// Match the ESP-DSP lookup table size selected in sdkconfig.
-#define MAX_FFT_SIZE CONFIG_DSP_MAX_FFT_SIZE
-EXT_RAM_BSS_ATTR static float s_fft_scratch[MAX_FFT_SIZE] __attribute__((aligned(16)));
-EXT_RAM_BSS_ATTR static float s_fft_mag_x[MAX_FFT_SIZE / 2];
-EXT_RAM_BSS_ATTR static float s_fft_mag_y[MAX_FFT_SIZE / 2];
-EXT_RAM_BSS_ATTR static float s_fft_mag_z[MAX_FFT_SIZE / 2];
+
+
 
 static float peak_score(const patrol_peak_t *peak)
 {
@@ -103,7 +97,7 @@ esp_err_t algo_fft_init(void)
     }
     
     // 初始化 FFT 查找表 (Bit-reverse table 和 Sin/Cos table)
-    esp_err_t ret = dsps_fft2r_init_fc32(NULL, MAX_FFT_SIZE);
+    esp_err_t ret = dsps_fft2r_init_fc32(NULL, CONFIG_DSP_MAX_FFT_SIZE);
     if (ret == ESP_OK) {
         s_fft_initialized = true;
         // LOG_DEBUG("FFT tables initialized");
@@ -187,7 +181,7 @@ esp_err_t algo_fft_extract_peaks(
     return ESP_OK;
 }
 
-esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
+esp_err_t algo_fft_calculate(const float *input, float *output, float *work_buf, uint32_t n)
 {
     if (!input || !output || n == 0) {
         return ESP_ERR_INVALID_ARG;
@@ -199,9 +193,9 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (n > MAX_FFT_SIZE) {
-        LOG_ERRORF("FFT size exceeds static scratch buffer, got %lu > %d", n, MAX_FFT_SIZE);
-        return ESP_ERR_INVALID_SIZE;
+    if (!work_buf) {
+        LOG_ERROR("work_buf is NULL");
+        return ESP_ERR_INVALID_ARG;
     }
 
     if (!s_fft_initialized) {
@@ -217,7 +211,7 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
     // === 实数 FFT 优化 (N/2 Trick) ===
     // 将 N 个实数看作 N/2 个复数进行处理，内存需求减半，速度翻倍。
     // 使用静态预分配暂存区，避免长期运行下反复 alloc/free 造成碎片。
-    float *y_cf = s_fft_scratch;
+    float *y_cf = work_buf;
 
     // 2. 加窗 (Hanning Window)
     // 优化：使用 DSP 库生成窗函数和向量乘法，替代原本的慢速 cosf 循环
@@ -316,70 +310,4 @@ esp_err_t algo_fft_calculate(const float *input, float *output, uint32_t n)
     return ESP_OK;
 }
 
-esp_err_t algo_fft_calculate_peaks(
-    const float *x_data,
-    const float *y_data,
-    const float *z_data,
-    uint32_t n,
-    float sample_rate,
-    patrol_fft_report_t *report)
-{
-    if (!x_data || !y_data || !z_data || !report)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
 
-    if ((n & (n - 1U)) != 0U || n == 0U)
-    {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (s_fft_peaks_lock == NULL) {
-        s_fft_peaks_lock = xSemaphoreCreateMutexStatic(&s_fft_peaks_lock_buf);
-        if (s_fft_peaks_lock == NULL) {
-            LOG_ERROR("Failed to create FFT peaks mutex");
-            return ESP_ERR_NO_MEM;
-        }
-    }
-
-    if (xSemaphoreTake(s_fft_peaks_lock, portMAX_DELAY) != pdTRUE) {
-        LOG_ERROR("Failed to take FFT peaks mutex");
-        return ESP_ERR_TIMEOUT;
-    }
-
-    esp_err_t err = algo_fft_calculate(x_data, s_fft_mag_x, n);
-    if (err != ESP_OK)
-    {
-        xSemaphoreGive(s_fft_peaks_lock);
-        return err;
-    }
-
-    err = algo_fft_calculate(y_data, s_fft_mag_y, n);
-    if (err != ESP_OK)
-    {
-        xSemaphoreGive(s_fft_peaks_lock);
-        return err;
-    }
-
-    err = algo_fft_calculate(z_data, s_fft_mag_z, n);
-    if (err != ESP_OK)
-    {
-        xSemaphoreGive(s_fft_peaks_lock);
-        return err;
-    }
-
-    err = algo_fft_extract_peaks(
-        s_fft_mag_x,
-        s_fft_mag_y,
-        s_fft_mag_z,
-        n,
-        sample_rate,
-        report->peaks);
-    if (err == ESP_OK)
-    {
-        report->sample_rate = sample_rate;
-    }
-
-    xSemaphoreGive(s_fft_peaks_lock);
-    return err;
-}

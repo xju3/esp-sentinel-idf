@@ -41,7 +41,8 @@ static const char *TAG = "ALGO_RMS";
 #define BIQUAD_Q 0.7071f      // Butterworth Q
 #define STEADY_SKIP_MS 50U // 丢弃前 50ms 以避免滤波瞬态影响（可按需修改）
 
-#define MAX_RMS_PROCESS_POINTS 8192
+#include "config_manager.h"
+#define MAX_RMS_PROCESS_POINTS MAX_ALLOWED_POINTS
 // 定义静态暂存区，强制 16 字节对齐以满足 SIMD 指令要求
 EXT_RAM_BSS_ATTR static float s_scratch_buf[MAX_RMS_PROCESS_POINTS] __attribute__((aligned(16)));
 EXT_RAM_BSS_ATTR static float s_band_buf[MAX_RMS_PROCESS_POINTS] __attribute__((aligned(16)));
@@ -113,7 +114,7 @@ static esp_err_t prepare_velocity_trace(const float *input,
 
     if (length > MAX_RMS_PROCESS_POINTS)
     {
-        ESP_LOGE(TAG, "Input length %lu exceeds static buffer size %d", length, MAX_RMS_PROCESS_POINTS);
+        LOG_ERRORF("Input length %lu exceeds static buffer size %d", length, MAX_RMS_PROCESS_POINTS);
         return ESP_ERR_INVALID_SIZE;
     }
 
