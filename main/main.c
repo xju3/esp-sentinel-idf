@@ -79,6 +79,11 @@ void app_main(void) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
 
+  gpio_hold_dis(GPIO_NUM_4);
+  gpio_hold_dis(GPIO_NUM_5); // MISO
+  gpio_hold_dis(GPIO_NUM_6);
+  gpio_hold_dis(GPIO_NUM_7);
+
   gpio_hold_dis(GPIO_NUM_9);
   gpio_hold_dis(GPIO_NUM_10); // MISO
   gpio_hold_dis(GPIO_NUM_12);
