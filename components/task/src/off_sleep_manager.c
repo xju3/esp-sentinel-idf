@@ -8,13 +8,13 @@
 #include "drv_lis2dh12.h"
 #include "logger.h"
 // Removed machine_state.h
-#include "sdkconfig.h"
-#include "task_daq.h"
 
-#include "task_http_message.h" // 引入同步拉取接口
+
+
+
 #include "wom_lis2dh12.h"
 
-#include "driver/rtc_io.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 

@@ -3,26 +3,26 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
+
 #include "sdkconfig.h"
 #include <string.h>
 #include <time.h>
 
 #include "bsp_wifi.h" // 引入 WiFi 接口
 #include "config_manager.h"
-#include "driver/rtc_io.h"
+
 #include "drv_4g.h" // 引入 4G 相关接口
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "esp_sntp.h" // 引入 WiFi 原生对时
 #include "init.h"
 #include "logger.h"
-#include "startup_gate.h"
+
 #include "system_lock.h"
 #include "task_daq.h"
-#include "task_http_message.h"
+
 #include "task_ota.h"
-#include "web_server.h"
+
 #include "wom_lis2dh12.h" // 引入 WoM 接口
 
 // 声明在 bsp_4g.c 中实现的 4G 对时函数
@@ -81,8 +81,7 @@ void app_main(void) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
 
-  lis2dh12_bus_gpio_deisolate_after_wakeup();
-  ;
+  deisolate_lis2dh12_pins();
 
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());

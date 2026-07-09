@@ -2,7 +2,7 @@
 #include "config_manager.h"
 #include "logger.h"
 #include "system_lock.h"
-#include "task_daq.h"
+
 
 #include "http_proxy.h"
 #include "cJSON.h"

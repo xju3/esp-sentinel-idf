@@ -99,18 +99,10 @@ esp_err_t isolate_lis2dh12_pins(void) {
 esp_err_t deisolate_lis2dh12_pins(void) {
   gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    rtc_gpio_deinit(pins[i]);
-  }
-  return ESP_OK;
-}
-
-void lis2dh12_bus_gpio_deisolate_after_wakeup(void) {
-  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
-
-  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
     gpio_hold_dis(pins[i]);
     rtc_gpio_deinit(pins[i]);
   }
+  return ESP_OK;
 }
 
 static uint16_t lis2dh12_int_ths_step_mg(lis2dh12_fs_t fs) {
