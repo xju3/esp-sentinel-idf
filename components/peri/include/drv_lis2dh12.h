@@ -15,13 +15,15 @@ extern "C" {
 // GPIO assignments
 #define LIS2DH12_PIN_NUM_INT1 GPIO_NUM_8
 #define LIS2DH12_PIN_NUM_INT2 GPIO_NUM_3
-#define LIS2DH12_PIN_NUM_CS   GPIO_NUM_9
-#define LIS2DH12_PIN_NUM_SDO  GPIO_NUM_10
-#define LIS2DH12_PIN_NUM_SDA  GPIO_NUM_11
-#define LIS2DH12_PIN_NUM_SCL  GPIO_NUM_12
+#define LIS2DH12_PIN_NUM_CS GPIO_NUM_9
+#define LIS2DH12_PIN_NUM_SDO GPIO_NUM_10
+#define LIS2DH12_PIN_NUM_SDA GPIO_NUM_11
+#define LIS2DH12_PIN_NUM_SCL GPIO_NUM_12
 
 // Pins that should be isolated during sleep to avoid current leakage
-#define LIS2DH12_ISOLATE_PINS {LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_SDA}
+#define LIS2DH12_ISOLATE_PINS                                                  \
+  {LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_CS,            \
+   LIS2DH12_PIN_NUM_SCL}
 
 // Register addresses (exposed for debugging and configuration)
 #define LIS2DH12_REG_WHO_AM_I 0x0F
