@@ -2,7 +2,7 @@
 
 #include "algo_fft.h"
 #include "config_manager.h"
-#include "daq_iis3dwb.h"
+#include "drv_iis3dwb.h"
 #include "drv_ds18b20.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -291,7 +291,7 @@ static esp_err_t capture_one_attempt(uint16_t range_g, capture_attempt_t *attemp
     iis3dwb_cfg_t cfg = cfg_for_range(range_g);
 
     memset(s_vib_buffer, 0, s_active_points * 3U * sizeof(float));
-    esp_err_t err = daq_iis3dwb_capture(&cfg,
+    esp_err_t err = drv_iis3dwb_capture(&cfg,
                                         capture_duration_ms(),
                                         capture_handler,
                                         &ctx,

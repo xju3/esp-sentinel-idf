@@ -14,13 +14,9 @@ extern "C" {
  */
 
 /* Power and control */
-#define BOARD_GPIO_CHARGE_PWM      GPIO_NUM_1
 #define BOARD_GPIO_SENSOR_EN       GPIO_NUM_2
-#define BOARD_GPIO_LED             GPIO_NUM_40
 
 /* Analog monitoring */
-#define BOARD_GPIO_ADC_BATTERY     GPIO_NUM_42
-#define BOARD_GPIO_ADC_SUPERCAP    GPIO_NUM_41
 
 
 

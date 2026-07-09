@@ -5,7 +5,7 @@ idf_component_register(
         "src/drv_ds18b20.c"
         "src/drv_4g.c"
         "src/imu_config.c" 
-        "src/daq_iis3dwb.c"
+        ""
     INCLUDE_DIRS include
     REQUIRES algo bsp
     PRIV_REQUIRES freertos esp_driver_spi esp_timer util driver

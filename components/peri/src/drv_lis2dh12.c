@@ -86,6 +86,7 @@ static bool s_lis2dh12_initialized = false;
 static float s_current_odr = 0.0f;
 static lis2dh12_fs_t s_current_fs = LIS2DH12_FS_2G;
 
+// 在ESP32进入深度睡眠前隔离GPIO
 esp_err_t isolate_lis2dh12_pins(void) {
   gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
@@ -96,6 +97,7 @@ esp_err_t isolate_lis2dh12_pins(void) {
   return ESP_OK;
 }
 
+// 在ESP32醒来后解除隔离
 esp_err_t deisolate_lis2dh12_pins(void) {
   gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {

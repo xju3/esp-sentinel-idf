@@ -59,6 +59,16 @@ esp_err_t drv_iis3dwb_stop_stream(void);
 esp_err_t drv_iis3dwb_enter_standby(void);
 extern iis3dwb_cfg_t iis3dwb_accel_fs_cfg_16;
 extern iis3dwb_cfg_t iis3dwb_accel_fs_cfg_2;
+
+esp_err_t drv_iis3dwb_capture(
+    iis3dwb_cfg_t *cfg,
+    uint32_t duration_ms,
+    imu_data_cb_ctx_t handler,
+    void *user_ctx,
+    int16_t chunck_size,
+    uint32_t skip_ms
+);
+
 #ifdef __cplusplus
 }
 #endif

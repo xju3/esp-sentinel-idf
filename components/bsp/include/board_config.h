@@ -24,18 +24,7 @@
 #define BOARD_WIFI_STA_TIMEOUT_MS          20000
 #define BOARD_4G_KEEP_POWER_ON_AFTER_TEST  1
 
-#define BOARD_GPIO_BATTERY_ADC             GPIO_NUM_2
-#define BOARD_GPIO_SUPERCAP_ADC            GPIO_NUM_1
 
-
-
-
-
-
-#define BOARD_GPIO_SENSOR_PWR              GPIO_NUM_42
-
-#define BOARD_GPIO_LED                     GPIO_NUM_40
-#define BOARD_GPIO_CHARGE                  GPIO_NUM_41
 
 #define BOARD_LIS2DH12_WHO_AM_I_REG        0x0F
 #define BOARD_LIS2DH12_WHO_AM_I_EXPECTED   0x33
