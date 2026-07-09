@@ -91,6 +91,14 @@ esp_err_t drv_lis2dh12_read_int2_source(uint8_t *source);
 // debug helper: read arbitrary register (non-atomic)
 esp_err_t drv_lis2dh12_read_register(uint8_t reg, uint8_t *value);
 
+// isolate lis2dh12 pins except int1, int2.
+esp_err_t isolate_lis2dh12_pins(void);
+
+esp_err_t deisolate_lis2dh12_pins(void);
+
+// deisolate lis2dh12 gpio pins.
+void lis2dh12_bus_gpio_deisolate_after_wakeup(void);
+
 // Sensor driver instance for imu_config
 extern SensorDriver_t lis2dh12_driver;
 

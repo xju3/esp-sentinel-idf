@@ -26,24 +26,6 @@
 static TaskHandle_t s_off_sleep_task = NULL;
 static volatile bool s_sleep_requested = false;
 
-static esp_err_t isolate_lis2dh12_pins(void) {
-  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
-  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    gpio_pullup_dis(pins[i]);
-    gpio_pulldown_dis(pins[i]);
-    rtc_gpio_isolate(pins[i]);
-  }
-  return ESP_OK;
-}
-
-static esp_err_t deisolate_lis2dh12_pins(void) {
-  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
-  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    rtc_gpio_deinit(pins[i]);
-  }
-  return ESP_OK;
-}
-
 static esp_err_t off_sleep_prepare_capture_path(void) {
   esp_err_t ret = drv_iis3dwb_enter_standby();
   if (ret != ESP_OK) {

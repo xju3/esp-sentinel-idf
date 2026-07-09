@@ -8,17 +8,17 @@
 #include <string.h>
 #include <time.h>
 
-#include "drv_4g.h"   // 引入 4G 相关接口
 #include "bsp_wifi.h" // 引入 WiFi 接口
 #include "config_manager.h"
 #include "driver/rtc_io.h"
+#include "drv_4g.h" // 引入 4G 相关接口
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "esp_sntp.h" // 引入 WiFi 原生对时
 #include "init.h"
 #include "logger.h"
-#include "system_lock.h"
 #include "startup_gate.h"
+#include "system_lock.h"
 #include "task_daq.h"
 #include "task_http_message.h"
 #include "task_ota.h"
@@ -36,15 +36,6 @@ static EventGroupHandle_t s_network_event_group = NULL;
 RTC_DATA_ATTR int g_dense_diag_remaining = 0; // 剩余密集诊断次数
 RTC_DATA_ATTR int g_dense_diag_interval_s =
     300; // 密集诊断的时间间隔 (默认 300秒 = 5分钟)
-
-static void lis2dh12_bus_gpio_deisolate_after_wakeup(void) {
-  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
-
-  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    gpio_hold_dis(pins[i]);
-    rtc_gpio_deinit(pins[i]);
-  }
-}
 
 // 供外部业务模块(如云端下发任务、或本地算法异常时)调用
 void enable_dense_diagnostic(int times, int interval_seconds) {
