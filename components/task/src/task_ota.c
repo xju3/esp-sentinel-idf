@@ -249,26 +249,7 @@ void execute_ota_update_sync(const char *task_id)
     LOG_INFOF("=== Starting OTA Update Process for Task: %s ===", task_id);
 
     // 1. 停止触发新任务，准备等待流水线排空
-    LOG_INFO("1. Pausing periodic DAQ tasks and waiting for pipeline drain...");
-    task_daq_pause_periodic();
-
-    TickType_t start_ticks = xTaskGetTickCount();
-    TickType_t timeout_ticks = pdMS_TO_TICKS(OTA_DRAIN_TIMEOUT_MS);
-    bool drained = false;
-
-    while ((xTaskGetTickCount() - start_ticks) < timeout_ticks) {
-        if (task_daq_is_idle()) {
-            drained = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    if (!drained) {
-        LOG_WARN("Pipeline drain timeout! Proceeding to force OTA.");
-    } else {
-        LOG_INFO("Pipeline drained successfully.");
-    }
+    LOG_INFO("1. Waiting for pipeline drain (skipped, synchronous scheduling in use).");
 
     // 2. 加锁独占系统，屏蔽硬件扫描被以外唤醒
     LOG_INFO("2. Locking system task mutex for exclusive OTA operations...");
@@ -284,7 +265,7 @@ void execute_ota_update_sync(const char *task_id)
         LOG_ERROR("Failed to fetch OTA info.");
         report_ota_result(task_id, 1);
         unlock_system_task();
-        task_daq_resume_periodic(true);
+
         return;
     }
 
@@ -295,7 +276,7 @@ void execute_ota_update_sync(const char *task_id)
         LOG_ERROR("Failed to parse OTA info JSON.");
         report_ota_result(task_id, 2);
         unlock_system_task();
-        task_daq_resume_periodic(true);
+
         return;
     }
 
@@ -308,7 +289,7 @@ void execute_ota_update_sync(const char *task_id)
         cJSON_Delete(root);
         report_ota_result(task_id, 3);
         unlock_system_task();
-        task_daq_resume_periodic(true);
+
         return;
     }
 
@@ -332,7 +313,7 @@ void execute_ota_update_sync(const char *task_id)
         LOG_ERROR("OTA Update failed.");
         report_ota_result(task_id, 4); // 大于 0 表示异常
         unlock_system_task();          // 释放排他锁
-        task_daq_resume_periodic(true);// 恢复原有的采样业务
+
     }
 }
 
@@ -346,25 +327,7 @@ void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url)
     }
 
     LOG_INFO("1. Pausing periodic DAQ tasks and waiting for pipeline drain...");
-    task_daq_pause_periodic();
 
-    TickType_t start_ticks = xTaskGetTickCount();
-    TickType_t timeout_ticks = pdMS_TO_TICKS(OTA_DRAIN_TIMEOUT_MS);
-    bool drained = false;
-
-    while ((xTaskGetTickCount() - start_ticks) < timeout_ticks) {
-        if (task_daq_is_idle()) {
-            drained = true;
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    if (!drained) {
-        LOG_WARN("Pipeline drain timeout! Proceeding to force OTA.");
-    } else {
-        LOG_INFO("Pipeline drained successfully.");
-    }
 
     LOG_INFO("2. Locking system task mutex for exclusive OTA operations...");
     lock_system_task();
@@ -386,6 +349,6 @@ void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url)
         LOG_ERROR("OTA Update failed during download.");
         report_ota_complete(task_id ? task_id : "", 1);
         unlock_system_task();
-        task_daq_resume_periodic(true);
+
     }
 }

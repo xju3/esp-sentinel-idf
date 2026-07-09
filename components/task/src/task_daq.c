@@ -171,38 +171,6 @@ uint64_t daq_scheduler_get_sleep_time_us(void)
     return (uint64_t)next_sleep_us;
 }
 
-// ====================================================================
-// 以下为兼容旧 API 的桩函数
-// 由于 DAQ 重构为同步阻塞调度器（daq_scheduler_execute），不再有后台
-// 周期性任务，因此 is_idle 恒为 true，pause/resume 和 start_task_daq 均为空操作。
-// ====================================================================
-
-esp_err_t start_task_daq(void)
-{
-    return ESP_OK;
-}
-
-bool task_daq_is_idle(void)
-{
-    return true;
-}
-
-esp_err_t task_daq_pause_periodic(void)
-{
-    return ESP_OK;
-}
-
-esp_err_t task_daq_resume_periodic(bool trigger_patrol_now)
-{
-    (void)trigger_patrol_now;
-    return ESP_OK;
-}
-
-bool task_daq_periodic_enabled(void)
-{
-    return false;
-}
-
 esp_err_t task_daq_trigger_patrol_now(void)
 {
     s_patrol_left_us = 0;

@@ -2,8 +2,8 @@
 #include "bsp_board.h"
 #include "driver/gpio.h"
 
-#include "drv_4g.h"
 #include "config_manager.h"
+#include "drv_4g.h"
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "logger.h"
@@ -62,37 +62,9 @@ static esp_err_t off_sleep_prepare_capture_path(void) {
   return ESP_OK;
 }
 
-static esp_err_t off_sleep_wait_for_system_idle(void) {
-  const TickType_t wait_step = pdMS_TO_TICKS(OFF_SLEEP_WAIT_STEP_MS);
-  const TickType_t timeout_ticks = pdMS_TO_TICKS(OFF_SLEEP_FFT_IDLE_TIMEOUT_MS);
-  const TickType_t start_ticks = xTaskGetTickCount();
-
-  while (!task_daq_is_idle()) {
-    if ((xTaskGetTickCount() - start_ticks) >= timeout_ticks) {
-      LOG_WARN("Timed out waiting for DAQ/FFT pipeline to become idle before "
-               "OFF sleep");
-      return ESP_ERR_TIMEOUT;
-    }
-    vTaskDelay(wait_step);
-  }
-
-  return ESP_OK;
-}
-
 static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
-  esp_err_t ret = task_daq_pause_periodic();
-  if (ret != ESP_OK) {
-    LOG_ERRORF("Failed to pause periodic DAQ before OFF sleep: %s",
-               esp_err_to_name(ret));
-    return ret;
-  }
 
-  bool periodic_paused = true;
-
-  ret = off_sleep_wait_for_system_idle();
-  if (ret != ESP_OK) {
-    goto rollback;
-  }
+  esp_err_t ret = ESP_OK;
 
   isolate_lis2dh12_pins();
 
@@ -105,10 +77,8 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
     goto rollback;
   }
 
-  // set_machine_state(STATE_OFF); // removed
-
   ret = wom_lis2dh12_enter_light_sleep_until_wakeup();
-  
+
   // 唤醒后立刻解除隔离，恢复 SPI 总线通信
   deisolate_lis2dh12_pins();
 
@@ -119,19 +89,10 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
   }
 
   (void)wom_lis2dh12_disable();
-  // set_machine_state(STATE_TRANSIENT); // removed
-
-  if (periodic_paused) {
-    (void)task_daq_resume_periodic(true);
-  }
 
   return ESP_OK;
 
 rollback:
-  // set_machine_state(STATE_TRANSIENT); // removed
-  if (periodic_paused) {
-    (void)task_daq_resume_periodic(false);
-  }
   return ret;
 }
 

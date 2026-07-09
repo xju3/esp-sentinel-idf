@@ -26,13 +26,7 @@ static void init_sensors()
 
 static esp_err_t enable_tasks()
 {
-    esp_err_t ret = start_task_daq();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-
-    ret = start_off_sleep_manager();
+    esp_err_t ret = start_off_sleep_manager();
     if (ret != ESP_OK)
     {
         return ret;
