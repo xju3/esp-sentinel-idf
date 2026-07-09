@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "bsp_board.h"
 #include "bsp_wifi.h" // 引入 WiFi 接口
 #include "config_manager.h"
 
@@ -166,6 +167,7 @@ void app_main(void) {
     (void)shutdown_4g_network(); // 通知 4G 模块 AT+QPOWD=1 关机并释放串口
   }
   (void)drv_iis3dwb_enter_standby(); // 传感器待机
+  gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
   vTaskDelay(pdMS_TO_TICKS(500));    // 给 4G 模块一点点关机信号处理时间
 
   // 7. 计算下一次唤醒时间并进入深度睡眠
