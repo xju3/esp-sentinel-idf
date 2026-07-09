@@ -7,6 +7,6 @@ idf_component_register(
         "src/imu_config.c" 
         ""
     INCLUDE_DIRS include
-    REQUIRES algo bsp
-    PRIV_REQUIRES freertos esp_driver_spi esp_timer util driver
+    REQUIRES algo bsp hal
+    PRIV_REQUIRES freertos esp_driver_gpio esp_driver_spi esp_timer util driver
 )

@@ -7,15 +7,9 @@
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "logger.h"
-// Removed machine_state.h
-
-
-
 
 #include "wom_lis2dh12.h"
 
-
-#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #define OFF_SLEEP_TASK_STACK_SIZE 4096

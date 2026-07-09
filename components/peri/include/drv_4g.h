@@ -2,13 +2,11 @@
 #define DRV_4G_H_
 
 #include "esp_err.h"
-#include "esp_event.h"
 #include "bsp_network.h"
+#include "hal/gpio_types.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include "driver/gpio.h"
 
 #ifdef __cplusplus
 extern "C" {
