@@ -10,7 +10,7 @@
 // Removed machine_state.h
 #include "sdkconfig.h"
 #include "task_daq.h"
-#include "task_fft.h"
+
 #include "task_http_message.h" // 引入同步拉取接口
 #include "wom_lis2dh12.h"
 

@@ -3,7 +3,7 @@
 #include "logger.h"
 #include "system_lock.h"
 #include "task_daq.h"
-#include "task_fft.h"
+
 #include "http_proxy.h"
 #include "cJSON.h"
 #include "esp_ota_ops.h"
