@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "driver/gpio.h"
+#include "driver/rtc_io.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -262,6 +263,26 @@ static ds18b20_resolution_t ds18b20_resolution_from_config(uint8_t config) {
   default:
     return DS18B20_RESOLUTION_12BIT;
   }
+}
+
+esp_err_t isolate_ds18b20_pin(void) {
+  gpio_pullup_dis(DS18B20_PIN);
+  gpio_pulldown_dis(DS18B20_PIN);
+  return rtc_gpio_isolate(DS18B20_PIN);
+}
+
+esp_err_t deisolate_ds18b20_pin(void) {
+  esp_err_t ret = gpio_hold_dis(DS18B20_PIN);
+  esp_err_t deinit_ret = rtc_gpio_deinit(DS18B20_PIN);
+  if (ret == ESP_OK) {
+    ret = deinit_ret;
+  }
+
+  esp_err_t pull_ret = gpio_set_pull_mode(DS18B20_PIN, GPIO_PULLUP_ONLY);
+  if (ret == ESP_OK) {
+    ret = pull_ret;
+  }
+  return ret;
 }
 
 esp_err_t drv_ds18b20_init(void) {

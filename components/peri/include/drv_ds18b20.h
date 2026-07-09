@@ -45,6 +45,8 @@ bool drv_ds18b20_is_conversion_done(void);
 esp_err_t drv_ds18b20_read_temperature(float *temperature);
 esp_err_t drv_ds18b20_read_temperature_async(ds18b20_temp_cb_t callback);
 esp_err_t drv_ds18b20_self_test(void);
+esp_err_t isolate_ds18b20_pin(void);
+esp_err_t deisolate_ds18b20_pin(void);
 
 extern bool g_ds18b20_initialized;
 

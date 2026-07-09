@@ -1,4 +1,5 @@
 #include "wom_lis2dh12.h"
+#include "drv_ds18b20.h"
 #include "drv_lis2dh12.h"
 #include "logger.h"
 
@@ -451,6 +452,8 @@ esp_err_t wom_lis2dh12_enable_deep_sleep_wakeup(void)
         return ret;
     }
 
+    (void)isolate_lis2dh12_pins();
+    (void)isolate_ds18b20_pin();
     LOG_INFO("WoM deep sleep wakeup enabled on EXT1.");
     return ESP_OK;
 }
@@ -524,7 +527,11 @@ esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void)
 
     LOG_INFO("Entering light sleep, waiting for WoM wakeup");
     vTaskDelay(pdMS_TO_TICKS(1));
+    (void)isolate_lis2dh12_pins();
+    (void)isolate_ds18b20_pin();
     ret = esp_light_sleep_start();
+    (void)deisolate_ds18b20_pin();
+    (void)deisolate_lis2dh12_pins();
 
     (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     (void)gpio_wakeup_disable(LIS2DH12_PIN_NUM_INT1);

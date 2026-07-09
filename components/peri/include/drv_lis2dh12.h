@@ -21,8 +21,9 @@ extern "C" {
 #define LIS2DH12_PIN_NUM_SCL GPIO_NUM_12
 
 // Pins that should be isolated during sleep to avoid current leakage
+// 只隔离SDA，睡眠期间功耗约80mA
 #define LIS2DH12_ISOLATE_PINS                                                  \
-  {LIS2DH12_PIN_NUM_SDO, LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_CS,            \
+  {LIS2DH12_PIN_NUM_SDA, LIS2DH12_PIN_NUM_CS, LIS2DH12_PIN_NUM_SDO,            \
    LIS2DH12_PIN_NUM_SCL}
 
 // Register addresses (exposed for debugging and configuration)

@@ -1,4 +1,5 @@
 #include "esp_attr.h"
+#include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -12,6 +13,7 @@
 #include "config_manager.h"
 
 #include "drv_4g.h" // 引入 4G 相关接口
+#include "drv_ds18b20.h"
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "esp_sntp.h" // 引入 WiFi 原生对时
@@ -81,7 +83,9 @@ void app_main(void) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
 
+  gpio_deep_sleep_hold_dis();
   deisolate_lis2dh12_pins();
+  deisolate_ds18b20_pin();
 
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());

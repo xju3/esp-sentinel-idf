@@ -10,6 +10,7 @@
 
 #include "wom_lis2dh12.h"
 
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #define OFF_SLEEP_TASK_STACK_SIZE 4096
@@ -42,8 +43,6 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
 
   esp_err_t ret = ESP_OK;
 
-  isolate_lis2dh12_pins();
-
   if (g_user_config.network == 1) {
     (void)shutdown_4g_network();
   }
@@ -54,9 +53,6 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
   }
 
   ret = wom_lis2dh12_enter_light_sleep_until_wakeup();
-
-  // 唤醒后立刻解除隔离，恢复 SPI 总线通信
-  deisolate_lis2dh12_pins();
 
   if (ret != ESP_OK) {
     LOG_ERRORF("WoM light sleep failed: %s", esp_err_to_name(ret));

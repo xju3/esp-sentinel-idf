@@ -1,4 +1,5 @@
 #include "drv_iis3dwb.h"
+#include "bsp_board.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
