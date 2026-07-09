@@ -1,7 +1,7 @@
 #include "task_ota.h"
 #include "config_manager.h"
 #include "logger.h"
-#include "machine_state.h"
+#include "system_lock.h"
 #include "task_daq.h"
 #include "task_fft.h"
 #include "http_proxy.h"
@@ -15,7 +15,7 @@
 #include <string.h>
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "bsp_4g.h"
+#include "drv_4g.h"
 
 extern esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle);
 

@@ -1,5 +1,5 @@
 #include "init.h"
-#include "bsp_4g.h"
+#include "drv_4g.h"
 #include "bsp_wifi.h"
 #include "config_manager.h"
 #include "drv_lis2dh12.h"

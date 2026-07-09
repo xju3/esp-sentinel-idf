@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "bsp_board.h"
+
 #include "driver/gpio.h"
 #include "esp_err.h"
 
@@ -19,7 +19,7 @@ extern "C" {
  * @note Board DQ is routed to GPIO16.
  */
 
-#define DS18B20_PIN BOARD_GPIO_DS18B20_DQ
+#define DS18B20_PIN GPIO_NUM_16
 
 #define DS18B20_CMD_SKIP_ROM          0xCC
 #define DS18B20_CMD_CONVERT_T         0x44

@@ -17,7 +17,7 @@
 #include <math.h>
 #include <string.h>
 #include "esp_attr.h"
-#include "machine_state.h"
+#include "system_lock.h"
 
 static DSP_Config_t patrol_config = {0};
 static DSP_Config_t diagnosis_config = {0};
@@ -420,10 +420,6 @@ esp_err_t start_daq_worker(daq_worker_param_t *param)
     }
 
     // 1. Check if the machine is in a stable state. This is a mandatory precondition.
-    // if (get_machine_state() != STATE_STABLE) {
-    //     LOG_WARN("Cannot start DAQ worker: machine state is not STABLE.");
-    //     return ESP_ERR_INVALID_STATE;
-    // }
 
     // 2. Lock the system task mutex to ensure exclusive operation during this DAQ work.
     // This will block the state check handler from running concurrently.

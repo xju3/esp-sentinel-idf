@@ -2,7 +2,7 @@
 #include "cJSON.h"
 #include "logger.h"
 #include "config_manager.h"
-#include "bsp_4g.h"
+#include "drv_4g.h"
 #include "task_ota.h"
 #include "http_proxy.h"
 #include "report_pipeline.h"

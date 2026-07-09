@@ -8,15 +8,16 @@
 #include <string.h>
 #include <time.h>
 
-#include "bsp_4g.h"   // 引入 4G 相关接口
+#include "drv_4g.h"   // 引入 4G 相关接口
 #include "bsp_wifi.h" // 引入 WiFi 接口
 #include "config_manager.h"
 #include "driver/rtc_io.h"
 #include "drv_iis3dwb.h"
+#include "drv_lis2dh12.h"
 #include "esp_sntp.h" // 引入 WiFi 原生对时
 #include "init.h"
 #include "logger.h"
-#include "machine_state.h"
+#include "system_lock.h"
 #include "startup_gate.h"
 #include "task_daq.h"
 #include "task_http_message.h"
@@ -36,24 +37,12 @@ RTC_DATA_ATTR int g_dense_diag_remaining = 0; // 剩余密集诊断次数
 RTC_DATA_ATTR int g_dense_diag_interval_s =
     300; // 密集诊断的时间间隔 (默认 300秒 = 5分钟)
 
-static void lis2dh12_bus_gpio_isolate_before_sleep(void) {
-  gpio_num_t pins[] = {
-      GPIO_NUM_9,  // R44: CS，可测试是否需要隔离
-      GPIO_NUM_10, // R45
-      GPIO_NUM_11, // R46，重点
-      GPIO_NUM_12  // R47
-  };
+static void lis2dh12_bus_gpio_deisolate_after_wakeup(void) {
+  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
 
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    gpio_reset_pin(pins[i]);
-    gpio_set_direction(pins[i], GPIO_MODE_INPUT);
-    gpio_pullup_dis(pins[i]);
-    gpio_pulldown_dis(pins[i]);
-
-    rtc_gpio_pullup_dis(pins[i]);
-    rtc_gpio_pulldown_dis(pins[i]);
-
-    rtc_gpio_isolate(pins[i]);
+    gpio_hold_dis(pins[i]);
+    rtc_gpio_deinit(pins[i]);
   }
 }
 
@@ -95,13 +84,15 @@ static void network_bringup_task(void *pvParameters) {
 void app_main(void) {
   // 1. 初始化基础外设与配置
   init_nvs();
-  init_machine_state();
+  init_system_lock();
   esp_err_t cfg_err = config_manager_load(&g_user_config);
   if (cfg_err != ESP_OK) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
 
-  lis2dh12_bus_gpio_isolate_before_sleep();
+  lis2dh12_bus_gpio_deisolate_after_wakeup();
+  ;
+
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());
 

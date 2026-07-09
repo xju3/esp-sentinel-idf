@@ -3,6 +3,7 @@ idf_component_register(
         "src/drv_lis2dh12.c"
         "src/drv_iis3dwb.c"
         "src/drv_ds18b20.c"
+        "src/drv_4g.c"
         "src/imu_config.c" 
         "src/daq_iis3dwb.c"
     INCLUDE_DIRS include

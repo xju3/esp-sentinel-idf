@@ -2,12 +2,12 @@
 #include "bsp_board.h"
 #include "driver/gpio.h"
 
-#include "bsp_4g.h"
+#include "drv_4g.h"
 #include "config_manager.h"
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "logger.h"
-#include "machine_state.h"
+// Removed machine_state.h
 #include "sdkconfig.h"
 #include "task_daq.h"
 #include "task_fft.h"
@@ -27,32 +27,20 @@ static TaskHandle_t s_off_sleep_task = NULL;
 static volatile bool s_sleep_requested = false;
 
 static esp_err_t isolate_lis2dh12_pins(void) {
-  // 3. 释放普通 GPIO 状态
-  gpio_reset_pin(LIS2DH12_PIN_NUM_SDO); // R45: LIS2DH12TR_MISO
-  gpio_reset_pin(LIS2DH12_PIN_NUM_SDA); // R46: LIS2DH12TR_MOSI
-  gpio_reset_pin(LIS2DH12_PIN_NUM_SCL); // R47: LIS2DH12TR_SCL
-  gpio_reset_pin(LIS2DH12_PIN_NUM_CS);  // R44: LIS2DH12TR_CS
+  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
+  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+    gpio_pullup_dis(pins[i]);
+    gpio_pulldown_dis(pins[i]);
+    rtc_gpio_isolate(pins[i]);
+  }
+  return ESP_OK;
+}
 
-  gpio_set_direction(LIS2DH12_PIN_NUM_SDO, GPIO_MODE_INPUT);
-  gpio_set_direction(LIS2DH12_PIN_NUM_SDA, GPIO_MODE_INPUT);
-  gpio_set_direction(LIS2DH12_PIN_NUM_SCL, GPIO_MODE_INPUT);
-  gpio_set_direction(LIS2DH12_PIN_NUM_CS, GPIO_MODE_INPUT);
-
-  gpio_pullup_dis(LIS2DH12_PIN_NUM_SDO);
-  gpio_pulldown_dis(LIS2DH12_PIN_NUM_SDO);
-  gpio_pullup_dis(LIS2DH12_PIN_NUM_SDA);
-  gpio_pulldown_dis(LIS2DH12_PIN_NUM_SDA);
-  gpio_pullup_dis(LIS2DH12_PIN_NUM_SCL);
-  gpio_pulldown_dis(LIS2DH12_PIN_NUM_SCL);
-  gpio_pullup_dis(LIS2DH12_PIN_NUM_CS);
-  gpio_pulldown_dis(LIS2DH12_PIN_NUM_CS);
-
-  // 4. 对 RTC GPIO 做隔离
-  rtc_gpio_isolate(LIS2DH12_PIN_NUM_SDO); // R45
-  rtc_gpio_isolate(LIS2DH12_PIN_NUM_SDA); // R46，重点
-  rtc_gpio_isolate(LIS2DH12_PIN_NUM_SCL); // R47
-  rtc_gpio_isolate(LIS2DH12_PIN_NUM_CS);  // R44，可选但建议测试
-
+static esp_err_t deisolate_lis2dh12_pins(void) {
+  gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
+  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+    rtc_gpio_deinit(pins[i]);
+  }
   return ESP_OK;
 }
 
@@ -106,20 +94,24 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
     goto rollback;
   }
 
+  isolate_lis2dh12_pins();
+
   if (g_user_config.network == 1) {
     (void)shutdown_4g_network();
   }
-
-  isolate_lis2dh12_pins();
 
   ret = off_sleep_prepare_capture_path();
   if (ret != ESP_OK) {
     goto rollback;
   }
 
-  set_machine_state(STATE_OFF);
+  // set_machine_state(STATE_OFF); // removed
 
   ret = wom_lis2dh12_enter_light_sleep_until_wakeup();
+  
+  // 唤醒后立刻解除隔离，恢复 SPI 总线通信
+  deisolate_lis2dh12_pins();
+
   if (ret != ESP_OK) {
     LOG_ERRORF("WoM light sleep failed: %s", esp_err_to_name(ret));
     (void)wom_lis2dh12_disable();
@@ -127,7 +119,7 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
   }
 
   (void)wom_lis2dh12_disable();
-  set_machine_state(STATE_TRANSIENT);
+  // set_machine_state(STATE_TRANSIENT); // removed
 
   if (periodic_paused) {
     (void)task_daq_resume_periodic(true);
@@ -136,7 +128,7 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
   return ESP_OK;
 
 rollback:
-  set_machine_state(STATE_TRANSIENT);
+  // set_machine_state(STATE_TRANSIENT); // removed
   if (periodic_paused) {
     (void)task_daq_resume_periodic(false);
   }

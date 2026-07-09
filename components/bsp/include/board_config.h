@@ -26,30 +26,11 @@
 
 #define BOARD_GPIO_BATTERY_ADC             GPIO_NUM_2
 #define BOARD_GPIO_SUPERCAP_ADC            GPIO_NUM_1
-#define BOARD_GPIO_IIS3DWB_MISO            GPIO_NUM_4
-#define BOARD_GPIO_IIS3DWB_MOSI            GPIO_NUM_5
-#define BOARD_GPIO_IIS3DWB_SCLK            GPIO_NUM_6
-#define BOARD_GPIO_IIS3DWB_CS              GPIO_NUM_7
-#define BOARD_GPIO_LIS2DH12_INT1           GPIO_NUM_8
-#define BOARD_GPIO_LIS2DH12_CS             GPIO_NUM_9
-#define BOARD_GPIO_LIS2DH12_MISO           GPIO_NUM_10
-#define BOARD_GPIO_LIS2DH12_MOSI           GPIO_NUM_11
-#define BOARD_GPIO_LIS2DH12_SCLK           GPIO_NUM_12
-#define BOARD_GPIO_LIS2DH12_INT2           GPIO_NUM_3
 
-#define BOARD_GPIO_TEMP_DQ                 GPIO_NUM_16
 
-#define BOARD_GPIO_4G_PWR                  GPIO_NUM_13
-#define BOARD_GPIO_4G_PWRKEY               GPIO_NUM_14
-#define BOARD_GPIO_4G_UART_TX              GPIO_NUM_17
-#define BOARD_GPIO_4G_UART_RX              GPIO_NUM_18
-#define BOARD_GPIO_4G_STATUS               GPIO_NUM_21
-#define BOARD_GPIO_4G_NET_STATUS           GPIO_NUM_47
-#define BOARD_GPIO_4G_RESET_N              GPIO_NUM_48
 
-#define BOARD_GPIO_IIS3DWB_INT1            GPIO_NUM_15
-#define BOARD_GPIO_IIS3DWB_INT2            GPIO_NUM_38
-#define BOARD_GPIO_IIS3DWB_PWR             BOARD_GPIO_SENSOR_PWR
+
+
 
 #define BOARD_GPIO_SENSOR_PWR              GPIO_NUM_42
 

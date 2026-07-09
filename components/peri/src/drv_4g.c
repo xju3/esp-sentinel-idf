@@ -1,4 +1,4 @@
-#include "bsp_4g.h"
+#include "drv_4g.h"
 #include "bsp_board.h"
 #include "board_config.h"
 #include "config_manager.h"
@@ -28,12 +28,12 @@
 #endif
 
 // ============== Board pin aliases ==============
-#define MODEM_UART_RX_PIN BOARD_GPIO_4G_UART_RX
-#define MODEM_UART_TX_PIN BOARD_GPIO_4G_UART_TX
-#define MODEM_PWR_EN_PIN BOARD_GPIO_4G_PWR
-#define MODEM_PWRKEY_PIN BOARD_GPIO_4G_PWRKEY
-#define MODEM_STATUS_PIN BOARD_GPIO_4G_STATUS
-#define MODEM_NET_STATUS_PIN BOARD_GPIO_4G_NET_STATUS
+#define MODEM_UART_RX_PIN DRV_4G_PIN_UART_RX
+#define MODEM_UART_TX_PIN DRV_4G_PIN_UART_TX
+#define MODEM_PWR_EN_PIN DRV_4G_PIN_PWR
+#define MODEM_PWRKEY_PIN DRV_4G_PIN_PWRKEY
+#define MODEM_STATUS_PIN DRV_4G_PIN_STATUS
+#define MODEM_NET_STATUS_PIN DRV_4G_PIN_NET_STATUS
 #define UART_PORT_NUM UART_NUM_1
 #define MODEM_UART_BAUD_RATE 115200
 #define MODEM_UART_RX_BUF_SIZE 2048
