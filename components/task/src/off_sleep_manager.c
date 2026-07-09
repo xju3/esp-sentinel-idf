@@ -5,6 +5,7 @@
 #include "bsp_4g.h"
 #include "config_manager.h"
 #include "drv_iis3dwb.h"
+#include "drv_lis2dh12.h"
 #include "logger.h"
 #include "machine_state.h"
 #include "sdkconfig.h"
@@ -101,15 +102,40 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
     (void)task_daq_resume_periodic(true);
   }
 
-  gpio_set_pull_mode(GPIO_NUM_12, GPIO_PULLUP_ONLY); // SCL - IO12
-  gpio_set_pull_mode(GPIO_NUM_11, GPIO_PULLUP_ONLY); // MOSI - IO11
-  gpio_set_pull_mode(GPIO_NUM_10, GPIO_PULLUP_ONLY); // MISO - IO10
+  // gpio_set_pull_mode(LIS2DH12_PIN_NUM_SDA, GPIO_PULLUP_ONLY); // SCL - IO12
+  // gpio_set_pull_mode(LIS2DH12_PIN_NUM_SDO,
+  //                    GPIO_PULLUP_ONLY); // SDA - IO11 (was MOSI)
+  // // GPIO_NUM_10 (SDO) is address pin, hardware should define its state
+  // // CS (GPIO_NUM_9) is hardware pulled up, no GPIO control needed
+  // gpio_hold_en(LIS2DH12_PIN_NUM_SDO); // SCL
+  // gpio_hold_en(LIS2DH12_PIN_NUM_SDA); // SDA
 
-  gpio_hold_en(GPIO_NUM_9);  // CS
-  gpio_hold_en(GPIO_NUM_10); // MISO
-  gpio_hold_en(GPIO_NUM_12); // SCLK
-  gpio_hold_en(GPIO_NUM_11); // MOSI
-  gpio_deep_sleep_hold_en();
+  // gpio_deep_sleep_hold_en();
+  // 3. 释放普通 GPIO 状态
+  gpio_reset_pin(LIS2DH12_PIN_NUM_SDO); // R45: LIS2DH12TR_MISO
+  gpio_reset_pin(LIS2DH12_PIN_NUM_SDA); // R46: LIS2DH12TR_MOSI
+  gpio_reset_pin(LIS2DH12_PIN_NUM_SCL); // R47: LIS2DH12TR_SCL
+  gpio_reset_pin(LIS2DH12_PIN_NUM_CS);  // R44: LIS2DH12TR_CS
+
+  gpio_set_direction(LIS2DH12_PIN_NUM_SDO, GPIO_MODE_INPUT);
+  gpio_set_direction(LIS2DH12_PIN_NUM_SDA, GPIO_MODE_INPUT);
+  gpio_set_direction(LIS2DH12_PIN_NUM_SCL, GPIO_MODE_INPUT);
+  gpio_set_direction(LIS2DH12_PIN_NUM_CS, GPIO_MODE_INPUT);
+
+  gpio_pullup_dis(LIS2DH12_PIN_NUM_SDO);
+  gpio_pulldown_dis(LIS2DH12_PIN_NUM_SDO);
+  gpio_pullup_dis(LIS2DH12_PIN_NUM_SDA);
+  gpio_pulldown_dis(LIS2DH12_PIN_NUM_SDA);
+  gpio_pullup_dis(LIS2DH12_PIN_NUM_SCL);
+  gpio_pulldown_dis(LIS2DH12_PIN_NUM_SCL);
+  gpio_pullup_dis(LIS2DH12_PIN_NUM_CS);
+  gpio_pulldown_dis(LIS2DH12_PIN_NUM_CS);
+
+  // 4. 对 RTC GPIO 做隔离
+  rtc_gpio_isolate(LIS2DH12_PIN_NUM_SDO); // R45
+  rtc_gpio_isolate(LIS2DH12_PIN_NUM_SDA); // R46，重点
+  rtc_gpio_isolate(LIS2DH12_PIN_NUM_SCL); // R47
+  rtc_gpio_isolate(LIS2DH12_PIN_NUM_CS);  // R44，可选但建议测试
 
   return ESP_OK;
 
