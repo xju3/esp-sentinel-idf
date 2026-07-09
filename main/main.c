@@ -11,6 +11,7 @@
 #include "bsp_4g.h"   // 引入 4G 相关接口
 #include "bsp_wifi.h" // 引入 WiFi 接口
 #include "config_manager.h"
+#include "driver/rtc_io.h"
 #include "drv_iis3dwb.h"
 #include "esp_sntp.h" // 引入 WiFi 原生对时
 #include "init.h"
@@ -34,6 +35,27 @@ static EventGroupHandle_t s_network_event_group = NULL;
 RTC_DATA_ATTR int g_dense_diag_remaining = 0; // 剩余密集诊断次数
 RTC_DATA_ATTR int g_dense_diag_interval_s =
     300; // 密集诊断的时间间隔 (默认 300秒 = 5分钟)
+
+static void lis2dh12_bus_gpio_isolate_before_sleep(void) {
+  gpio_num_t pins[] = {
+      GPIO_NUM_9,  // R44: CS，可测试是否需要隔离
+      GPIO_NUM_10, // R45
+      GPIO_NUM_11, // R46，重点
+      GPIO_NUM_12  // R47
+  };
+
+  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+    gpio_reset_pin(pins[i]);
+    gpio_set_direction(pins[i], GPIO_MODE_INPUT);
+    gpio_pullup_dis(pins[i]);
+    gpio_pulldown_dis(pins[i]);
+
+    rtc_gpio_pullup_dis(pins[i]);
+    rtc_gpio_pulldown_dis(pins[i]);
+
+    rtc_gpio_isolate(pins[i]);
+  }
+}
 
 // 供外部业务模块(如云端下发任务、或本地算法异常时)调用
 void enable_dense_diagnostic(int times, int interval_seconds) {
@@ -79,15 +101,7 @@ void app_main(void) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
 
-  gpio_hold_dis(GPIO_NUM_4);
-  gpio_hold_dis(GPIO_NUM_5); // MISO
-  gpio_hold_dis(GPIO_NUM_6);
-  gpio_hold_dis(GPIO_NUM_7);
-
-  gpio_hold_dis(GPIO_NUM_9);
-  gpio_hold_dis(GPIO_NUM_10); // MISO
-  gpio_hold_dis(GPIO_NUM_12);
-  gpio_hold_dis(GPIO_NUM_11);
+  lis2dh12_bus_gpio_isolate_before_sleep();
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());
 
