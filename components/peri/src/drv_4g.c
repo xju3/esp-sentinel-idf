@@ -442,7 +442,10 @@ static esp_err_t modem_uart_init(void)
         return ESP_OK;
     }
 
-    (void)uart_driver_delete(UART_PORT_NUM);
+    if (uart_is_driver_installed(UART_PORT_NUM))
+    {
+        (void)uart_driver_delete(UART_PORT_NUM);
+    }
 
     const uart_config_t config = {
         .baud_rate = MODEM_UART_BAUD_RATE,
@@ -926,18 +929,29 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
         result->registered = true;
     }
 
-    if (!modem_attached(response, MODEM_RESP_BUF_SIZE))
+    bool attached = modem_attached(response, MODEM_RESP_BUF_SIZE);
+    int64_t attach_deadline = deadline_after_ms(MODEM_ATTACH_TIMEOUT_MS);
+    while (!attached && esp_timer_get_time() < attach_deadline)
     {
-        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE, MODEM_ATTACH_TIMEOUT_MS);
-        if (err != ESP_OK || !modem_response_is_ok(response))
+        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE, 5000);
+        if (err == ESP_OK && modem_response_is_ok(response))
         {
-            if (result != NULL)
-            {
-                result->timing.network_attach_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
-                result->code = PPP_4G_DIAG_ATTACH_FAILED;
-            }
-            return err != ESP_OK ? err : ESP_FAIL;
+            attached = true;
+            break;
         }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        attached = modem_attached(response, MODEM_RESP_BUF_SIZE);
+    }
+
+    if (!attached)
+    {
+        if (result != NULL)
+        {
+            result->timing.network_attach_ms = (uint32_t)((esp_timer_get_time() - stage_start_us) / 1000LL);
+            result->code = PPP_4G_DIAG_ATTACH_FAILED;
+        }
+        return err != ESP_OK ? err : ESP_FAIL;
     }
     if (result != NULL)
     {
