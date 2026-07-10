@@ -7,32 +7,6 @@ config DEV_MODE
       When enabled, the firmware will keep the web server running even after
       Wi-Fi is configured, and may enable other dev-only features.
 
-config SENTINEL_ENABLE_OFF_SLEEP_GATE
-    bool "Pause periodic monitoring and enter WoM light sleep when patrol RMS is low"
-    default y
-    help
-      When enabled, patrol RMS below the configured threshold for several
-      consecutive patrol windows will pause periodic monitoring, arm LIS2DH12
-      WoM wakeup, and enter light sleep until motion wakes the device.
-
-config SENTINEL_OFF_RMS_THRESHOLD_MM_S
-    int "Patrol RMS threshold for OFF gating (mm/s)"
-    range 0 100
-    default 1
-    depends on SENTINEL_ENABLE_OFF_SLEEP_GATE
-    help
-      If the maximum RMS across X/Y/Z during patrol is below this value, the
-      sample is considered a low-energy OFF candidate.
-
-config SENTINEL_OFF_CONFIRM_COUNT
-    int "Consecutive low-RMS patrol windows required before sleep"
-    range 1 10
-    default 2
-    depends on SENTINEL_ENABLE_OFF_SLEEP_GATE
-    help
-      Number of consecutive patrol RMS windows below threshold required before
-      periodic tasks are paused and the device enters WoM light sleep.
-
 config SENTINEL_BOOT_AP_CONNECT_WINDOW_SEC
     int "Boot AP connect window (seconds)"
     range 1 300
@@ -57,14 +31,6 @@ config SENTINEL_DIRECT_REPORT_PATROL_THRESHOLD_MIN
     help
       When patrol interval is greater than or equal to this value, normal
       patrol RMS reports bypass batch accumulation and flush immediately.
-
-config SENTINEL_SLEEP_PRE_FLUSH_TIMEOUT_SEC
-    int "Timeout for dispatcher flush before OFF sleep (seconds)"
-    range 1 300
-    default 30
-    help
-      Before entering WoM light sleep after low-RMS OFF detection, the device
-      waits up to this many seconds for queued reports to flush successfully.
 
 config SENTINEL_CAP_READY_DELTA_MV
     int "Super-cap ready delta threshold (mV)"

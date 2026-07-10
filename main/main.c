@@ -16,7 +16,6 @@
 #include "drv_4g.h" // 引入 4G 相关接口
 #include "drv_ds18b20.h"
 #include "drv_iis3dwb.h"
-#include "drv_lis2dh12.h"
 #include "esp_sntp.h" // 引入 WiFi 原生对时
 #include "init.h"
 #include "logger.h"
@@ -25,8 +24,6 @@
 #include "task_daq.h"
 
 #include "task_ota.h"
-
-#include "wom_lis2dh12.h" // 引入 WoM 接口
 
 // 声明在 bsp_4g.c 中实现的 4G 对时函数
 extern esp_err_t bsp_4g_sync_time(void);
@@ -78,7 +75,6 @@ static void network_bringup_task(void *pvParameters) {
 static void deisolate_gpio_pins() {
   gpio_deep_sleep_hold_dis();
   deisolate_iis3dwb_pins();
-  deisolate_lis2dh12_pins();
   deisolate_ds18b20_pin();
 }
 
@@ -145,10 +141,6 @@ void app_main(void) {
   // 3. 执行单次 DAQ 调度决策
   // (判断当前时间是否需要采集，若需要则阻塞式采集并推入队列)
   // LOG_INFO("Evaluating DAQ schedule after wakeup...");
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
-    LOG_INFO("Wakeup caused by LIS2DH12 WoM! Forcing immediate patrol.");
-    task_daq_trigger_wom_patrol();
-  }
   daq_scheduler_execute();
 
   // LOG_INFO("Report pipeline finished.");
@@ -200,9 +192,6 @@ void app_main(void) {
   } else {
     LOG_INFO("No periodic tasks enabled. Entering infinite deep sleep...");
   }
-
-  // 在进入深睡之前，挂载并启用 LIS2DH12 的外部中断唤醒
-  wom_lis2dh12_enable_deep_sleep_wakeup();
 
   esp_deep_sleep_start();
 }

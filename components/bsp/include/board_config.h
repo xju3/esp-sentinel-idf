@@ -25,12 +25,8 @@
 #define BOARD_4G_KEEP_POWER_ON_AFTER_TEST  1
 
 
-
-#define BOARD_LIS2DH12_WHO_AM_I_REG        0x0F
-#define BOARD_LIS2DH12_WHO_AM_I_EXPECTED   0x33
 #define BOARD_IIS3DWB_WHO_AM_I_REG         0x0F
 #define BOARD_IIS3DWB_WHO_AM_I_EXPECTED    0x7B
-
 static inline bool board_gpio_supports_adc(gpio_num_t gpio)
 {
     return gpio >= GPIO_NUM_1 && gpio <= GPIO_NUM_20;

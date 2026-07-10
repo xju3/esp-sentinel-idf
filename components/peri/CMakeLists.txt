@@ -1,6 +1,5 @@
 idf_component_register(
     SRCS 
-        "src/drv_lis2dh12.c"
         "src/drv_iis3dwb.c"
         "src/drv_ds18b20.c"
         "src/drv_4g.c"

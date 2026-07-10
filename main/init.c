@@ -3,14 +3,10 @@
 #include "drv_4g.h"
 #include "bsp_wifi.h"
 #include "config_manager.h"
-#include "drv_lis2dh12.h"
 #include "drv_iis3dwb.h"
 #include "drv_ds18b20.h"
 #include "logger.h"
 #include "task_daq.h"
-#include "off_sleep_manager.h"
-#include "wom_lis2dh12.h"
-
 #include "esp_err.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -45,19 +41,12 @@ static esp_err_t reset_sensor_power_rail(void)
 static void init_sensors()
 {
     (void)reset_sensor_power_rail();
-    drv_lis2dh12_init();
     drv_iis3dwb_init();
     drv_ds18b20_init();
 }
 
 static esp_err_t enable_tasks()
 {
-    esp_err_t ret = start_off_sleep_manager();
-    if (ret != ESP_OK)
-    {
-        return ret;
-    }
-
     return ESP_OK;
 }
 
