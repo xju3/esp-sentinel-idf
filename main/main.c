@@ -77,11 +77,11 @@ static void network_bringup_task(void *pvParameters) {
 
 static void deisolate_gpio_pins() {
   gpio_deep_sleep_hold_dis();
-  deisolate_iis3dwb_pins();
+  // deisolate_iis3dwb_pins();
   deisolate_lis2dh12_pins();
   deisolate_ds18b20_pin();
 }
-
+//
 void app_main(void) {
   // 1. 初始化基础外设与配置
   init_nvs();
@@ -160,10 +160,10 @@ void app_main(void) {
   // --- 修复：给后台网络及对时任务留出存活窗口 ---
   if (is_hot_wakeup) {
     // LOG_INFO("Hot wakeup: Waiting for background network and time sync to
-    // complete..."); 最长等待 5
+    // complete..."); 最长等待 90
     // 秒。如果网络和对时提前完成，主线程会立刻被唤醒并放行，不会死等
     xEventGroupWaitBits(s_network_event_group, NETWORK_DONE_BIT, pdFALSE,
-                        pdFALSE, pdMS_TO_TICKS(5000));
+                        pdFALSE, pdMS_TO_TICKS(90000));
   }
 
   // --- 修复3：休眠前必须显式关断外部高功耗模块 ---

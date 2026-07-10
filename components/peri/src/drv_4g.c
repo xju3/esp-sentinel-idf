@@ -933,7 +933,7 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
     int64_t attach_deadline = deadline_after_ms(MODEM_ATTACH_TIMEOUT_MS);
     while (!attached && esp_timer_get_time() < attach_deadline)
     {
-        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE, 5000);
+        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE, MODEM_ATTACH_TIMEOUT_MS);
         if (err == ESP_OK && modem_response_is_ok(response))
         {
             attached = true;
