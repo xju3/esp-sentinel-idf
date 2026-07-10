@@ -1,7 +1,6 @@
 #ifndef DRV_LIS2DH12_H
 #define DRV_LIS2DH12_H
 
-#include "bsp_board.h"
 #include "imu_config.h"
 #include <esp_err.h>
 #include <stdint.h>

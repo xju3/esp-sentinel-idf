@@ -28,8 +28,10 @@ static esp_err_t off_sleep_prepare_capture_path(void) {
                esp_err_to_name(ret));
     return ret;
   }
+  // 拔掉电源后，立即把相关数据线拉低到0V并锁定，防止寄生电流倒灌回芯片
+  isolate_iis3dwb_pins();
 
-  gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
+  ret = gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
   if (ret != ESP_OK) {
     LOG_ERRORF("Failed to disable IIS3DWB power rail before OFF sleep: %s",
                esp_err_to_name(ret));
@@ -52,7 +54,11 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
     goto rollback;
   }
 
+  // 进入轻度睡眠等待唤醒
   ret = wom_lis2dh12_enter_light_sleep_until_wakeup();
+
+  // 唤醒后，第一时间解除 IIS3DWB 引脚锁定，为后续重新上电做准备
+  deisolate_iis3dwb_pins();
 
   if (ret != ESP_OK) {
     LOG_ERRORF("WoM light sleep failed: %s", esp_err_to_name(ret));

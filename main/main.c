@@ -1,5 +1,5 @@
-#include "esp_attr.h"
 #include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -75,6 +75,13 @@ static void network_bringup_task(void *pvParameters) {
   vTaskDelete(NULL);
 }
 
+static void deisolate_gpio_pins() {
+  gpio_deep_sleep_hold_dis();
+  deisolate_iis3dwb_pins();
+  deisolate_lis2dh12_pins();
+  deisolate_ds18b20_pin();
+}
+
 void app_main(void) {
   // 1. 初始化基础外设与配置
   init_nvs();
@@ -84,9 +91,7 @@ void app_main(void) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
 
-  gpio_deep_sleep_hold_dis();
-  deisolate_lis2dh12_pins();
-  deisolate_ds18b20_pin();
+  deisolate_gpio_pins();
 
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());
@@ -168,7 +173,7 @@ void app_main(void) {
   }
   (void)drv_iis3dwb_enter_standby(); // 传感器待机
   gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
-  vTaskDelay(pdMS_TO_TICKS(500));    // 给 4G 模块一点点关机信号处理时间
+  vTaskDelay(pdMS_TO_TICKS(500)); // 给 4G 模块一点点关机信号处理时间
 
   // 7. 计算下一次唤醒时间并进入深度睡眠
   uint64_t sleep_time_us = daq_scheduler_get_sleep_time_us();

@@ -728,3 +728,31 @@ esp_err_t drv_iis3dwb_capture(
     drv_iis3dwb_finish_sensor_session();
     return ESP_OK;
 }
+
+#include "esp_sleep.h"
+
+// 在 IIS3DWB 断电期间，将其相连的所有引脚强制拉低到 0V。
+// 目标：防止向断电的芯片灌电流（Backpowering）。
+// 如果配置为输入或浮空，ESP32 侧输入缓冲器可能因悬空而漏电；
+// 因此直接配置为强推挽输出并输出 0V，这样在 Light Sleep 期间
+// 能利用 gpio_hold_en 完美将这几个脚死死锁在 0V (地电平)。
+esp_err_t isolate_iis3dwb_pins(void) {
+  gpio_num_t pins[] = IIS3DWB_ISOLATE_PINS;
+  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+    gpio_reset_pin(pins[i]);
+    gpio_set_direction(pins[i], GPIO_MODE_OUTPUT);
+    gpio_set_level(pins[i], 0); // 强制输出 0V
+    gpio_hold_en(pins[i]);
+  }
+  return ESP_OK;
+}
+
+// 恢复供电前或后，解除对引脚的电平锁定
+esp_err_t deisolate_iis3dwb_pins(void) {
+  gpio_num_t pins[] = IIS3DWB_ISOLATE_PINS;
+  for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
+    gpio_hold_dis(pins[i]);
+    gpio_reset_pin(pins[i]);
+  }
+  return ESP_OK;
+}

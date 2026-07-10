@@ -1097,7 +1097,7 @@ static esp_err_t shutdown_4g_network_internal(void)
     // 锁定电源使能引脚，使其在进入深度睡眠后依然强制输出断电状态（低电平），
     // 防止悬空导致外部电源开关管(LDO/MOSFET)微导通，彻底消除随机漏电。
     gpio_hold_en(MODEM_PWR_EN_PIN);
-    
+
     // 开启全局深睡 GPIO 保持，确保上面的 hold_en 在 Deep Sleep 期间依然生效
     gpio_deep_sleep_hold_en();
 

@@ -86,22 +86,31 @@ static bool s_lis2dh12_initialized = false;
 static float s_current_odr = 0.0f;
 static lis2dh12_fs_t s_current_fs = LIS2DH12_FS_2G;
 
-// 在ESP32进入深度睡眠前隔离GPIO
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
+
+// 在ESP32进入深度睡眠前，不要完全隔离引脚（会导致浮空）
+// 之前的弱上拉(rtc_gpio_pullup_en)可能不足以抵抗板级漏电或走线噪声，
+// 之前的 gpio_set_level 强推挽虽然理论正确，但 ESP32-S3 的数字 pad 电源域
+// 在深睡时会掉电，导致 digital hold 无法真正输出 3.3V，引脚依然会掉电浮空。
+// 最终方案：必须使用 RTC GPIO 驱动，因为 RTC 电源域在深睡期间是常开的！
+// 将引脚配置为 RTC 强输出高电平，确保深睡时提供真正的极低阻抗 3.3V 锁定。
 esp_err_t isolate_lis2dh12_pins(void) {
   gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    gpio_pullup_dis(pins[i]);
-    gpio_pulldown_dis(pins[i]);
-    rtc_gpio_isolate(pins[i]);
+    rtc_gpio_init(pins[i]);
+    rtc_gpio_set_direction(pins[i], RTC_GPIO_MODE_OUTPUT_ONLY);
+    rtc_gpio_set_level(pins[i], 1);
+    rtc_gpio_hold_en(pins[i]);
   }
   return ESP_OK;
 }
 
-// 在ESP32醒来后解除隔离
+// 在ESP32醒来后解除保持
 esp_err_t deisolate_lis2dh12_pins(void) {
   gpio_num_t pins[] = LIS2DH12_ISOLATE_PINS;
   for (int i = 0; i < sizeof(pins) / sizeof(pins[0]); i++) {
-    gpio_hold_dis(pins[i]);
+    rtc_gpio_hold_dis(pins[i]);
     rtc_gpio_deinit(pins[i]);
   }
   return ESP_OK;

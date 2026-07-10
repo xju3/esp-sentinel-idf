@@ -19,6 +19,11 @@ extern "C" {
 #define IIS3DWB_PIN_NUM_SDA GPIO_NUM_5
 #define IIS3DWB_PIN_NUM_SDO GPIO_NUM_4
 
+// Pins to isolate (drive to 0V) when IIS3DWB is powered off to prevent backpowering
+#define IIS3DWB_ISOLATE_PINS                                                   \
+  {IIS3DWB_PIN_NUM_SCL, IIS3DWB_PIN_NUM_CS, IIS3DWB_PIN_NUM_SDA,               \
+   IIS3DWB_PIN_NUM_SDO, IIS3DWB_PIN_NUM_INT1, IIS3DWB_PIN_NUM_INT2}
+
 // Register addresses (for debug/config)
 #define IIS3DWB_REG_WHO_AM_I 0x0F
 #define IIS3DWB_REG_CTRL1_XL 0x10
@@ -61,6 +66,9 @@ extern iis3dwb_cfg_t iis3dwb_accel_fs_cfg_2;
 esp_err_t drv_iis3dwb_capture(iis3dwb_cfg_t *cfg, uint32_t duration_ms,
                               imu_data_cb_ctx_t handler, void *user_ctx,
                               int16_t chunck_size, uint32_t skip_ms);
+
+esp_err_t isolate_iis3dwb_pins(void);
+esp_err_t deisolate_iis3dwb_pins(void);
 
 #ifdef __cplusplus
 }
