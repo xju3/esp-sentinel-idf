@@ -10,6 +10,17 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # set(EXTRA_COMPONENT_DIRS "" )
 project(sentinel)
 
+# --------------------------------------------------------------------------
+# LIS2DH12 hardware feature gate
+# Pass -DLIS2=1 (default) to enable LIS2DH12 + WoM, or -DLIS2=0 to disable.
+# --------------------------------------------------------------------------
+if(NOT DEFINED LIS2)
+    set(LIS2 1)
+endif()
+# Use idf_build_set_property so the definition propagates to all IDF components
+idf_build_set_property(COMPILE_DEFINITIONS "-DLIS2=${LIS2}" APPEND)
+message(STATUS "LIS2DH12 support: LIS2=${LIS2}")
+
 # 在创建SPIFFS镜像前的预处理
 set(RESOURCES_SYSTEM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources/system")
 

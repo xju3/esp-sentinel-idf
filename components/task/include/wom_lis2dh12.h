@@ -2,6 +2,9 @@
 #define WOM_LIS2DH12_H
 
 #include "esp_err.h"
+
+#if LIS2
+
 #include "drv_lis2dh12.h"
 
 #ifdef __cplusplus
@@ -34,5 +37,16 @@ void wom_lis2dh12_on_wakeup(void);
 #ifdef __cplusplus
 }
 #endif
+
+#else // LIS2 == 0: provide no-op stubs
+
+static inline esp_err_t start_wom_lis2dh12_listener(void)            { return ESP_OK; }
+static inline esp_err_t wom_lis2dh12_enable(void)                    { return ESP_OK; }
+static inline esp_err_t wom_lis2dh12_disable(void)                   { return ESP_OK; }
+static inline esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void) { return ESP_OK; }
+static inline esp_err_t wom_lis2dh12_enable_deep_sleep_wakeup(void)  { return ESP_OK; }
+static inline void      wom_lis2dh12_on_wakeup(void)                 {}
+
+#endif // LIS2
 
 #endif // WOM_LIS2DH12_H

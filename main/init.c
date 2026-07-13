@@ -45,18 +45,22 @@ static esp_err_t reset_sensor_power_rail(void)
 static void init_sensors()
 {
     (void)reset_sensor_power_rail();
+#if LIS2
     drv_lis2dh12_init();
+#endif
     drv_iis3dwb_init();
     drv_ds18b20_init();
 }
 
 static esp_err_t enable_tasks()
 {
+#if LIS2
     esp_err_t ret = start_off_sleep_manager();
     if (ret != ESP_OK)
     {
         return ret;
     }
+#endif
 
     return ESP_OK;
 }

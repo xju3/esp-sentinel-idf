@@ -170,6 +170,10 @@ static esp_err_t iis3dwb_init_spi_resources(void)
         .sclk_io_num = IIS3DWB_PIN_NUM_SCL,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
+        .data4_io_num = -1,
+        .data5_io_num = -1,
+        .data6_io_num = -1,
+        .data7_io_num = -1,
         .max_transfer_sz = 4092,
     };
     esp_err_t ret = spi_bus_initialize(IIS3DWB_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);

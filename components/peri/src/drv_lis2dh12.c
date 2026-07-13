@@ -253,11 +253,15 @@ esp_err_t drv_lis2dh12_init(void) {
   // Use canonical pin macros where possible; prefer ICM defines for
   // MISO/MOSI/CLK
   spi_bus_config_t buscfg = {
-      .miso_io_num = LIS2DH12_PIN_NUM_SDO, // 21
-      .mosi_io_num = LIS2DH12_PIN_NUM_SDA, // 35
-      .sclk_io_num = LIS2DH12_PIN_NUM_SCL, // 36
+      .miso_io_num = LIS2DH12_PIN_NUM_SDO, // 10
+      .mosi_io_num = LIS2DH12_PIN_NUM_SDA, // 11
+      .sclk_io_num = LIS2DH12_PIN_NUM_SCL, // 12
       .quadwp_io_num = -1,
       .quadhd_io_num = -1,
+      .data4_io_num = -1,
+      .data5_io_num = -1,
+      .data6_io_num = -1,
+      .data7_io_num = -1,
       .max_transfer_sz = 4092,
   };
   esp_err_t ret = spi_bus_initialize(SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);

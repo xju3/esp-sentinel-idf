@@ -78,7 +78,9 @@ static void network_bringup_task(void *pvParameters) {
 static void deisolate_gpio_pins() {
   gpio_deep_sleep_hold_dis();
   // deisolate_iis3dwb_pins();
+#if LIS2
   deisolate_lis2dh12_pins();
+#endif
   deisolate_ds18b20_pin();
 }
 //
@@ -145,10 +147,12 @@ void app_main(void) {
   // 3. 执行单次 DAQ 调度决策
   // (判断当前时间是否需要采集，若需要则阻塞式采集并推入队列)
   // LOG_INFO("Evaluating DAQ schedule after wakeup...");
+#if LIS2
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
     LOG_INFO("Wakeup caused by LIS2DH12 WoM! Forcing immediate patrol.");
     task_daq_trigger_wom_patrol();
   }
+#endif
   daq_scheduler_execute();
 
   // LOG_INFO("Report pipeline finished.");
@@ -201,8 +205,10 @@ void app_main(void) {
     LOG_INFO("No periodic tasks enabled. Entering infinite deep sleep...");
   }
 
+#if LIS2
   // 在进入深睡之前，挂载并启用 LIS2DH12 的外部中断唤醒
   wom_lis2dh12_enable_deep_sleep_wakeup();
+#endif
 
   esp_deep_sleep_start();
 }

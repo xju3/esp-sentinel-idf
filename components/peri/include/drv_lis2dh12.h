@@ -1,8 +1,11 @@
 #ifndef DRV_LIS2DH12_H
 #define DRV_LIS2DH12_H
 
-#include "imu_config.h"
 #include <esp_err.h>
+
+#if LIS2
+
+#include "imu_config.h"
 #include <stdint.h>
 
 #include <driver/gpio.h>
@@ -102,5 +105,13 @@ extern SensorDriver_t lis2dh12_driver;
 #ifdef __cplusplus
 }
 #endif
+
+#else // LIS2 == 0: provide no-op stubs so callers compile without changes
+
+static inline esp_err_t drv_lis2dh12_init(void)       { return ESP_OK; }
+static inline esp_err_t isolate_lis2dh12_pins(void)   { return ESP_OK; }
+static inline esp_err_t deisolate_lis2dh12_pins(void) { return ESP_OK; }
+
+#endif // LIS2
 
 #endif // DRV_LIS2DH12_H
