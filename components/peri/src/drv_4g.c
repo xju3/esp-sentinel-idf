@@ -19,8 +19,6 @@
 #include <sys/param.h>
 #include <stdbool.h>
 #include "esp_ota_ops.h"
-#include <time.h>
-#include <sys/time.h>
 #include "logger.h"
 
 #ifndef SN
@@ -62,32 +60,6 @@ static bool s_module_network_ready = false;
 static char s_modem_response[MODEM_RESP_BUF_SIZE];
 static volatile bool s_at_cmd_active = false;
 static SemaphoreHandle_t s_at_mutex = NULL;
-
-static int64_t days_from_civil(int year, int month, int day)
-{
-    year -= month <= 2;
-    const int era = (year >= 0 ? year : year - 399) / 400;
-    const unsigned yoe = (unsigned)(year - era * 400);
-    const unsigned month_adjusted = (unsigned)(month + (month > 2 ? -3 : 9));
-    const unsigned doy = (153 * month_adjusted + 2) / 5 + (unsigned)day - 1;
-    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return (int64_t)era * 146097 + (int64_t)doe - 719468;
-}
-
-static time_t utc_epoch_from_modem_time(
-    int year,
-    int month,
-    int day,
-    int hour,
-    int min,
-    int sec)
-{
-    const int full_year = 2000 + year;
-    const int64_t days = days_from_civil(full_year, month, day);
-    const int64_t utc_seconds =
-        days * 86400 + (int64_t)hour * 3600 + (int64_t)min * 60 + sec;
-    return (time_t)utc_seconds;
-}
 
 static void ensure_at_mutex(void)
 {
@@ -339,102 +311,6 @@ static esp_err_t modem_gpio_init(void)
 static esp_err_t modem_read_response(char *response, size_t response_size, uint32_t timeout_ms);
 static esp_err_t modem_uart_init(void);
 
-// ================= 新增：通过 4G 基站或内部 NTP 获取时间并同步给 ESP32 =================
-esp_err_t bsp_4g_sync_time(void)
-{
-    ensure_at_mutex();
-    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
-
-    char response[MODEM_RESP_BUF_SIZE];
-    esp_err_t err = ESP_FAIL;
-    s_at_cmd_active = true;
-
-    err = modem_gpio_init();
-    if (err != ESP_OK)
-    {
-        LOG_ERRORF("4G GPIO init failed before time sync: %s", esp_err_to_name(err));
-        goto cleanup;
-    }
-
-    err = modem_uart_init();
-    if (err != ESP_OK)
-    {
-        LOG_ERRORF("4G UART init failed before time sync: %s", esp_err_to_name(err));
-        goto cleanup;
-    }
-
-    // 发送 AT+CCLK? 查询模块当前时间 (格式: +CCLK: "24/06/15,12:30:45+32")
-    uart_flush_input(UART_PORT_NUM);
-    uart_write_bytes(UART_PORT_NUM, "AT+CCLK?\r\n", 10);
-    err = modem_read_response(response, sizeof(response), 2000);
-
-    if (err == ESP_OK)
-    {
-        int year, month, day, hour, min, sec;
-        int tz_quarters = 0;
-        char *line = strstr(response, "+CCLK: \"");
-        int parsed = 0;
-        if (line)
-        {
-            parsed = sscanf(
-                line,
-                "+CCLK: \"%d/%d/%d,%d:%d:%d%d",
-                &year,
-                &month,
-                &day,
-                &hour,
-                &min,
-                &sec,
-                &tz_quarters);
-        }
-
-        if (parsed >= 6)
-        {
-            if (year >= 24 && month >= 1 && month <= 12 && day >= 1 && day <= 31 &&
-                hour >= 0 && hour <= 23 && min >= 0 && min <= 59 && sec >= 0 && sec <= 60)
-            { // 确保时间大于 2024 年，排除模块自身的默认初始时间 1980/2004 等
-                time_t t = utc_epoch_from_modem_time(
-                    year,
-                    month,
-                    day,
-                    hour,
-                    min,
-                    sec);
-
-                struct timeval tv = {.tv_sec = t, .tv_usec = 0};
-                settimeofday(&tv, NULL); // 强制修改 ESP32 的硬件 RTC 系统时间
-
-                LOG_DEBUGF(
-                    "Time synced from 4G Base Station: 20%02d-%02d-%02d %02d:%02d:%02d tz_quarters=%d",
-                    year,
-                    month,
-                    day,
-                    hour,
-                    min,
-                    sec,
-                    parsed >= 7 ? tz_quarters : 0);
-                err = ESP_OK;
-            }
-            else
-            {
-                LOG_WARNF(
-                    "4G time not updated yet or invalid (20%02d-%02d-%02d %02d:%02d:%02d). Retry needed.",
-                    year,
-                    month,
-                    day,
-                    hour,
-                    min,
-                    sec);
-                err = ESP_FAIL;
-            }
-        }
-    }
-
-cleanup:
-    s_at_cmd_active = false;
-    xSemaphoreGive(s_at_mutex);
-    return err;
-}
 static esp_err_t modem_uart_init(void)
 {
     if (s_uart_driver_installed)

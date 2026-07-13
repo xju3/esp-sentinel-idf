@@ -8,7 +8,6 @@
 #include "esp_timer.h"
 #include "http_proxy.h"
 #include "logger.h"
-#include "report_upload_cache.h"
 #include "sdkconfig.h"
 #include "server_report_task_scheduler.h"
 #include "task_http_message.h"
@@ -24,8 +23,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
-#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -129,19 +126,6 @@ static double round_to_decimals(double value, int decimals)
 static cJSON *add_number_rounded(cJSON *object, const char *key, double value, int decimals)
 {
     return cJSON_AddNumberToObject(object, key, round_to_decimals(value, decimals));
-}
-
-static uint64_t current_epoch_ms_or_zero(void)
-{
-    time_t now = 0;
-    time(&now);
-    if (now < 1600000000) {
-        return 0;
-    }
-
-    struct timeval tv = {0};
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
 }
 
 static float lsb_to_g_for_range(uint16_t range_g)
@@ -612,8 +596,7 @@ static esp_err_t add_axis_features(cJSON *root)
     return ESP_OK;
 }
 
-static char *build_report_json(uint64_t ts_ms,
-                               float temperature_c,
+static char *build_report_json(float temperature_c,
                                bool temperature_valid,
                                uint16_t final_range_g,
                                const capture_attempt_t *attempts,
@@ -629,7 +612,6 @@ static char *build_report_json(uint64_t ts_ms,
 
     cJSON_AddNumberToObject(root, "schema_version", REPORT_SCHEMA_VERSION);
     cJSON_AddStringToObject(root, "sn", REPORT_SN);
-    add_number_rounded(root, "ts_ms", (double)ts_ms, 0);
     if (temperature_valid) {
         add_number_rounded(root, "temperature_c", temperature_c, 1);
     } else {
@@ -777,21 +759,8 @@ static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
     };
     esp_err_t err = send_report_json_once(json, &upload_ctx);
     if (err != ESP_OK) {
-        esp_err_t save_err = report_upload_cache_save_failed(json);
-        if (save_err != ESP_OK) {
-            LOG_ERRORF("Report JSON upload failed and local save failed: upload=%s save=%s",
-                       esp_err_to_name(err),
-                       esp_err_to_name(save_err));
-        }
+        LOG_WARNF("Discarding report JSON after upload failure: %s", esp_err_to_name(err));
         return err;
-    }
-
-    report_upload_ctx_t retry_ctx = {
-        .accept_server_tasks = false,
-    };
-    esp_err_t retry_err = report_upload_cache_flush(send_report_json_once, &retry_ctx);
-    if (retry_err != ESP_OK) {
-        LOG_WARNF("Some cached report JSON files were not uploaded: %s", esp_err_to_name(retry_err));
     }
     return ESP_OK;
 }
@@ -808,7 +777,6 @@ esp_err_t report_pipeline_run(const char *task_id)
         return err;
     }
 
-    const uint64_t ts_ms = current_epoch_ms_or_zero();
     float temperature_c = 0.0f;
     const bool temperature_valid = (g_ds18b20_initialized &&
                                     drv_ds18b20_read_temperature(&temperature_c) == ESP_OK);
@@ -835,8 +803,7 @@ esp_err_t report_pipeline_run(const char *task_id)
     // 获取从本次唤醒起，到目前生成报告为止的精准工作耗时（毫秒）
     uint32_t duration_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
 
-    char *json = build_report_json(ts_ms,
-                                   temperature_c,
+    char *json = build_report_json(temperature_c,
                                    temperature_valid,
                                    final_range_g,
                                    attempts,

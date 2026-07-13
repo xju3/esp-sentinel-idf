@@ -1,7 +1,6 @@
 {
   "schema_version": 2,
   "sn": "STL26BW001",
-  "ts_ms": 1710000000000,
   "temperature_c": 23.8,
   "fs_hz": 26667,
   "requested_range_g": 2,

@@ -1,7 +1,6 @@
 set(TASK_SRCS
     "src/task_daq.c"
     "src/report_pipeline.c"
-    "src/report_upload_cache.c"
     "src/server_report_task_scheduler.c"
     "src/task_http_message.c"
     "src/task_ota.c"
@@ -18,7 +17,7 @@ idf_component_register(
     INCLUDE_DIRS 
         "include" 
     REQUIRES 
-        esp-dsp driver esp_driver_gpio bsp peri net util algo msg json esp_http_client esp_timer)
+        esp-dsp driver esp_driver_gpio bsp peri net util algo msg json esp_http_client esp_timer esp_hw_support)
 
 
 if(DEFINED SN)

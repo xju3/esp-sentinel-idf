@@ -8,7 +8,6 @@
 #include "driver/temperature_sensor.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_http_client.h"
-#include <time.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -23,7 +22,6 @@ void task_status_report_execute(const char *task_id)
     float temperature = 0.0f;
     int rssi = -99;
     float voltage = 0.0f;
-    uint64_t ts = (uint64_t)time(NULL);
 
     // 1. Get MCU Temperature
     temperature_sensor_handle_t temp_sensor = NULL;
@@ -64,7 +62,6 @@ void task_status_report_execute(const char *task_id)
     cJSON_AddNumberToObject(root, "voltage", voltage);
     cJSON_AddStringToObject(root, "sn", REPORT_SN);
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
-    cJSON_AddNumberToObject(root, "ts", (double)ts);
 
     char *json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
