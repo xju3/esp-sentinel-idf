@@ -2,7 +2,6 @@
 #include "bsp_board.h"
 #include "driver/gpio.h"
 
-#include "config_manager.h"
 #include "drv_4g.h"
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
@@ -45,9 +44,7 @@ static esp_err_t off_sleep_manager_enter_wom_sleep(void) {
 
   esp_err_t ret = ESP_OK;
 
-  if (g_user_config.network == 1) {
-    (void)shutdown_4g_network();
-  }
+  (void)shutdown_4g_network();
 
   ret = off_sleep_prepare_capture_path();
   if (ret != ESP_OK) {

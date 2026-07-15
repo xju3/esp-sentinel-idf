@@ -11,11 +11,8 @@
 #include "sdkconfig.h"
 #include "server_report_task_scheduler.h"
 #include "task_http_message.h"
-#include "drv_4g.h"
 
 #include "cJSON.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -48,6 +45,7 @@
 #define REPORT_FFT_PEAK_MIN_HZ 0.0f
 #define REPORT_FFT_PEAK_MAX_HZ 5000.0f
 #define REPORT_BAND_COUNT 5
+#define REPORT_CAPTURE_ATTEMPTS 4
 
 static float *s_vib_buffer;
 static float *s_fft_scratch;
@@ -113,6 +111,11 @@ static const struct {
 typedef struct {
     bool accept_server_tasks;
 } report_upload_ctx_t;
+
+struct report_payload {
+    bool accept_server_tasks;
+    char *json;
+};
 
 static double round_to_decimals(double value, int decimals)
 {
@@ -646,21 +649,33 @@ static char *build_report_json(float temperature_c,
     return json;
 }
 
-static void log_report_json(const char *json)
+static esp_err_t update_report_duration(char **json)
 {
-    return;
-    // if (!json) {
-    //     return;
-    // }
+    if (!json || !*json) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    // const size_t len = strlen(json);
-    // LOG_INFOF("Report JSON begin, len=%u", (unsigned)len);
-    // for (size_t i = 0; i < len; i += 256U) {
-    //     const size_t remaining = len - i;
-    //     const size_t chunk = remaining > 256U ? 256U : remaining;
-    //     LOG_INFOF("%.*s", (int)chunk, json + i);
-    // }
-    // LOG_INFO("Report JSON end");
+    cJSON *root = cJSON_Parse(*json);
+    if (!root) {
+        return ESP_FAIL;
+    }
+
+    cJSON *duration = cJSON_GetObjectItemCaseSensitive(root, "duration_ms");
+    if (!cJSON_IsNumber(duration)) {
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    cJSON_SetNumberValue(duration, (double)(esp_timer_get_time() / 1000ULL));
+    char *updated = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!updated) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    free(*json);
+    *json = updated;
+    return ESP_OK;
 }
 
 static void handle_upload_response_tasks(const cJSON *data, bool accept_server_tasks)
@@ -765,8 +780,14 @@ static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
     return ESP_OK;
 }
 
-esp_err_t report_pipeline_run(const char *task_id)
+esp_err_t report_pipeline_capture(const char *task_id,
+                                  report_payload_t **out_payload)
 {
+    if (!out_payload) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_payload = NULL;
+
     esp_err_t err = apply_report_configuration();
     if (err != ESP_OK) {
         return err;
@@ -778,15 +799,16 @@ esp_err_t report_pipeline_run(const char *task_id)
     }
 
     float temperature_c = 0.0f;
-    const bool temperature_valid = (g_ds18b20_initialized &&
-                                    drv_ds18b20_read_temperature(&temperature_c) == ESP_OK);
-
-    capture_attempt_t attempts[4] = {0};
+    const bool temperature_valid =
+        g_ds18b20_initialized &&
+        drv_ds18b20_read_temperature(&temperature_c) == ESP_OK;
+    capture_attempt_t attempts[REPORT_CAPTURE_ATTEMPTS] = {0};
     size_t attempt_count = 0;
     uint16_t final_range_g = s_active_range_g;
     bool accepted = false;
+
     err = capture_with_auto_range(attempts,
-                                  sizeof(attempts) / sizeof(attempts[0]),
+                                  REPORT_CAPTURE_ATTEMPTS,
                                   &attempt_count,
                                   &final_range_g,
                                   &accepted);
@@ -794,30 +816,52 @@ esp_err_t report_pipeline_run(const char *task_id)
         return err;
     }
 
-    // 提前阻塞等待网络就绪，以便把后台真实的 4G 驻网耗时也计算进 duration_ms 中
-    // 这样如果 4G 信号极差导致连网卡了数十秒，服务器也能通过解析 JSON 准确感知
-    if (g_user_config.network == 1) {
-        init_4g_network(NULL);
-    }
-
-    // 获取从本次唤醒起，到目前生成报告为止的精准工作耗时（毫秒）
-    uint32_t duration_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-
-    char *json = build_report_json(temperature_c,
-                                   temperature_valid,
-                                   final_range_g,
-                                   attempts,
-                                   attempt_count,
-                                   accepted,
-                                   task_id,
-                                   duration_ms);
-    if (!json) {
+    report_payload_t *payload = calloc(1, sizeof(*payload));
+    if (!payload) {
         return ESP_ERR_NO_MEM;
     }
 
-    log_report_json(json);
-    err = post_report_json(json, task_id == NULL || task_id[0] == '\0');
+    const uint32_t duration_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    payload->json = build_report_json(temperature_c,
+                                      temperature_valid,
+                                      final_range_g,
+                                      attempts,
+                                      attempt_count,
+                                      accepted,
+                                      task_id,
+                                      duration_ms);
+    if (!payload->json) {
+        report_pipeline_discard(payload);
+        return ESP_ERR_NO_MEM;
+    }
 
-    free(json);
+    payload->accept_server_tasks = task_id == NULL || task_id[0] == '\0';
+    *out_payload = payload;
+    return ESP_OK;
+}
+
+esp_err_t report_pipeline_upload(report_payload_t *payload)
+{
+    if (!payload || !payload->json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = update_report_duration(&payload->json);
+    if (err != ESP_OK) {
+        report_pipeline_discard(payload);
+        return err;
+    }
+
+    err = post_report_json(payload->json, payload->accept_server_tasks);
+    report_pipeline_discard(payload);
     return err;
+}
+
+void report_pipeline_discard(report_payload_t *payload)
+{
+    if (!payload) {
+        return;
+    }
+    free(payload->json);
+    free(payload);
 }

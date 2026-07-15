@@ -10,8 +10,13 @@ extern "C"
 {
 #endif
 
-/** @brief 执行基于RTC时间单次任务调度决策与采集 */
-esp_err_t daq_scheduler_execute(void);
+typedef esp_err_t (*daq_before_upload_fn)(void *ctx);
+
+/** @brief Evaluate the RTC schedule without starting capture or networking. */
+esp_err_t daq_scheduler_prepare(bool *out_has_report_work);
+
+/** @brief Execute prepared reports and call prepare_upload after capture. */
+esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload, void *ctx);
 
 /** @brief 获取距离下一次任务唤醒所需的时间差 (微秒) */
 uint64_t daq_scheduler_get_sleep_time_us(void);

@@ -11,6 +11,8 @@
 #include "esp_err.h"
 #include "esp_rtc_time.h"
 
+#include <stddef.h>
+
 // 容许提前唤醒的宽容度 (防止硬件定时器一点点抖动导致错过判断)
 #define WAKEUP_TOLERANCE_US 2000000LL
 #define IMMEDIATE_WAKEUP_US 1000000LL
@@ -19,7 +21,7 @@
 RTC_DATA_ATTR static int64_t s_patrol_left_us = 0;
 RTC_DATA_ATTR static uint64_t s_last_sleep_rtc_us = 0;
 
-// 本次唤醒周期的RTC起点；每次启动都会由 daq_scheduler_execute() 设置。
+// 本次唤醒周期的RTC起点；每次启动都会由 daq_scheduler_prepare() 设置。
 static uint64_t s_cycle_start_rtc_us = 0;
 
 // 本次运行中，哪些任务被触发执行了
@@ -27,11 +29,15 @@ static bool s_ran_patrol = false;
 static bool s_is_wom_wakeup = false;
 
 /**
- * @brief 从深度睡眠唤醒后调用的 DAQ 评估与执行入口
+ * @brief 从深度睡眠唤醒后调用的 DAQ 评估入口
  * 此函数不依赖网络或绝对时间，只使用设备RTC相对计时
  */
-esp_err_t daq_scheduler_execute(void)
+esp_err_t daq_scheduler_prepare(bool *out_has_report_work)
 {
+    if (!out_has_report_work) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     s_ran_patrol = false;
 
     const uint64_t rtc_now_us = esp_rtc_get_time_us();
@@ -61,42 +67,79 @@ esp_err_t daq_scheduler_execute(void)
         s_ran_patrol = true;
     }
 
-    esp_err_t err = ESP_OK;
+    *out_has_report_work =
+        s_is_wom_wakeup || s_ran_patrol || server_report_task_is_due();
+    if (!*out_has_report_work) {
+        LOG_INFO("Woke up but no report task scheduled to run right now.");
+    }
+    return ESP_OK;
+}
 
-    bool task_executed = false;
+esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload, void *ctx)
+{
+    if (!prepare_upload) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    typedef struct {
+        report_payload_t *payload;
+        bool server_task;
+        char task_id[64];
+    } pending_report_t;
+
+    pending_report_t reports[2] = {0};
+    size_t report_count = 0;
+    esp_err_t err = ESP_OK;
 
     if (s_is_wom_wakeup) {
         LOG_INFO("Executing WoM wakeup report pipeline...");
-        err = report_pipeline_run("0");
+        err = report_pipeline_capture("0", &reports[report_count].payload);
         s_is_wom_wakeup = false;
-        task_executed = true;
+        if (err != ESP_OK) goto cleanup;
+        ++report_count;
     }
 
     if (s_ran_patrol) {
         server_report_task_clear("normal report due");
         LOG_INFO("Executing unified normal report pipeline...");
-        err = report_pipeline_run(NULL);
-        task_executed = true;
-    }
-
-    // Execute any server tasks that are due (either from previous deep sleep schedule, 
-    // or newly received from the HTTP response of the report_pipeline_run above).
-    while (server_report_task_is_due()) {
-        char task_id[64] = {0};
-        if (server_report_task_copy_due_id(task_id, sizeof(task_id))) {
-            LOG_INFOF("Executing scheduled server report task: id=%s", task_id);
-            err = report_pipeline_run(task_id);
-            server_report_task_mark_attempted(task_id);
-            task_executed = true;
-        } else {
-            break;
+        err = report_pipeline_capture(NULL, &reports[report_count].payload);
+        if (err != ESP_OK) goto cleanup;
+        ++report_count;
+    } else if (server_report_task_is_due()) {
+        pending_report_t *report = &reports[report_count];
+        if (server_report_task_copy_due_id(report->task_id,
+                                           sizeof(report->task_id))) {
+            LOG_INFOF("Executing scheduled server report task: id=%s",
+                      report->task_id);
+            err = report_pipeline_capture(report->task_id, &report->payload);
+            if (err != ESP_OK) goto cleanup;
+            report->server_task = true;
+            ++report_count;
         }
     }
 
-    if (!task_executed) {
+    if (report_count == 0) {
         LOG_INFO("Woke up but no report task scheduled to run right now.");
+        return ESP_OK;
     }
 
+    // Every report is fully sampled and calculated before the modem is started.
+    err = prepare_upload(ctx);
+    if (err != ESP_OK) goto cleanup;
+
+    for (size_t i = 0; i < report_count; ++i) {
+        err = report_pipeline_upload(reports[i].payload);
+        reports[i].payload = NULL;
+        if (reports[i].server_task) {
+            server_report_task_mark_attempted(reports[i].task_id);
+        }
+        if (err != ESP_OK) goto cleanup;
+    }
+
+cleanup:
+    for (size_t i = 0; i < report_count; ++i) {
+        report_pipeline_discard(reports[i].payload);
+    }
     return err;
 }
 

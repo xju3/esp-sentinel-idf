@@ -2,13 +2,11 @@
 #include "esp_attr.h"
 #include "esp_sleep.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/event_groups.h"
 #include "freertos/task.h"
 
 #include "sdkconfig.h"
 
 #include "bsp_board.h"
-#include "bsp_wifi.h" // 引入 WiFi 接口
 #include "config_manager.h"
 
 #include "drv_4g.h" // 引入 4G 相关接口
@@ -25,10 +23,6 @@
 
 #include "wom_lis2dh12.h" // 引入 WoM 接口
 
-// 定义事件组，用于主线程与后台网络任务的同步
-static EventGroupHandle_t s_network_event_group = NULL;
-#define NETWORK_DONE_BIT BIT0
-
 // === 密集诊断模式状态 (存储在 RTC 内存，深睡掉电不丢失) ===
 RTC_DATA_ATTR int g_dense_diag_remaining = 0; // 剩余密集诊断次数
 RTC_DATA_ATTR int g_dense_diag_interval_s =
@@ -40,20 +34,9 @@ void enable_dense_diagnostic(int times, int interval_seconds) {
   g_dense_diag_interval_s = interval_seconds;
 }
 
-static void network_bringup_task(void *pvParameters) {
-  if (g_user_config.network == 1) {
-    // LOG_INFO("Background: Connecting to 4G Network...");
-    init_4g_network(NULL);
-  } else {
-    // LOG_INFO("Background: Connecting to WiFi Network...");
-    wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, NULL);
-  }
-
-  // 通知主线程：网络准备流程已经结束
-  if (s_network_event_group != NULL) {
-    xEventGroupSetBits(s_network_event_group, NETWORK_DONE_BIT);
-  }
-  vTaskDelete(NULL);
+static esp_err_t prepare_4g_network(void *ctx) {
+  (void)ctx;
+  return init_4g_network(NULL);
 }
 
 static void deisolate_gpio_pins() {
@@ -79,53 +62,43 @@ void app_main(void) {
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());
 
-  // Cold/hot startup is a reset-source property, not a wall-clock property.
-  // Wall-clock time is intentionally not synchronized or used by scheduling.
-  const esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
-  const bool is_hot_wakeup = (wakeup_cause != ESP_SLEEP_WAKEUP_UNDEFINED);
-
-  s_network_event_group = xEventGroupCreate();
-
-  if (is_hot_wakeup) {
-    // 深睡唤醒：后台连网，主线程直接执行基于相对时间的 DAQ 调度。
-    xTaskCreate(network_bringup_task, "net_bringup", 4096, NULL, 5, NULL);
-  } else {
-    // 冷启动：只等待网络准备，不获取4G基站时间或NTP时间。
-    if (g_user_config.network == 1) {
-      init_4g_network(NULL);
-    } else {
-      wifi_init_sta(g_user_config.wifi.ssid, g_user_config.wifi.pass, NULL);
-    }
-  }
-
-  // 3. 执行单次 DAQ 调度决策
-  // (判断当前时间是否需要采集，若需要则阻塞式采集并推入队列)
-  // LOG_INFO("Evaluating DAQ schedule after wakeup...");
+  // 3. 统一评估本次启动需要完成的工作，不按启动来源拆分业务流程。
 #if LIS2
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
     LOG_INFO("Wakeup caused by LIS2DH12 WoM! Forcing immediate patrol.");
     task_daq_trigger_wom_patrol();
   }
 #endif
-  daq_scheduler_execute();
 
-  // LOG_INFO("Report pipeline finished.");
+  bool has_report_work = false;
+  esp_err_t err = daq_scheduler_prepare(&has_report_work);
+  if (err != ESP_OK) {
+    LOG_WARNF("DAQ schedule evaluation failed: %s", esp_err_to_name(err));
+    goto sleep_prepare;
+  }
 
-  // 5. 拉取并处理云端下发的同步任务 (OTA / 配置更新)
-  // LOG_INFO("Checking for pending cloud tasks (OTA/Config)...");
+  const bool ota_status_pending = task_ota_status_pending();
+  if (!has_report_work && !ota_status_pending) {
+    goto sleep_prepare;
+  }
+
+  // 4. 先完成采集与计算，再启动4G，避免驻网期间的射频和电源纹波污染采样。
+  if (has_report_work) {
+    err = daq_scheduler_execute(prepare_4g_network, NULL);
+  } else {
+    err = prepare_4g_network(NULL);
+  }
+  if (err != ESP_OK) {
+    LOG_WARNF("Capture or 4G preparation failed: %s", esp_err_to_name(err));
+    goto sleep_prepare;
+  }
+
+  // 5. 网络确认可用后，补报OTA重启结果。服务器任务由报告响应处理。
   check_and_report_ota_status();
 
-  // 给后台网络任务留出完成窗口。
-  if (is_hot_wakeup) {
-    xEventGroupWaitBits(s_network_event_group, NETWORK_DONE_BIT, pdFALSE,
-                        pdFALSE, pdMS_TO_TICKS(90000));
-  }
-
-  // --- 修复3：休眠前必须显式关断外部高功耗模块 ---
-  // LOG_INFO("Shutting down peripherals before deep sleep...");
-  if (g_user_config.network == 1) {
-    (void)shutdown_4g_network(); // 通知 4G 模块 AT+QPOWD=1 关机并释放串口
-  }
+sleep_prepare:
+  // 6. 统一释放本轮外部资源。
+  (void)shutdown_4g_network(); // 通知4G模块关机并释放串口
   (void)drv_iis3dwb_enter_standby(); // 传感器待机
   gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
   vTaskDelay(pdMS_TO_TICKS(500)); // 给 4G 模块一点点关机信号处理时间

@@ -8,7 +8,6 @@ set(EXTRA_COMPONENT_DIRS "components")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # 告诉构建系统：除了 components/ 下的直接子目录，还要搜索 components/group1/ 下的子目录作为组件
 # set(EXTRA_COMPONENT_DIRS "" )
-project(sentinel)
 
 # --------------------------------------------------------------------------
 # LIS2DH12 hardware feature gate
@@ -17,6 +16,11 @@ project(sentinel)
 if(NOT DEFINED LIS2)
     set(LIS2 1)
 endif()
+
+# Component source lists are evaluated by project(), so the feature value must
+# be defined before project() runs.
+project(sentinel)
+
 # Use idf_build_set_property so the definition propagates to all IDF components
 idf_build_set_property(COMPILE_DEFINITIONS "-DLIS2=${LIS2}" APPEND)
 message(STATUS "LIS2DH12 support: LIS2=${LIS2}")

@@ -973,6 +973,14 @@ esp_err_t init_4g_network(cb_communication_channel_established cb)
 
 static esp_err_t shutdown_4g_network_internal(void)
 {
+    // The no-work wakeup path may reach shutdown without ever initializing the
+    // modem. Configure the power pin before forcing and holding the off level.
+    esp_err_t gpio_err = modem_gpio_init();
+    if (gpio_err != ESP_OK)
+    {
+        LOG_WARNF("4G GPIO preparation before shutdown failed: %s", esp_err_to_name(gpio_err));
+    }
+
     (void)modem_shutdown_gracefully(s_at_ready);
     (void)modem_power_disable();
     modem_uart_deinit();
@@ -993,7 +1001,7 @@ static esp_err_t shutdown_4g_network_internal(void)
 
     s_at_ready = false;
     s_module_network_ready = false;
-    return ESP_OK;
+    return gpio_err;
 }
 
 esp_err_t shutdown_4g_network(void)

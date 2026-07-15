@@ -5,7 +5,6 @@
 #include "drv_4g.h"
 #include "task_ota.h"
 #include "http_proxy.h"
-#include "report_pipeline.h"
 #include "server_report_task_scheduler.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -110,10 +109,7 @@ http_pending_tasks_result_t http_message_process_task_array(const cJSON *task_ar
             else if (!transport_shutdown)
             {
                 LOG_INFOF("Action %d does not require 4G. Shutting down 4G before local task execution.", action);
-                if (g_user_config.network == 1)
-                {
-                    (void)shutdown_4g_network();
-                }
+                (void)shutdown_4g_network();
                 transport_shutdown = true;
             }
 

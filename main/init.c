@@ -1,7 +1,6 @@
 #include "init.h"
 #include "bsp_board.h"
 #include "drv_4g.h"
-#include "bsp_wifi.h"
 #include "config_manager.h"
 #include "drv_lis2dh12.h"
 #include "drv_iis3dwb.h"
