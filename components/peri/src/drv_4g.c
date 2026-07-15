@@ -50,7 +50,13 @@
 #define MODEM_SHUTDOWN_TIMEOUT_MS 65000
 #define MODEM_REG_POLL_MS 200
 #define MODEM_SYNC_AT_CMD "AT"
-#define MODEM_HTTP_POST_CONNECT_TIMEOUT_MS 125000
+#define MODEM_HTTP_POST_INPUT_TIMEOUT_S 80U
+#define MODEM_HTTP_POST_RESPONSE_TIMEOUT_S 80U
+#define MODEM_HTTP_POST_UART_MARGIN_MS 5000U
+#define MODEM_HTTP_POST_CONNECT_TIMEOUT_MS                                  \
+    (MODEM_HTTP_POST_INPUT_TIMEOUT_S * 1000U + MODEM_HTTP_POST_UART_MARGIN_MS)
+#define MODEM_HTTP_POST_RESULT_TIMEOUT_MS                                   \
+    (MODEM_HTTP_POST_RESPONSE_TIMEOUT_S * 1000U + MODEM_HTTP_POST_UART_MARGIN_MS)
 #define MODEM_HTTP_RESP_BUF_SIZE 4096
 
 // UART & AT state
@@ -1488,7 +1494,9 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
     }
 
     int total_len = req_len + payload_len;
-    snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=%d,80,80\r\n", total_len);
+    snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=%d,%u,%u\r\n", total_len,
+             (unsigned)MODEM_HTTP_POST_INPUT_TIMEOUT_S,
+             (unsigned)MODEM_HTTP_POST_RESPONSE_TIMEOUT_S);
     uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
     (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(1000));
 
@@ -1498,7 +1506,9 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
         uart_write_bytes(UART_PORT_NUM, payload, payload_len);
         (void)uart_wait_tx_done(UART_PORT_NUM, pdMS_TO_TICKS(5000));
 
-        err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE, "+QHTTPPOST:", 15000);
+        err = modem_read_until_pattern(response, MODEM_RESP_BUF_SIZE,
+                                       "+QHTTPPOST:",
+                                       MODEM_HTTP_POST_RESULT_TIMEOUT_MS);
         if (err == ESP_OK)
         {
             int64_t qdeadline = esp_timer_get_time() + 1000000;

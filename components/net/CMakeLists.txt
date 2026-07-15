@@ -6,7 +6,3 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES esp_http_server esp_netif esp_wifi lwip spiffs net util bsp peri
 )
-
-if(DEFINED SN)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE SN=${SN})
-endif()

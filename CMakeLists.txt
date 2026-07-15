@@ -83,5 +83,36 @@ endif()
 # 将 SPIFFS_TEMP_DIR 打包进 10MB 的 system 分区
 spiffs_create_partition_image(system ${SPIFFS_TEMP_DIR} FLASH_IN_PROJECT)
 
-# 将 resources/user 目录打包进 64KB 的 user 分区 (初始的用户配置文件)
-spiffs_create_partition_image(user resources/user FLASH_IN_PROJECT)
+# SN只用于生成设备专属的user.bin，绝不作为应用固件的编译宏。
+if(NOT DEFINED SN OR SN STREQUAL "")
+    message(FATAL_ERROR "SN is required to generate user.bin (example: -DSN=26SH00101)")
+endif()
+string(LENGTH "${SN}" SN_LENGTH)
+if(SN_LENGTH GREATER 63 OR NOT SN MATCHES "^[A-Za-z0-9_-]+$")
+    message(FATAL_ERROR "Invalid sensor SN: ${SN}")
+endif()
+
+if(NOT DEFINED VERSION OR VERSION STREQUAL "")
+    message(FATAL_ERROR "VERSION is required to generate user.bin (example: -DVERSION=1.0.0)")
+endif()
+string(LENGTH "${VERSION}" VERSION_LENGTH)
+if(VERSION_LENGTH GREATER 63 OR NOT VERSION MATCHES "^[A-Za-z0-9._-]+$")
+    message(FATAL_ERROR "Invalid device profile version: ${VERSION}")
+endif()
+
+string(TIMESTAMP DEVICE_PROFILE_GENERATED_AT "%Y-%m-%dT%H:%M:%SZ" UTC)
+
+set(USER_SPIFFS_DIR "${CMAKE_CURRENT_BINARY_DIR}/user_spiffs")
+file(REMOVE_RECURSE "${USER_SPIFFS_DIR}")
+file(MAKE_DIRECTORY "${USER_SPIFFS_DIR}")
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/resources/user/"
+     DESTINATION "${USER_SPIFFS_DIR}")
+file(WRITE "${USER_SPIFFS_DIR}/device_profile.json"
+     "{\n"
+     "  \"sn\": \"${SN}\",\n"
+     "  \"version\": \"${VERSION}\",\n"
+     "  \"generated_at\": \"${DEVICE_PROFILE_GENERATED_AT}\"\n"
+     "}\n")
+
+message(STATUS "Generating user.bin device profile: SN=${SN}, VERSION=${VERSION}, generated_at=${DEVICE_PROFILE_GENERATED_AT}")
+spiffs_create_partition_image(user ${USER_SPIFFS_DIR} FLASH_IN_PROJECT)

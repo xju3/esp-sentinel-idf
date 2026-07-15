@@ -19,14 +19,4 @@ idf_component_register(
         "include" 
     REQUIRES 
         esp-dsp driver esp_driver_gpio bsp peri net util algo msg json esp_timer esp_hw_support)
-
-
-if(DEFINED SN)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE REPORT_SN="${SN}")
-endif()
-
-
-
-
-
 # target_sources(${COMPONENT_LIB} PRIVATE)

@@ -3,17 +3,18 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 <sn_prefix> <start_sn> <count> <lis2>"
+    echo "Usage: $0 <sn_prefix> <start_sn> <count> <lis2> <version>"
     echo "  sn_prefix: alphanumeric sensor serial number prefix"
     echo "  start_sn:  first numeric sensor serial number suffix"
     echo "  count:     number of consecutive sensor firmwares to build"
     echo "  lis2:      1 when LIS2DH12 is fitted, otherwise 0"
+    echo "  version:   device profile version (letters, digits, dot, underscore, hyphen)"
     echo "Example:"
-    echo "  $0 26SH00 101 9 0    # builds 26SH00101 through 26SH00109"
-    echo "  $0 26SH00 201 5 1    # builds 26SH00201 through 26SH00205"
+    echo "  $0 26SH00 101 9 0 1.0.0    # builds 26SH00101 through 26SH00109"
+    echo "  $0 26SH00 201 5 1 1.0.0    # builds 26SH00201 through 26SH00205"
 }
 
-if [[ $# -ne 4 ]]; then
+if [[ $# -ne 5 ]]; then
     usage
     exit 2
 fi
@@ -22,6 +23,7 @@ sn_prefix="$1"
 start_sn="$2"
 count="$3"
 lis2="$4"
+version="$5"
 
 if [[ ! "$sn_prefix" =~ ^[[:alnum:]]+$ ]]; then
     echo "Error: sn_prefix must contain letters and digits only: $sn_prefix" >&2
@@ -43,6 +45,11 @@ if [[ "$lis2" != "0" && "$lis2" != "1" ]]; then
     exit 2
 fi
 
+if [[ ! "$version" =~ ^[[:alnum:]._-]+$ ]] || (( ${#version} > 63 )); then
+    echo "Error: version must contain only letters, digits, dot, underscore, or hyphen: $version" >&2
+    exit 2
+fi
+
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 start_sn_value=$((10#$start_sn))
 sn_suffix_width=${#start_sn}
@@ -54,7 +61,7 @@ cd "$project_dir"
 printf -v first_full_sn '%s%0*d' "$sn_prefix" "$sn_suffix_width" "$start_sn_value"
 printf -v last_full_sn '%s%0*d' "$sn_prefix" "$sn_suffix_width" "$end_sn"
 
-echo "Batch building ${count_value} sensors: ${first_full_sn}..${last_full_sn}, LIS2=${lis2}"
+echo "Batch building ${count_value} sensors: ${first_full_sn}..${last_full_sn}, LIS2=${lis2}, VERSION=${version}"
 
 for ((sensor_sn = start_sn_value; sensor_sn <= end_sn; ++sensor_sn)); do
     printf -v sensor_suffix '%0*d' "$sn_suffix_width" "$sensor_sn"
@@ -65,10 +72,12 @@ for ((sensor_sn = start_sn_value; sensor_sn <= end_sn; ++sensor_sn)); do
     python3 "$IDF_PATH/tools/idf.py" \
         -B "$build_dir" \
         "-DSN=${full_sn}" \
+        "-DVERSION=${version}" \
         "-DLIS2=${lis2}" \
         build
 
     echo "Firmware: ${project_dir}/${build_dir}/sentinel.bin"
+    echo "Device profile image: ${project_dir}/${build_dir}/user.bin"
 done
 
-echo "Batch build completed: ${first_full_sn}..${last_full_sn}, LIS2=${lis2}"
+echo "Batch build completed: ${first_full_sn}..${last_full_sn}, LIS2=${lis2}, VERSION=${version}"

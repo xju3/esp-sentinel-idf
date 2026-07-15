@@ -17,6 +17,7 @@
 #include "logger.h"
 
 #include "system_lock.h"
+#include "report_pipeline.h"
 #include "task_daq.h"
 
 #include "task_ota.h"
@@ -49,6 +50,9 @@ static void deisolate_gpio_pins() {
 }
 //
 void app_main(void) {
+  esp_err_t err = ESP_OK;
+  bool has_report_work = false;
+
   // 1. 初始化基础外设与配置
   init_nvs();
   init_system_lock();
@@ -62,6 +66,14 @@ void app_main(void) {
   // 2. 启动本地服务
   ESP_ERROR_CHECK(start_local_services());
 
+  // OTA镜像的本地确认不能依赖服务器。先取消回滚并持久化结果，
+  // 完成通知等本轮正常检测报告上传成功后再补报。
+  esp_err_t ota_finalize_err = task_ota_finalize_boot_status();
+  if (ota_finalize_err != ESP_OK) {
+    LOG_WARNF("OTA boot status finalization failed: %s",
+              esp_err_to_name(ota_finalize_err));
+  }
+
   // 3. 统一评估本次启动需要完成的工作，不按启动来源拆分业务流程。
 #if LIS2
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
@@ -70,32 +82,36 @@ void app_main(void) {
   }
 #endif
 
-  bool has_report_work = false;
-  esp_err_t err = daq_scheduler_prepare(&has_report_work);
+  err = daq_scheduler_prepare(&has_report_work);
   if (err != ESP_OK) {
     LOG_WARNF("DAQ schedule evaluation failed: %s", esp_err_to_name(err));
     goto sleep_prepare;
   }
 
-  const bool ota_status_pending = task_ota_status_pending();
-  if (!has_report_work && !ota_status_pending) {
+  if (cfg_err != ESP_OK || g_user_config.sn[0] == '\0') {
+    LOG_ERROR("Device configuration or SN is unavailable. Skipping acquisition and upload.");
+    goto sleep_prepare;
+  }
+
+  if (!has_report_work) {
     goto sleep_prepare;
   }
 
   // 4. 先完成原始采样，再让4G启动与报告计算并行；上传前等待两者完成。
   //    这样既避免射频和电源纹波污染采样，又缩短整轮工作时间。
-  if (has_report_work) {
-    err = daq_scheduler_execute(prepare_4g_network, NULL);
-  } else {
-    err = prepare_4g_network(NULL);
-  }
+  err = daq_scheduler_execute(prepare_4g_network, NULL);
   if (err != ESP_OK) {
     LOG_WARNF("Capture or 4G preparation failed: %s", esp_err_to_name(err));
     goto sleep_prepare;
   }
 
-  // 5. 网络确认可用后，补报OTA重启结果。服务器任务由报告响应处理。
-  check_and_report_ota_status();
+  // 5. 正常检测报告已成功，服务器可用；此时再补报OTA完成结果。
+  //    补报失败只保留NVS标记，不改变本轮正常业务结果。
+  task_ota_report_pending_completion();
+
+  // 历史报告只是附属补报环节，放在本轮必要业务完成之后；
+  // 其成功或失败都不能改变本轮业务结果。
+  (void)report_pipeline_flush_cache();
 
 sleep_prepare:
   // 6. 统一释放本轮外部资源。

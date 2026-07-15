@@ -7,10 +7,6 @@
 #include "driver/temperature_sensor.h"
 #include <stdlib.h>
 
-#ifndef REPORT_SN
-#define REPORT_SN "UNKNOWN"
-#endif
-
 void task_status_report_execute(const char *task_id)
 {
     LOG_INFOF("Executing Device Status Report Task: %s", task_id ? task_id : "NULL");
@@ -51,7 +47,7 @@ void task_status_report_execute(const char *task_id)
     cJSON_AddNumberToObject(root, "temperature", temperature);
     cJSON_AddNumberToObject(root, "rssi", rssi);
     cJSON_AddNumberToObject(root, "voltage", voltage);
-    cJSON_AddStringToObject(root, "sn", REPORT_SN);
+    cJSON_AddStringToObject(root, "sn", g_user_config.sn);
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
 
     char *json_str = cJSON_PrintUnformatted(root);

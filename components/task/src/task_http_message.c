@@ -12,10 +12,6 @@
 #include <string.h>
 #include "task_status_report.h"
 
-#ifndef REPORT_SN
-#define REPORT_SN "UNKNOWN"
-#endif
-
 static http_task_action_handler_t s_action_handler = NULL;
 
 static int task_val_to_int(const cJSON *val_item)
@@ -115,8 +111,13 @@ http_pending_tasks_result_t http_message_process_task_array(const cJSON *task_ar
 
             if (action == 0)
             {
-                LOG_DEBUG("Update firmware by OTA. Processing synchronously...");
-                execute_ota_update_from_url_sync(task_id, val_str);
+                if (task_ota_completion_pending_for(task_id)) {
+                    LOG_WARNF("Skipping already completed OTA task pending server acknowledgement: id=%s",
+                              task_id);
+                } else {
+                    LOG_DEBUG("Update firmware by OTA. Processing synchronously...");
+                    execute_ota_update_from_url_sync(task_id, val_str);
+                }
             }
             else if (action == 1)
             {

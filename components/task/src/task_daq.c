@@ -247,10 +247,6 @@ esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload,
       goto cleanup;
   }
 
-  // Retry history only after every current report has uploaded successfully.
-  // A history failure remains cached and must not fail the current DAQ cycle.
-  (void)report_pipeline_flush_cache();
-
 cleanup:
   if (network_prepare.started && !network_prepare.joined) {
     (void)join_network_prepare(&network_prepare, false);

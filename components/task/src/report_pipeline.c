@@ -26,13 +26,6 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#ifndef REPORT_SN
-#define REPORT_SN "UNKNOWN"
-#endif
-
-
-
-
 #define REPORT_SCHEMA_VERSION 2
 #define REPORT_SAMPLE_TYPE "normal"
 #define REPORT_FS_HZ 26667.0f
@@ -615,7 +608,7 @@ static char *build_report_json(float temperature_c,
     }
 
     cJSON_AddNumberToObject(root, "schema_version", REPORT_SCHEMA_VERSION);
-    cJSON_AddStringToObject(root, "sn", REPORT_SN);
+    cJSON_AddStringToObject(root, "sn", g_user_config.sn);
     if (temperature_valid) {
         add_number_rounded(root, "temperature_c", temperature_c, 1);
     } else {

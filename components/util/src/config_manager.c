@@ -1,5 +1,6 @@
 #include "config_manager.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,7 +58,7 @@ static uint32_t calc_fft_points(uint32_t rpm, uint32_t target_rev) {
   return N_pow2;
 }
 
-// 挂载 system/user 分区，为后续读写做准备；user 分区缺省允许自动格式化。
+// 挂载 system/user 分区，为后续读写做准备。user分区包含设备身份，禁止自动格式化。
 esp_err_t config_manager_init(void) {
   esp_err_t err = ESP_OK;
 
@@ -71,9 +72,9 @@ esp_err_t config_manager_init(void) {
   }
   // LOG_INFO("system storage mounted.");
 
-  // 挂载 user 分区（允许自动格式化）
+  // 挂载 user 分区。挂载失败时保留原始内容，不能格式化并擦除设备SN。
   if (!fsu_is_user_mounted()) {
-    err = fsu_mount_user(true); // true 表示如果挂载失败则自动格式化
+    err = fsu_mount_user(false);
     if (err != ESP_OK) {
       LOG_ERRORF("Failed to mount user storage: %s", esp_err_to_name(err));
       return err; // 返回具体的错误码，而不是 ESP_FAIL
@@ -197,6 +198,56 @@ static esp_err_t load_and_apply(const char *path, user_config_t *cfg) {
   return fsu_parse_json(path, parser_apply_wrapper, cfg);
 }
 
+static bool device_sn_is_valid(const char *sn) {
+  if (!sn) {
+    return false;
+  }
+
+  size_t len = strnlen(sn, LEN_MAX_DEVICE_ID);
+  if (len == 0 || len >= LEN_MAX_DEVICE_ID) {
+    return false;
+  }
+
+  for (size_t i = 0; i < len; ++i) {
+    unsigned char ch = (unsigned char)sn[i];
+    if (!isalnum(ch) && ch != '_' && ch != '-') {
+      return false;
+    }
+  }
+  return true;
+}
+
+static esp_err_t load_device_profile(user_config_t *cfg) {
+  if (!cfg || !fsu_is_user_mounted()) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  char *json = fsu_read_file_alloc(FILE_PATH_DEVICE_PROFILE, NULL);
+  if (!json) {
+    LOG_ERRORF("Device profile not found: %s", FILE_PATH_DEVICE_PROFILE);
+    return ESP_ERR_NOT_FOUND;
+  }
+
+  cJSON *root = cJSON_Parse(json);
+  free(json);
+  if (!cJSON_IsObject(root)) {
+    cJSON_Delete(root);
+    LOG_ERROR("Device profile is not valid JSON");
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+
+  const cJSON *sn = cJSON_GetObjectItemCaseSensitive(root, "sn");
+  if (!cJSON_IsString(sn) || !device_sn_is_valid(sn->valuestring)) {
+    cJSON_Delete(root);
+    LOG_ERROR("Device profile contains an invalid SN");
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+
+  safe_copy(cfg->sn, sizeof(cfg->sn), sn->valuestring);
+  cJSON_Delete(root);
+  return ESP_OK;
+}
+
 static void log_json_chunks(const char *prefix, const char *json, size_t len) {
   if (!json) {
     return;
@@ -281,7 +332,16 @@ esp_err_t config_manager_load(user_config_t *out_cfg) {
     (void)config_manager_log_default_json();
     out_cfg->is_configured = false;
   }
-  // 第三步：验证 RPM，并动态分配内存
+
+  // 第三步：最后加载不可变的设备身份，运行配置不能覆盖SN。
+  err = load_device_profile(out_cfg);
+  if (err != ESP_OK) {
+    out_cfg->sn[0] = '\0';
+    LOG_ERRORF("Device identity unavailable: %s", esp_err_to_name(err));
+    return err;
+  }
+
+  // 第四步：验证 RPM，并动态分配内存
   if (g_user_config.vib_buf) {
     heap_caps_free(g_user_config.vib_buf);
     g_user_config.vib_buf = NULL;
