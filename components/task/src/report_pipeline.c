@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "http_proxy.h"
 #include "logger.h"
+#include "report_upload_cache.h"
 #include "sdkconfig.h"
 #include "server_report_task_scheduler.h"
 #include "task_http_message.h"
@@ -678,6 +679,35 @@ static esp_err_t update_report_duration(char **json)
     return ESP_OK;
 }
 
+static esp_err_t update_report_sequence(char **json, uint32_t seq)
+{
+    if (!json || !*json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *root = cJSON_Parse(*json);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "seq");
+    if (!cJSON_AddNumberToObject(root, "seq", seq)) {
+        cJSON_Delete(root);
+        return ESP_ERR_NO_MEM;
+    }
+
+    char *updated = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!updated) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    free(*json);
+    *json = updated;
+    return ESP_OK;
+}
+
 static void handle_upload_response_tasks(const cJSON *data, bool accept_server_tasks)
 {
     if (!cJSON_IsArray(data)) {
@@ -772,12 +802,7 @@ static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
     report_upload_ctx_t upload_ctx = {
         .accept_server_tasks = accept_server_tasks,
     };
-    esp_err_t err = send_report_json_once(json, &upload_ctx);
-    if (err != ESP_OK) {
-        LOG_WARNF("Discarding report JSON after upload failure: %s", esp_err_to_name(err));
-        return err;
-    }
-    return ESP_OK;
+    return send_report_json_once(json, &upload_ctx);
 }
 
 esp_err_t report_pipeline_capture(const char *task_id,
@@ -852,9 +877,40 @@ esp_err_t report_pipeline_upload(report_payload_t *payload)
         return err;
     }
 
+    // The report captured in this wake cycle is the time anchor.
+    err = update_report_sequence(&payload->json, 0);
+    if (err != ESP_OK) {
+        report_pipeline_discard(payload);
+        return err;
+    }
+
     err = post_report_json(payload->json, payload->accept_server_tasks);
+    if (err != ESP_OK) {
+        esp_err_t cache_err = report_pipeline_cache(payload);
+        if (cache_err != ESP_OK) {
+            LOG_ERRORF("Failed to persist report after upload failure: %s",
+                       esp_err_to_name(cache_err));
+        }
+    }
     report_pipeline_discard(payload);
     return err;
+}
+
+esp_err_t report_pipeline_cache(report_payload_t *payload)
+{
+    if (!payload || !payload->json) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return report_upload_cache_store(payload->json, NULL);
+}
+
+esp_err_t report_pipeline_flush_cache(void)
+{
+    const report_upload_ctx_t upload_ctx = {
+        .accept_server_tasks = false,
+    };
+    return report_upload_cache_flush(send_report_json_once,
+                                     (void *)&upload_ctx);
 }
 
 void report_pipeline_discard(report_payload_t *payload)

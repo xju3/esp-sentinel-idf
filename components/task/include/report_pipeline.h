@@ -16,6 +16,12 @@ esp_err_t report_pipeline_capture(const char *task_id,
 /** Upload and release one payload returned by report_pipeline_capture(). */
 esp_err_t report_pipeline_upload(report_payload_t *payload);
 
+/** Persist one payload for ordered retry without releasing it. */
+esp_err_t report_pipeline_cache(report_payload_t *payload);
+
+/** Retry persisted reports after all current reports uploaded successfully. */
+esp_err_t report_pipeline_flush_cache(void);
+
 /** Release a captured payload without uploading it. */
 void report_pipeline_discard(report_payload_t *payload);
 
