@@ -42,11 +42,20 @@ static esp_err_t reset_sensor_power_rail(void) {
 
 static void init_sensors() {
   (void)reset_sensor_power_rail();
+
+  esp_err_t ds18b20_err = drv_ds18b20_init();
+  if (ds18b20_err == ESP_OK) {
+    ds18b20_err = drv_ds18b20_start_conversion();
+  }
+  if (ds18b20_err != ESP_OK) {
+    LOG_WARNF("DS18B20 conversion could not be started during sensor init: %s",
+              esp_err_to_name(ds18b20_err));
+  }
+
 #if LIS2
   drv_lis2dh12_init();
 #endif
   drv_iis3dwb_init();
-  drv_ds18b20_init();
 }
 
 static esp_err_t enable_tasks() {

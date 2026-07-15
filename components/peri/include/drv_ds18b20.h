@@ -36,14 +36,20 @@ typedef enum {
     DS18B20_RESOLUTION_12BIT = 3,
 } ds18b20_resolution_t;
 
-typedef void (*ds18b20_temp_cb_t)(float temperature_celsius);
+typedef enum {
+    DS18B20_STATE_IDLE = 0,
+    DS18B20_STATE_CONVERTING,
+    DS18B20_STATE_READY,
+    DS18B20_STATE_ERROR,
+} ds18b20_state_t;
 
 esp_err_t drv_ds18b20_init(void);
 esp_err_t drv_ds18b20_set_resolution(ds18b20_resolution_t resolution);
 esp_err_t drv_ds18b20_start_conversion(void);
-bool drv_ds18b20_is_conversion_done(void);
-esp_err_t drv_ds18b20_read_temperature(float *temperature);
-esp_err_t drv_ds18b20_read_temperature_async(ds18b20_temp_cb_t callback);
+ds18b20_state_t drv_ds18b20_get_state(void);
+esp_err_t drv_ds18b20_get_conversion_timing(int64_t *elapsed_us,
+                                             int64_t *remaining_us);
+esp_err_t drv_ds18b20_read_conversion_result(float *temperature);
 esp_err_t drv_ds18b20_self_test(void);
 esp_err_t isolate_ds18b20_pin(void);
 esp_err_t deisolate_ds18b20_pin(void);

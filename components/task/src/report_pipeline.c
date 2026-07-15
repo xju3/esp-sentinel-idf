@@ -14,6 +14,8 @@
 #include "task_http_message.h"
 
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -209,6 +211,62 @@ static esp_err_t ensure_buffers(void)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+static esp_err_t ensure_temperature_conversion_started(void)
+{
+    if (!g_ds18b20_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const ds18b20_state_t state = drv_ds18b20_get_state();
+    if (state == DS18B20_STATE_CONVERTING || state == DS18B20_STATE_READY) {
+        return ESP_OK;
+    }
+    return drv_ds18b20_start_conversion();
+}
+
+static esp_err_t get_temperature_conversion_progress(int64_t *elapsed_us,
+                                                     int64_t *remaining_us)
+{
+    if (!elapsed_us || !remaining_us) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return drv_ds18b20_get_conversion_timing(elapsed_us, remaining_us);
+}
+
+static esp_err_t wait_for_temperature_conversion_at_read(float *temperature_c)
+{
+    if (!temperature_c) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int64_t elapsed_us = 0;
+    int64_t remaining_us = 0;
+    esp_err_t err = get_temperature_conversion_progress(&elapsed_us,
+                                                         &remaining_us);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    LOG_INFOF("DS18B20 conversion elapsed at read: %lld ms",
+              (long long)(elapsed_us / 1000LL));
+    LOG_INFOF("DS18B20 remaining wait at read: %lld ms",
+              (long long)((remaining_us + 999LL) / 1000LL));
+
+    while (remaining_us > 0) {
+        const uint32_t remaining_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        vTaskDelay(pdMS_TO_TICKS(remaining_ms));
+
+        err = get_temperature_conversion_progress(&elapsed_us, &remaining_us);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    return drv_ds18b20_read_conversion_result(temperature_c);
 }
 
 static void capture_handler(const imu_raw_data_t *data, size_t count, void *user_ctx)
@@ -809,6 +867,8 @@ esp_err_t report_pipeline_capture_with_sample_complete(
     }
     *out_payload = NULL;
 
+    esp_err_t temperature_err = ensure_temperature_conversion_started();
+
     esp_err_t err = apply_report_configuration();
     if (err != ESP_OK) {
         return err;
@@ -819,14 +879,27 @@ esp_err_t report_pipeline_capture_with_sample_complete(
         return err;
     }
 
-    float temperature_c = 0.0f;
-    const bool temperature_valid =
-        g_ds18b20_initialized &&
-        drv_ds18b20_read_temperature(&temperature_c) == ESP_OK;
+    int64_t conversion_elapsed_us = 0;
+    int64_t conversion_remaining_us = 0;
+    if (temperature_err == ESP_OK) {
+        temperature_err = get_temperature_conversion_progress(
+            &conversion_elapsed_us, &conversion_remaining_us);
+        if (temperature_err == ESP_OK) {
+            LOG_INFOF("DS18B20 conversion elapsed before IIS3DWB capture: %lld ms",
+                      (long long)(conversion_elapsed_us / 1000LL));
+        }
+    }
+
     capture_attempt_t attempts[REPORT_CAPTURE_ATTEMPTS] = {0};
     size_t attempt_count = 0;
     uint16_t final_range_g = s_active_range_g;
     bool accepted = false;
+
+    if (temperature_err == ESP_OK && conversion_remaining_us > 0) {
+        LOG_INFO("IIS3DWB sampling started while DS18B20 converting");
+    } else {
+        LOG_INFO("IIS3DWB sampling started");
+    }
 
     err = capture_with_auto_range(attempts,
                                   REPORT_CAPTURE_ATTEMPTS,
@@ -836,10 +909,24 @@ esp_err_t report_pipeline_capture_with_sample_complete(
     if (err != ESP_OK) {
         return err;
     }
+    LOG_INFO("IIS3DWB sampling completed");
+
+    float temperature_c = 0.0f;
+    bool temperature_valid = false;
+    if (temperature_err == ESP_OK) {
+        temperature_err = wait_for_temperature_conversion_at_read(
+            &temperature_c);
+        temperature_valid = temperature_err == ESP_OK;
+    }
+    if (temperature_err != ESP_OK) {
+        LOG_WARNF("DS18B20 temperature read failed: %s",
+                  esp_err_to_name(temperature_err));
+    }
 
     // All auto-range attempts are complete. From this point onward the raw
-    // vibration buffer is only read for feature calculation, so external
-    // work that must not overlap IIS3DWB sampling can safely begin.
+    // vibration buffer is only read for feature calculation, and the
+    // synchronous DS18B20 result has been collected. External work that must
+    // not overlap IIS3DWB sampling can safely begin.
     if (sample_complete) {
         sample_complete(sample_complete_ctx);
     }

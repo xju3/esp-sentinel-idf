@@ -56,15 +56,16 @@ void app_main(void) {
   // 1. 初始化基础外设与配置
   init_nvs();
   init_system_lock();
+  deisolate_gpio_pins();
+
+  // 先启动 DS18B20 转换；后续本地传感器初始化、配置加载和缓冲区准备
+  // 都与转换等待重叠，正式 IIS3DWB 采样仍在温度结果读取之后开始。
+  ESP_ERROR_CHECK(start_local_services());
+
   esp_err_t cfg_err = config_manager_load(&g_user_config);
   if (cfg_err != ESP_OK) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
   }
-
-  deisolate_gpio_pins();
-
-  // 2. 启动本地服务
-  ESP_ERROR_CHECK(start_local_services());
 
   // OTA镜像的本地确认不能依赖服务器。先取消回滚并持久化结果，
   // 完成通知等本轮正常检测报告上传成功后再补报。
@@ -74,7 +75,7 @@ void app_main(void) {
               esp_err_to_name(ota_finalize_err));
   }
 
-  // 3. 统一评估本次启动需要完成的工作，不按启动来源拆分业务流程。
+  // 2. 统一评估本次启动需要完成的工作，不按启动来源拆分业务流程。
 #if LIS2
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
     LOG_INFO("Wakeup caused by LIS2DH12 WoM! Forcing immediate patrol.");
@@ -97,7 +98,7 @@ void app_main(void) {
     goto sleep_prepare;
   }
 
-  // 4. 先完成原始采样，再让4G启动与报告计算并行；上传前等待两者完成。
+  // 3. 先完成原始采样，再让4G启动与报告计算并行；上传前等待两者完成。
   //    这样既避免射频和电源纹波污染采样，又缩短整轮工作时间。
   err = daq_scheduler_execute(prepare_4g_network, NULL);
   if (err != ESP_OK) {
@@ -105,7 +106,7 @@ void app_main(void) {
     goto sleep_prepare;
   }
 
-  // 5. 正常检测报告已成功，服务器可用；此时再补报OTA完成结果。
+  // 4. 正常检测报告已成功，服务器可用；此时再补报OTA完成结果。
   //    补报失败只保留NVS标记，不改变本轮正常业务结果。
   task_ota_report_pending_completion();
 
@@ -114,13 +115,13 @@ void app_main(void) {
   (void)report_pipeline_flush_cache();
 
 sleep_prepare:
-  // 6. 统一释放本轮外部资源。
+  // 5. 统一释放本轮外部资源。
   (void)shutdown_4g_network(); // 通知4G模块关机并释放串口
   (void)drv_iis3dwb_enter_standby(); // 传感器待机
   gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
   vTaskDelay(pdMS_TO_TICKS(500)); // 给 4G 模块一点点关机信号处理时间
 
-  // 7. 计算下一次唤醒时间并进入深度睡眠
+  // 6. 计算下一次唤醒时间并进入深度睡眠
   uint64_t sleep_time_us = daq_scheduler_get_sleep_time_us();
 
   // === 拦截并动态覆盖休眠时间 (密集诊断逻辑) ===
