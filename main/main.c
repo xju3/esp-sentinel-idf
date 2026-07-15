@@ -82,7 +82,8 @@ void app_main(void) {
     goto sleep_prepare;
   }
 
-  // 4. 先完成采集与计算，再启动4G，避免驻网期间的射频和电源纹波污染采样。
+  // 4. 先完成原始采样，再让4G启动与报告计算并行；上传前等待两者完成。
+  //    这样既避免射频和电源纹波污染采样，又缩短整轮工作时间。
   if (has_report_work) {
     err = daq_scheduler_execute(prepare_4g_network, NULL);
   } else {

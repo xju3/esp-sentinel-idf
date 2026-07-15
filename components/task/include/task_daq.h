@@ -15,7 +15,10 @@ typedef esp_err_t (*daq_before_upload_fn)(void *ctx);
 /** @brief Evaluate the RTC schedule without starting capture or networking. */
 esp_err_t daq_scheduler_prepare(bool *out_has_report_work);
 
-/** @brief Execute prepared reports and call prepare_upload after capture. */
+/**
+ * @brief Execute prepared reports, starting prepare_upload after the final raw
+ * sample while report calculation continues, then join before upload.
+ */
 esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload, void *ctx);
 
 /** @brief 获取距离下一次任务唤醒所需的时间差 (微秒) */

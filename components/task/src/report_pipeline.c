@@ -805,8 +805,11 @@ static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
     return send_report_json_once(json, &upload_ctx);
 }
 
-esp_err_t report_pipeline_capture(const char *task_id,
-                                  report_payload_t **out_payload)
+esp_err_t report_pipeline_capture_with_sample_complete(
+    const char *task_id,
+    report_sample_complete_fn sample_complete,
+    void *sample_complete_ctx,
+    report_payload_t **out_payload)
 {
     if (!out_payload) {
         return ESP_ERR_INVALID_ARG;
@@ -841,6 +844,13 @@ esp_err_t report_pipeline_capture(const char *task_id,
         return err;
     }
 
+    // All auto-range attempts are complete. From this point onward the raw
+    // vibration buffer is only read for feature calculation, so external
+    // work that must not overlap IIS3DWB sampling can safely begin.
+    if (sample_complete) {
+        sample_complete(sample_complete_ctx);
+    }
+
     report_payload_t *payload = calloc(1, sizeof(*payload));
     if (!payload) {
         return ESP_ERR_NO_MEM;
@@ -863,6 +873,15 @@ esp_err_t report_pipeline_capture(const char *task_id,
     payload->accept_server_tasks = task_id == NULL || task_id[0] == '\0';
     *out_payload = payload;
     return ESP_OK;
+}
+
+esp_err_t report_pipeline_capture(const char *task_id,
+                                  report_payload_t **out_payload)
+{
+    return report_pipeline_capture_with_sample_complete(task_id,
+                                                        NULL,
+                                                        NULL,
+                                                        out_payload);
 }
 
 esp_err_t report_pipeline_upload(report_payload_t *payload)

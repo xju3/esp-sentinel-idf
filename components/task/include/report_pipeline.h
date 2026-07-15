@@ -8,10 +8,21 @@ extern "C" {
 #endif
 
 typedef struct report_payload report_payload_t;
+typedef void (*report_sample_complete_fn)(void *ctx);
 
 /** Capture sensor data, calculate features, and retain the report JSON. */
 esp_err_t report_pipeline_capture(const char *task_id,
                                   report_payload_t **out_payload);
+
+/**
+ * Capture a report and invoke a hook after the final raw sample has been
+ * accepted, before FFT/feature calculation and JSON construction begin.
+ */
+esp_err_t report_pipeline_capture_with_sample_complete(
+    const char *task_id,
+    report_sample_complete_fn sample_complete,
+    void *sample_complete_ctx,
+    report_payload_t **out_payload);
 
 /** Upload and release one payload returned by report_pipeline_capture(). */
 esp_err_t report_pipeline_upload(report_payload_t *payload);
