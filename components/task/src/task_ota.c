@@ -308,14 +308,38 @@ static esp_err_t perform_ota_download_url(const char *fw_url, int fw_size,
         return ESP_ERR_INVALID_ARG;
     }
 
-    LOG_INFO("Starting OTA chunked download via 4G AT Mode...");
+    char *clean_url = strdup(fw_url);
+    if (!clean_url) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    char *ver_ptr = strstr(clean_url, "?ver=");
+    if (!ver_ptr) {
+        ver_ptr = strstr(clean_url, "&ver=");
+    }
+    
+    if (ver_ptr) {
+        char *end_ptr = strchr(ver_ptr + 1, '&');
+        if (end_ptr) {
+            if (ver_ptr[0] == '?') {
+                *end_ptr = '?';
+                memmove(ver_ptr, end_ptr, strlen(end_ptr) + 1);
+            } else {
+                memmove(ver_ptr, end_ptr, strlen(end_ptr) + 1);
+            }
+        } else {
+            *ver_ptr = '\0';
+        }
+    }
+
+    LOG_INFOF("Starting OTA chunked download via 4G AT Mode, URL: %s", clean_url);
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition) {
         LOG_INFOF("Writing to partition subtype %d at offset 0x%lx", update_partition->subtype, update_partition->address);
         esp_ota_handle_t update_handle = 0;
 
         if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle) == ESP_OK) {
-            if (bsp_4g_ota_download_and_write(fw_url, fw_size, access_key, update_handle) == ESP_OK) {
+            if (bsp_4g_ota_download_and_write(clean_url, fw_size, access_key, update_handle) == ESP_OK) {
                 if (esp_ota_end(update_handle) == ESP_OK) {
                     if (esp_ota_set_boot_partition(update_partition) == ESP_OK) {
                         ota_err = ESP_OK;
@@ -332,6 +356,7 @@ static esp_err_t perform_ota_download_url(const char *fw_url, int fw_size,
         }
     }
 
+    free(clean_url);
     return ota_err;
 }
 

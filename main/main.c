@@ -21,6 +21,7 @@
 #include "task_daq.h"
 
 #include "task_ota.h"
+#include "esp_ota_ops.h"
 
 #include "wom_lis2dh12.h" // 引入 WoM 接口
 
@@ -52,6 +53,11 @@ static void deisolate_gpio_pins() {
 void app_main(void) {
   esp_err_t err = ESP_OK;
   bool has_report_work = false;
+
+  const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+  LOG_INFOF("========================================");
+  LOG_INFOF("Firmware Version: %s", app_desc->version);
+  LOG_INFOF("========================================");
 
   // 1. 初始化基础外设与配置
   init_nvs();
