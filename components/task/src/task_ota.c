@@ -303,43 +303,15 @@ static esp_err_t perform_ota_download_url(const char *fw_url, int fw_size,
 
     esp_err_t ota_err = ESP_FAIL;
 
-    if (fw_size <= 0) {
-        LOG_ERROR("4G OTA from direct URL requires known firmware size.");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    char *clean_url = strdup(fw_url);
-    if (!clean_url) {
-        return ESP_ERR_NO_MEM;
-    }
-
-    char *ver_ptr = strstr(clean_url, "?ver=");
-    if (!ver_ptr) {
-        ver_ptr = strstr(clean_url, "&ver=");
-    }
-    
-    if (ver_ptr) {
-        char *end_ptr = strchr(ver_ptr + 1, '&');
-        if (end_ptr) {
-            if (ver_ptr[0] == '?') {
-                *end_ptr = '?';
-                memmove(ver_ptr, end_ptr, strlen(end_ptr) + 1);
-            } else {
-                memmove(ver_ptr, end_ptr, strlen(end_ptr) + 1);
-            }
-        } else {
-            *ver_ptr = '\0';
-        }
-    }
-
-    LOG_INFOF("Starting OTA chunked download via 4G AT Mode, URL: %s", clean_url);
+    LOG_INFO("Starting OTA chunked download via 4G AT Mode...");
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition) {
         LOG_INFOF("Writing to partition subtype %d at offset 0x%lx", update_partition->subtype, update_partition->address);
         esp_ota_handle_t update_handle = 0;
 
         if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle) == ESP_OK) {
-            if (bsp_4g_ota_download_and_write(clean_url, fw_size, access_key, update_handle) == ESP_OK) {
+            esp_err_t dl_err = bsp_4g_ota_download_and_write(fw_url, fw_size, access_key, update_handle);
+            if (dl_err == ESP_OK) {
                 if (esp_ota_end(update_handle) == ESP_OK) {
                     if (esp_ota_set_boot_partition(update_partition) == ESP_OK) {
                         ota_err = ESP_OK;
@@ -350,13 +322,12 @@ static esp_err_t perform_ota_download_url(const char *fw_url, int fw_size,
                     }
                 }
             } else {
-                LOG_ERROR("4G OTA Download aborted due to error.");
+                LOG_ERRORF("4G OTA Download aborted due to error: %s", esp_err_to_name(dl_err));
                 esp_ota_abort(update_handle);
             }
         }
     }
 
-    free(clean_url);
     return ota_err;
 }
 
@@ -463,22 +434,11 @@ void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url)
 
     LOG_INFOF("OTA direct firmware URL: %s", fw_url);
     int fw_size = 0;
-    char *access_key = NULL;
-    esp_err_t metadata_err =
-        fetch_ota_download_parameters(task_id, &fw_size, &access_key);
-    if (metadata_err != ESP_OK) {
-        LOG_ERRORF("Failed to fetch OTA download parameters: %s",
-                   esp_err_to_name(metadata_err));
-        (void)report_ota_complete(task_id ? task_id : "", 1);
-        unlock_system_task();
-        return;
-    }
 
     uint32_t target_address = 0;
     esp_err_t ota_err = perform_ota_download_url(fw_url, fw_size,
-                                                 access_key ? access_key : "",
+                                                 "",
                                                  &target_address);
-    free(access_key);
 
     if (ota_err == ESP_OK) {
         esp_err_t state_err = persist_pending_ota(task_id, target_address);

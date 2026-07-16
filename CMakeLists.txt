@@ -17,6 +17,18 @@ if(NOT DEFINED LIS2)
     set(LIS2 1)
 endif()
 
+# VERSION is shared by the application descriptor and device_profile.json.
+# It must be set before project() so ESP-IDF uses it as PROJECT_VER instead of
+# falling back to `git describe`.
+if(NOT DEFINED VERSION OR VERSION STREQUAL "")
+    message(FATAL_ERROR "VERSION is required (example: -DVERSION=1.0.0)")
+endif()
+string(LENGTH "${VERSION}" VERSION_LENGTH)
+if(VERSION_LENGTH GREATER 31 OR NOT VERSION MATCHES "^[A-Za-z0-9._-]+$")
+    message(FATAL_ERROR "Invalid application version: ${VERSION}")
+endif()
+set(PROJECT_VER "${VERSION}")
+
 # Component source lists are evaluated by project(), so the feature value must
 # be defined before project() runs.
 project(sentinel)
@@ -90,14 +102,6 @@ endif()
 string(LENGTH "${SN}" SN_LENGTH)
 if(SN_LENGTH GREATER 63 OR NOT SN MATCHES "^[A-Za-z0-9_-]+$")
     message(FATAL_ERROR "Invalid sensor SN: ${SN}")
-endif()
-
-if(NOT DEFINED VERSION OR VERSION STREQUAL "")
-    message(FATAL_ERROR "VERSION is required to generate user.bin (example: -DVERSION=1.0.0)")
-endif()
-string(LENGTH "${VERSION}" VERSION_LENGTH)
-if(VERSION_LENGTH GREATER 63 OR NOT VERSION MATCHES "^[A-Za-z0-9._-]+$")
-    message(FATAL_ERROR "Invalid device profile version: ${VERSION}")
 endif()
 
 string(TIMESTAMP DEVICE_PROFILE_GENERATED_AT "%Y-%m-%dT%H:%M:%SZ" UTC)

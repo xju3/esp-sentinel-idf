@@ -8,7 +8,7 @@ usage() {
     echo "  start_sn:  first numeric sensor serial number suffix"
     echo "  count:     number of consecutive sensor firmwares to build"
     echo "  lis2:      1 when LIS2DH12 is fitted, otherwise 0"
-    echo "  version:   device profile version (letters, digits, dot, underscore, hyphen)"
+    echo "  version:   application/profile version, up to 31 characters"
     echo "Example:"
     echo "  $0 26SH00 101 9 0 1.0.0    # builds 26SH00101 through 26SH00109"
     echo "  $0 26SH00 201 5 1 1.0.0    # builds 26SH00201 through 26SH00205"
@@ -45,8 +45,8 @@ if [[ "$lis2" != "0" && "$lis2" != "1" ]]; then
     exit 2
 fi
 
-if [[ ! "$version" =~ ^[[:alnum:]._-]+$ ]] || (( ${#version} > 63 )); then
-    echo "Error: version must contain only letters, digits, dot, underscore, or hyphen: $version" >&2
+if [[ ! "$version" =~ ^[[:alnum:]._-]+$ ]] || (( ${#version} > 31 )); then
+    echo "Error: version must be at most 31 characters and contain only letters, digits, dot, underscore, or hyphen: $version" >&2
     exit 2
 fi
 
