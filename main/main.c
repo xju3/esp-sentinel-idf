@@ -43,11 +43,48 @@ static esp_err_t prepare_4g_network(void *ctx) {
 
 static void deisolate_gpio_pins() {
   gpio_deep_sleep_hold_dis();
+  gpio_hold_dis(BOARD_GPIO_SENSOR_EN);
   // deisolate_iis3dwb_pins();
 #if LIS2
   deisolate_lis2dh12_pins();
 #endif
   deisolate_ds18b20_pin();
+}
+
+static esp_err_t power_off_sensors_for_deep_sleep(void) {
+  esp_err_t ret = drv_iis3dwb_enter_standby();
+  if (ret != ESP_OK) {
+    LOG_WARNF("Failed to place IIS3DWB in standby: %s", esp_err_to_name(ret));
+  }
+
+  esp_err_t isolate_ret = isolate_ds18b20_pin();
+  if (isolate_ret != ESP_OK) {
+    LOG_WARNF("Failed to isolate DS18B20 pin: %s",
+              esp_err_to_name(isolate_ret));
+    if (ret == ESP_OK) {
+      ret = isolate_ret;
+    }
+  }
+
+  esp_err_t power_ret = gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
+  if (power_ret == ESP_OK) {
+    power_ret = gpio_hold_en(BOARD_GPIO_SENSOR_EN);
+  }
+  if (power_ret != ESP_OK) {
+    LOG_ERRORF("Failed to hold sensor power rail off for deep sleep: %s",
+               esp_err_to_name(power_ret));
+    if (ret == ESP_OK) {
+      ret = power_ret;
+    }
+  }
+
+  // GPIO2 is active-low sensor power enable. Without a deep-sleep hold it can
+  // become high impedance after esp_deep_sleep_start() and turn the complete
+  // sensor rail back on.
+  gpio_deep_sleep_hold_en();
+  LOG_INFOF("Sensor deep-sleep power state: SENSOR_EN=%d (off=1)",
+            gpio_get_level(BOARD_GPIO_SENSOR_EN));
+  return ret;
 }
 //
 void app_main(void) {
@@ -123,8 +160,7 @@ void app_main(void) {
 sleep_prepare:
   // 5. 统一释放本轮外部资源。
   (void)shutdown_4g_network(); // 通知4G模块关机并释放串口
-  (void)drv_iis3dwb_enter_standby(); // 传感器待机
-  gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
+  (void)power_off_sensors_for_deep_sleep();
   vTaskDelay(pdMS_TO_TICKS(500)); // 给 4G 模块一点点关机信号处理时间
 
   // 6. 计算下一次唤醒时间并进入深度睡眠

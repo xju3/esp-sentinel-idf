@@ -44,8 +44,7 @@
 #define MODEM_PULSE_PWRKEY_MS 600
 #define MODEM_BOOT_TIMEOUT_MS 5000
 #define MODEM_SIM_TIMEOUT_MS 10000
-#define MODEM_REG_TIMEOUT_MS 5000
-#define MODEM_ATTACH_TIMEOUT_MS 30000
+#define MODEM_NETWORK_READY_TIMEOUT_MS 5000
 #define MODEM_PDP_TIMEOUT_MS 30000
 #define MODEM_SHUTDOWN_TIMEOUT_MS 65000
 #define MODEM_REG_POLL_MS 200
@@ -399,6 +398,32 @@ static esp_err_t modem_power_disable(void)
     return gpio_set_level(MODEM_PWR_EN_PIN, MODEM_POWER_DISABLE_LEVEL);
 }
 
+static int modem_status_level(void);
+
+static esp_err_t modem_cut_power_and_verify(void)
+{
+    esp_err_t err = modem_power_disable();
+    if (err != ESP_OK)
+    {
+        LOG_ERRORF("4G power disable failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+    int power_level = gpio_get_level(MODEM_PWR_EN_PIN);
+    int status_level = modem_status_level();
+    LOG_INFOF("4G power cut state: PWR_EN=%d STATUS=%d",
+              power_level, status_level);
+
+    if (power_level != MODEM_POWER_DISABLE_LEVEL)
+    {
+        LOG_ERRORF("4G power enable pin did not reach off level: %d",
+                   power_level);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
 static int modem_status_level(void)
 {
     return gpio_get_level(MODEM_STATUS_PIN);
@@ -651,15 +676,6 @@ static esp_err_t modem_send_command(const char *cmd,
     return err;
 }
 
-static bool modem_attached(char *response, size_t response_size)
-{
-    if (modem_send_command("AT+CGATT?", response, response_size, 1000) != ESP_OK)
-    {
-        return false;
-    }
-    return response_has_token(response, "+CGATT: 1");
-}
-
 static bool modem_pdp_active(char *response, size_t response_size)
 {
     if (modem_send_command("AT+CGACT?", response, response_size, 1000) != ESP_OK)
@@ -708,13 +724,31 @@ static esp_err_t modem_shutdown_gracefully(bool at_ready)
             }
             LOG_WARNF("Graceful shutdown timeout via STATUS pin.");
         }
+        else
+        {
+            LOG_WARNF("Failed to send graceful shutdown command: uart_write=%d",
+                      written);
+        }
     }
 
     if (modem_status_is_on())
     {
         LOG_WARNF("Forcing shutdown via PWRKEY...");
-        (void)modem_pulse_low_active_line(MODEM_PWRKEY_PIN, 700);
-        (void)modem_wait_for_status_level(0, 5000);
+        esp_err_t err = modem_pulse_low_active_line(MODEM_PWRKEY_PIN, 700);
+        if (err != ESP_OK)
+        {
+            LOG_ERRORF("Forced shutdown PWRKEY pulse failed: %s",
+                       esp_err_to_name(err));
+            return err;
+        }
+
+        err = modem_wait_for_status_level(0, 5000);
+        if (err != ESP_OK)
+        {
+            LOG_ERRORF("Forced shutdown failed: STATUS remained high after 5 seconds.");
+            return err;
+        }
+        LOG_INFO("Forced shutdown confirmed by STATUS low.");
     }
 
     return ESP_OK;
@@ -774,17 +808,37 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
     }
 
     stage_start_us = esp_timer_get_time();
-    if (modem_send_command("AT+CFUN?", response, MODEM_RESP_BUF_SIZE, 1000) != ESP_OK ||
-        !response_has_token(response, "+CFUN: 1"))
+    int64_t network_deadline =
+        deadline_after_ms(MODEM_NETWORK_READY_TIMEOUT_MS);
+    uint32_t cfun_timeout_ms = MODEM_NETWORK_READY_TIMEOUT_MS;
+    if (cfun_timeout_ms > 1000U)
+        cfun_timeout_ms = 1000U;
+    bool cfun_ready =
+        modem_send_command("AT+CFUN?", response, MODEM_RESP_BUF_SIZE,
+                           cfun_timeout_ms) == ESP_OK &&
+        response_has_token(response, "+CFUN: 1");
+    if (!cfun_ready && esp_timer_get_time() < network_deadline)
     {
-        (void)modem_send_command("AT+CFUN=1", response, MODEM_RESP_BUF_SIZE, 2000);
+        int64_t remaining_us = network_deadline - esp_timer_get_time();
+        uint32_t command_timeout_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        if (command_timeout_ms > 2000U)
+            command_timeout_ms = 2000U;
+        (void)modem_send_command("AT+CFUN=1", response, MODEM_RESP_BUF_SIZE,
+                                 command_timeout_ms);
     }
 
     bool registered = false;
-    int64_t reg_deadline = deadline_after_ms(MODEM_REG_TIMEOUT_MS);
-    while (esp_timer_get_time() < reg_deadline)
+    while (esp_timer_get_time() < network_deadline)
     {
-        if (modem_send_command("AT+CEREG?", response, MODEM_RESP_BUF_SIZE, 1000) == ESP_OK)
+        int64_t remaining_us = network_deadline - esp_timer_get_time();
+        uint32_t command_timeout_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        if (command_timeout_ms > 1000U)
+            command_timeout_ms = 1000U;
+
+        if (modem_send_command("AT+CEREG?", response, MODEM_RESP_BUF_SIZE,
+                               command_timeout_ms) == ESP_OK)
         {
             if (modem_response_is_registered(response))
             {
@@ -792,7 +846,15 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
                 break;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(MODEM_REG_POLL_MS));
+        if (esp_timer_get_time() < network_deadline)
+        {
+            int64_t remaining_us = network_deadline - esp_timer_get_time();
+            uint32_t delay_ms =
+                (uint32_t)((remaining_us + 999LL) / 1000LL);
+            if (delay_ms > MODEM_REG_POLL_MS)
+                delay_ms = MODEM_REG_POLL_MS;
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        }
     }
     if (result != NULL)
     {
@@ -811,19 +873,28 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
         result->registered = true;
     }
 
-    bool attached = modem_attached(response, MODEM_RESP_BUF_SIZE);
-    int64_t attach_deadline = deadline_after_ms(MODEM_ATTACH_TIMEOUT_MS);
-    while (!attached && esp_timer_get_time() < attach_deadline)
+    bool attached = false;
+    if (esp_timer_get_time() < network_deadline)
     {
-        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE, MODEM_ATTACH_TIMEOUT_MS);
+        int64_t remaining_us = network_deadline - esp_timer_get_time();
+        uint32_t command_timeout_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        err = modem_send_command("AT+CGATT?", response, MODEM_RESP_BUF_SIZE,
+                                 command_timeout_ms);
+        attached = err == ESP_OK && response_has_token(response, "+CGATT: 1");
+    }
+
+    if (!attached && esp_timer_get_time() < network_deadline)
+    {
+        int64_t remaining_us = network_deadline - esp_timer_get_time();
+        uint32_t command_timeout_ms =
+            (uint32_t)((remaining_us + 999LL) / 1000LL);
+        err = modem_send_command("AT+CGATT=1", response, MODEM_RESP_BUF_SIZE,
+                                 command_timeout_ms);
         if (err == ESP_OK && modem_response_is_ok(response))
         {
             attached = true;
-            break;
         }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        attached = modem_attached(response, MODEM_RESP_BUF_SIZE);
     }
 
     if (!attached)
@@ -961,8 +1032,8 @@ cleanup:
         ppp_4g_log_result(&result);
     }
     s_module_network_ready = false;
-    (void)modem_shutdown_gracefully(s_at_ready);
-    (void)modem_power_disable();
+    LOG_WARN("4G initialization failed; cutting modem power immediately.");
+    (void)modem_cut_power_and_verify();
     modem_uart_deinit();
     s_at_ready = false;
     return err;
@@ -987,8 +1058,8 @@ static esp_err_t shutdown_4g_network_internal(void)
         LOG_WARNF("4G GPIO preparation before shutdown failed: %s", esp_err_to_name(gpio_err));
     }
 
-    (void)modem_shutdown_gracefully(s_at_ready);
-    (void)modem_power_disable();
+    esp_err_t shutdown_err = modem_shutdown_gracefully(s_at_ready);
+    esp_err_t power_err = modem_cut_power_and_verify();
     modem_uart_deinit();
 
     // 重置相关引脚为默认高阻态，防止深度睡眠期间对已断电的 4G 模块产生电流倒灌泄漏
@@ -1007,7 +1078,11 @@ static esp_err_t shutdown_4g_network_internal(void)
 
     s_at_ready = false;
     s_module_network_ready = false;
-    return gpio_err;
+    if (gpio_err != ESP_OK)
+        return gpio_err;
+    if (power_err != ESP_OK)
+        return power_err;
+    return shutdown_err;
 }
 
 esp_err_t shutdown_4g_network(void)
