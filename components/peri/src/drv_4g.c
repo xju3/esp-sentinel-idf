@@ -46,7 +46,7 @@
 #define MODEM_SIM_TIMEOUT_MS 10000
 #define MODEM_NETWORK_READY_TIMEOUT_MS 5000
 #define MODEM_PDP_TIMEOUT_MS 30000
-#define MODEM_SHUTDOWN_TIMEOUT_MS 65000
+#define MODEM_SHUTDOWN_TIMEOUT_MS 5000
 #define MODEM_REG_POLL_MS 200
 #define MODEM_SYNC_AT_CMD "AT"
 #define MODEM_HTTP_POST_INPUT_TIMEOUT_S 80U
@@ -1032,8 +1032,23 @@ cleanup:
         ppp_4g_log_result(&result);
     }
     s_module_network_ready = false;
-    LOG_WARN("4G initialization failed; cutting modem power immediately.");
-    (void)modem_cut_power_and_verify();
+
+    // Keep the proven r1 shutdown order: while AT and the modem power rail are
+    // still available, ask the modem to shut down and wait for STATUS low.
+    // Cutting PWR_EN first can leave the module in an undefined powered state.
+    esp_err_t shutdown_err = modem_shutdown_gracefully(s_at_ready);
+    if (shutdown_err != ESP_OK)
+    {
+        LOG_WARNF("4G graceful shutdown after initialization failure failed: %s",
+                  esp_err_to_name(shutdown_err));
+    }
+
+    esp_err_t power_err = modem_cut_power_and_verify();
+    if (power_err != ESP_OK)
+    {
+        LOG_ERRORF("4G power cut after initialization failure failed: %s",
+                   esp_err_to_name(power_err));
+    }
     modem_uart_deinit();
     s_at_ready = false;
     return err;
