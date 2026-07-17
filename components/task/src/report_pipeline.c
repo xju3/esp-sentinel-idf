@@ -730,7 +730,7 @@ static esp_err_t update_report_duration(char **json)
     return ESP_OK;
 }
 
-static esp_err_t update_report_sequence(char **json, uint32_t seq)
+static esp_err_t update_report_delay(char **json, uint32_t delay_s)
 {
     if (!json || !*json) {
         return ESP_ERR_INVALID_ARG;
@@ -743,7 +743,8 @@ static esp_err_t update_report_sequence(char **json, uint32_t seq)
     }
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "seq");
-    if (!cJSON_AddNumberToObject(root, "seq", seq)) {
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "delay");
+    if (!cJSON_AddNumberToObject(root, "delay", delay_s)) {
         cJSON_Delete(root);
         return ESP_ERR_NO_MEM;
     }
@@ -977,7 +978,7 @@ esp_err_t report_pipeline_upload(report_payload_t *payload)
     }
 
     // The report captured in this wake cycle is the time anchor.
-    err = update_report_sequence(&payload->json, 0);
+    err = update_report_delay(&payload->json, 0);
     if (err != ESP_OK) {
         report_pipeline_discard(payload);
         return err;

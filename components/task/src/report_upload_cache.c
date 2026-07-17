@@ -11,19 +11,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "esp_rtc_time.h"
+#include "config_manager.h"
 
 #define REPORT_CACHE_DIR "/user"
 #define REPORT_CACHE_TEMP_PATH REPORT_CACHE_DIR "/.report.tmp"
 
 typedef struct {
     size_t count;
-    uint32_t min_seq;
-    uint32_t max_seq;
+    uint64_t min_time_s;
+    uint64_t max_time_s;
 } report_cache_index_t;
 
-static bool parse_sequence_filename(const char *name, uint32_t *out_seq)
+static bool parse_timestamp_filename(const char *name, uint64_t *out_time_s)
 {
-    if (!name || !out_seq) {
+    if (!name || !out_time_s) {
         return false;
     }
 
@@ -34,10 +36,7 @@ static bool parse_sequence_filename(const char *name, uint32_t *out_seq)
     uint64_t value = 0;
     size_t digits = 0;
     while (name[digits] >= '0' && name[digits] <= '9') {
-        value = value * 10U + (uint32_t)(name[digits] - '0');
-        if (value > UINT32_MAX) {
-            return false;
-        }
+        value = value * 10U + (uint64_t)(name[digits] - '0');
         ++digits;
     }
 
@@ -45,7 +44,7 @@ static bool parse_sequence_filename(const char *name, uint32_t *out_seq)
         return false;
     }
 
-    *out_seq = (uint32_t)value;
+    *out_time_s = value;
     return true;
 }
 
@@ -64,16 +63,16 @@ static esp_err_t scan_cache(report_cache_index_t *index)
 
     struct dirent *entry = NULL;
     while ((entry = readdir(dir)) != NULL) {
-        uint32_t seq = 0;
-        if (!parse_sequence_filename(entry->d_name, &seq)) {
+        uint64_t time_s = 0;
+        if (!parse_timestamp_filename(entry->d_name, &time_s)) {
             continue;
         }
 
-        if (index->count == 0 || seq < index->min_seq) {
-            index->min_seq = seq;
+        if (index->count == 0 || time_s < index->min_time_s) {
+            index->min_time_s = time_s;
         }
-        if (index->count == 0 || seq > index->max_seq) {
-            index->max_seq = seq;
+        if (index->count == 0 || time_s > index->max_time_s) {
+            index->max_time_s = time_s;
         }
         ++index->count;
     }
@@ -82,7 +81,7 @@ static esp_err_t scan_cache(report_cache_index_t *index)
     return ESP_OK;
 }
 
-static esp_err_t json_with_sequence(const char *json, uint32_t seq,
+static esp_err_t json_with_delay(const char *json, uint32_t delay_s,
                                     char **out_json)
 {
     if (!json || !out_json) {
@@ -97,7 +96,8 @@ static esp_err_t json_with_sequence(const char *json, uint32_t seq,
     }
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "seq");
-    if (!cJSON_AddNumberToObject(root, "seq", seq)) {
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "delay");
+    if (!cJSON_AddNumberToObject(root, "delay", delay_s)) {
         cJSON_Delete(root);
         return ESP_ERR_NO_MEM;
     }
@@ -107,7 +107,7 @@ static esp_err_t json_with_sequence(const char *json, uint32_t seq,
     return *out_json ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-static esp_err_t json_without_sequence(const char *json, char **out_json)
+static esp_err_t json_without_delay(const char *json, char **out_json)
 {
     if (!json || !out_json) {
         return ESP_ERR_INVALID_ARG;
@@ -121,12 +121,13 @@ static esp_err_t json_without_sequence(const char *json, char **out_json)
     }
 
     cJSON_DeleteItemFromObjectCaseSensitive(root, "seq");
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "delay");
     *out_json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return *out_json ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-esp_err_t report_upload_cache_store(const char *json, uint32_t *out_seq)
+esp_err_t report_upload_cache_store(const char *json, uint64_t *out_time_s)
 {
     if (!json) {
         return ESP_ERR_INVALID_ARG;
@@ -141,22 +142,24 @@ esp_err_t report_upload_cache_store(const char *json, uint32_t *out_seq)
     if (err != ESP_OK) {
         return err;
     }
-    if (index.count > 0 && index.max_seq == UINT32_MAX) {
-        return ESP_ERR_INVALID_SIZE;
+    if (err != ESP_OK) {
+        return err;
     }
 
-    const uint32_t seq = index.count == 0 ? 1U : index.max_seq + 1U;
-    // The report's final seq depends on how many older files exist when a
-    // future current report succeeds, so do not freeze seq at storage time.
+    uint64_t time_s = esp_rtc_get_time_us() / 1000000ULL;
+    if (index.count > 0 && time_s <= index.max_time_s) {
+        time_s = index.max_time_s + 1;
+    }
+
     char *stored_json = NULL;
-    err = json_without_sequence(json, &stored_json);
+    err = json_without_delay(json, &stored_json);
     if (err != ESP_OK) {
         return err;
     }
 
     char final_path[48];
-    snprintf(final_path, sizeof(final_path), REPORT_CACHE_DIR "/%lu.json",
-             (unsigned long)seq);
+    snprintf(final_path, sizeof(final_path), REPORT_CACHE_DIR "/%llu.json",
+             (unsigned long long)time_s);
 
     (void)unlink(REPORT_CACHE_TEMP_PATH);
     err = fsu_write_file(REPORT_CACHE_TEMP_PATH, stored_json,
@@ -173,11 +176,11 @@ esp_err_t report_upload_cache_store(const char *json, uint32_t *out_seq)
         return ESP_FAIL;
     }
 
-    if (out_seq) {
-        *out_seq = seq;
+    if (out_time_s) {
+        *out_time_s = time_s;
     }
-    LOG_INFOF("Report persisted for retry: file_no=%lu file=%s",
-              (unsigned long)seq, final_path);
+    LOG_INFOF("Report persisted for retry: time_s=%llu file=%s",
+              (unsigned long long)time_s, final_path);
     return ESP_OK;
 }
 
@@ -199,12 +202,12 @@ esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender,
         }
 
         char path[48];
-        snprintf(path, sizeof(path), REPORT_CACHE_DIR "/%lu.json",
-                 (unsigned long)index.min_seq);
+        snprintf(path, sizeof(path), REPORT_CACHE_DIR "/%llu.json",
+                 (unsigned long long)index.min_time_s);
         char *stored_json = fsu_read_file_alloc(path, NULL);
         if (!stored_json) {
-            LOG_WARNF("Failed to read cached report: file_no=%lu",
-                      (unsigned long)index.min_seq);
+            LOG_WARNF("Failed to read cached report: time_s=%llu",
+                      (unsigned long long)index.min_time_s);
             return ESP_FAIL;
         }
 
@@ -213,11 +216,12 @@ esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender,
             return ESP_ERR_INVALID_SIZE;
         }
 
-        // With N cached files, the oldest is N periods before the fresh
-        // seq=0 report, and the newest cached file is one period before it.
+        // 按巡逻时间(patrol)去计算延迟，损失一些精度但可以容忍重启导致的时间乱序
+        uint32_t patrol_s = (g_user_config.patrol > 0 ? g_user_config.patrol : 60) * 60;
+        uint32_t delay_s = (uint32_t)index.count * patrol_s;
+
         char *upload_json = NULL;
-        err = json_with_sequence(stored_json, (uint32_t)index.count,
-                                 &upload_json);
+        err = json_with_delay(stored_json, delay_s, &upload_json);
         free(stored_json);
         if (err != ESP_OK) {
             return err;
@@ -226,20 +230,20 @@ esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender,
         err = sender(upload_json, ctx);
         free(upload_json);
         if (err != ESP_OK) {
-            LOG_WARNF("Cached report upload deferred: file_no=%lu seq=%lu error=%s",
-                      (unsigned long)index.min_seq,
-                      (unsigned long)index.count, esp_err_to_name(err));
+            LOG_WARNF("Cached report upload deferred: time_s=%llu delay_s=%lu error=%s",
+                      (unsigned long long)index.min_time_s,
+                      (unsigned long)delay_s, esp_err_to_name(err));
             return err;
         }
 
         if (unlink(path) != 0) {
-            LOG_WARNF("Cached report uploaded but file removal failed: file_no=%lu seq=%lu",
-                      (unsigned long)index.min_seq,
-                      (unsigned long)index.count);
+            LOG_WARNF("Cached report uploaded but file removal failed: time_s=%llu delay_s=%lu",
+                      (unsigned long long)index.min_time_s,
+                      (unsigned long)delay_s);
             return ESP_FAIL;
         }
-        LOG_INFOF("Cached report uploaded: file_no=%lu seq=%lu",
-                  (unsigned long)index.min_seq,
-                  (unsigned long)index.count);
+        LOG_INFOF("Cached report uploaded: time_s=%llu delay_s=%lu",
+                  (unsigned long long)index.min_time_s,
+                  (unsigned long)delay_s);
     }
 }
