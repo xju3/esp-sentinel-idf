@@ -129,7 +129,7 @@ sleep_prepare:
   esp_err_t sensor_power_err = gpio_hold_dis(BOARD_GPIO_SENSOR_EN);
   if (sensor_power_err == ESP_OK) {
     sensor_power_err =
-        gpio_set_direction(BOARD_GPIO_SENSOR_EN, GPIO_MODE_OUTPUT);
+        gpio_set_direction(BOARD_GPIO_SENSOR_EN, GPIO_MODE_INPUT_OUTPUT);
   }
   if (sensor_power_err == ESP_OK) {
     sensor_power_err = gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
