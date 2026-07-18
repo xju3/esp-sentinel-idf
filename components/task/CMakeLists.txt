@@ -6,6 +6,7 @@ set(TASK_SRCS
     "src/task_http_message.c"
     "src/task_ota.c"
     "src/task_status_report.c"
+    "src/task_binding.c"
 )
 
 # wom_lis2dh12.c and off_sleep_manager.c are only compiled when LIS2DH12 is present (-DLIS2=1)

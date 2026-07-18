@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "task_status_report.h"
+#include "task_binding.h"
 
 static http_task_action_handler_t s_action_handler = NULL;
 
@@ -126,6 +127,10 @@ http_pending_tasks_result_t http_message_process_task_array(const cJSON *task_ar
             else if (action == 2)
             {
                 task_status_report_execute(task_id);
+            }
+            else if (action == 3)
+            {
+                task_binding_execute(task_id);
             }
             else if (is_repeated_report_action)
             {
