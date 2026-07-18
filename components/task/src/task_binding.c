@@ -152,15 +152,13 @@ void task_binding_execute(const char *task_id) {
     return;
   }
 
+  const char *new_device_id = "";
   cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
-  if (!cJSON_IsString(dev_id_item)) {
-    LOG_ERROR("Missing device_id in binding data");
-    cJSON_Delete(root);
-    free(response);
-    return;
+  if (cJSON_IsString(dev_id_item)) {
+      new_device_id = dev_id_item->valuestring;
+  } else {
+      LOG_INFO("device_id is missing or not a string. Treating as completely unbound.");
   }
-
-  const char *new_device_id = dev_id_item->valuestring;
   bool needs_factory_reset = (new_device_id[0] == '\0');
   bool binding_changed =
       (strncmp(g_user_config.device_id, new_device_id, LEN_MAX_DEVICE_ID) != 0);
