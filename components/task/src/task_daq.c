@@ -334,8 +334,13 @@ uint64_t daq_scheduler_get_sleep_time_us(void) {
     }
   }
 
-  if (next_sleep_us < 0) {
-    return 0; // 全被禁用，且无服务器任务，无限休眠
+  if (next_sleep_us <= 0) {
+    int64_t fallback_us = (int64_t)(g_user_config.patrol * 60000000.0);
+    if (fallback_us <= 0) {
+        fallback_us = 60000000LL; // 至少保证1分钟休眠，绝对防止变砖
+    }
+    s_patrol_left_us = fallback_us;
+    next_sleep_us = fallback_us;
   }
 
   // 6. 正常情况下，睡眠时间是周期剩余量：patrol周期 - 实际工作时间。
