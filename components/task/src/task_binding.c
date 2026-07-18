@@ -12,6 +12,7 @@
 #include "drv_4g.h"
 #include "logger.h"
 #include "task_binding.h"
+#include "fs_utils.h"
 #include "bsp_board.h"
 #include "driver/gpio.h"
 #include "drv_iis3dwb.h"
@@ -171,11 +172,22 @@ void task_binding_execute(const char *task_id) {
     // Give 4G module some time to finish transmitting the HTTP POST completely
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // Restore factory settings: delete user_config.json
-    if (remove(FILE_PATH_CONFIG_USER) == 0) {
-      LOG_INFO("Successfully deleted user config file.");
+    // Clear the device ID from device profile
+    if (config_manager_save_device_id("") == ESP_OK) {
+      LOG_INFO("Successfully cleared device_id from device profile.");
     } else {
-      LOG_WARN("Failed to delete user config file.");
+      LOG_WARN("Failed to clear device_id from device profile.");
+    }
+
+    // Restore factory settings: delete user_config.json
+    if (fsu_file_exists(FILE_PATH_CONFIG_USER)) {
+      if (remove(FILE_PATH_CONFIG_USER) == 0) {
+        LOG_INFO("Successfully deleted user config file.");
+      } else {
+        LOG_WARN("Failed to delete user config file.");
+      }
+    } else {
+      LOG_INFO("User config file does not exist, no need to delete.");
     }
 
     LOG_INFO("Restarting system...");
