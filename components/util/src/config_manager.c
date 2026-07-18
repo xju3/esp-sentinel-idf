@@ -244,6 +244,14 @@ static esp_err_t load_device_profile(user_config_t *cfg) {
   }
 
   safe_copy(cfg->sn, sizeof(cfg->sn), sn->valuestring);
+
+  const cJSON *device_id = cJSON_GetObjectItemCaseSensitive(root, "device_id");
+  if (cJSON_IsString(device_id)) {
+    safe_copy(cfg->device_id, sizeof(cfg->device_id), device_id->valuestring);
+  } else {
+    cfg->device_id[0] = '\0';
+  }
+
   cJSON_Delete(root);
   return ESP_OK;
 }
@@ -472,5 +480,47 @@ esp_err_t config_manager_save_user(const user_config_t *cfg) {
 
   esp_err_t err = config_manager_save_user_json(json_str);
   free(json_str);
+  return err;
+}
+
+esp_err_t config_manager_save_device_id(const char* device_id) {
+  if (!fsu_is_user_mounted()) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  char *json = fsu_read_file_alloc(FILE_PATH_DEVICE_PROFILE, NULL);
+  if (!json) {
+    LOG_ERRORF("Device profile not found: %s", FILE_PATH_DEVICE_PROFILE);
+    return ESP_ERR_NOT_FOUND;
+  }
+
+  cJSON *root = cJSON_Parse(json);
+  free(json);
+  if (!cJSON_IsObject(root)) {
+    cJSON_Delete(root);
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+
+  // Update or add device_id
+  cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(root, "device_id");
+  if (dev_id_item) {
+    cJSON_ReplaceItemInObjectCaseSensitive(root, "device_id", cJSON_CreateString(device_id));
+  } else {
+    cJSON_AddStringToObject(root, "device_id", device_id);
+  }
+
+  char *new_json = cJSON_PrintUnformatted(root);
+  cJSON_Delete(root);
+
+  if (!new_json) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  esp_err_t err = fsu_write_file(FILE_PATH_DEVICE_PROFILE, new_json, strlen(new_json));
+  free(new_json);
+
+  if (err == ESP_OK) {
+    safe_copy(g_user_config.device_id, sizeof(g_user_config.device_id), device_id);
+  }
   return err;
 }

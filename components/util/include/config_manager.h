@@ -64,6 +64,7 @@ extern "C"
     typedef struct
     {
         char sn[LEN_MAX_DEVICE_ID];
+        char device_id[LEN_MAX_DEVICE_ID];
         char device_name[LEN_MAX_DEVICE_NAME];
         char device_type[LEN_MAX_DEVICE_TYPE]; // defined in iso standards.
         int8_t motor_type;                     // 1. fixed speed motor, 2. variable frequency device, 3. servo
@@ -101,6 +102,9 @@ extern "C"
 
     // Save user config struct as JSON to user partition.
     esp_err_t config_manager_save_user(const user_config_t *cfg);
+
+    // Save device_id to device profile.
+    esp_err_t config_manager_save_device_id(const char* device_id);
 
     // Log the default JSON config (used when user config is missing or invalid).
     esp_err_t config_manager_log_default_json(void);

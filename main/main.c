@@ -15,6 +15,7 @@
 #include "drv_lis2dh12.h"
 #include "init.h"
 #include "logger.h"
+#include "cJSON.h"
 
 #include "system_lock.h"
 #include "report_pipeline.h"
@@ -101,6 +102,65 @@ void app_main(void) {
     LOG_ERROR("Device configuration or SN is unavailable. Skipping acquisition and upload.");
     goto sleep_prepare;
   }
+
+  // --- BINDING CHECK LOGIC START ---
+  if (g_user_config.device_id[0] == '\0') {
+      LOG_INFO("Device is not bound to any monitored device. Checking binding status via 4G...");
+      bool is_bound = false;
+      if (init_4g_network(NULL) == ESP_OK) {
+          char url[256];
+          snprintf(url, sizeof(url), "http://%s/api/v1/sensors/binding/%s", g_user_config.api_host, g_user_config.sn);
+          char *response = NULL;
+          if (bsp_4g_http_get(url, &response) == ESP_OK && response != NULL) {
+              cJSON *root = cJSON_Parse(response);
+              if (root) {
+                  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+                  if (cJSON_IsObject(data)) {
+                      cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
+                      if (cJSON_IsString(dev_id_item) && dev_id_item->valuestring[0] != '\0') {
+                          LOG_INFOF("Successfully retrieved binding info: device_id=%s", dev_id_item->valuestring);
+                          config_manager_save_device_id(dev_id_item->valuestring);
+                          is_bound = true;
+                      }
+                  }
+                  cJSON_Delete(root);
+              }
+          } else {
+              LOG_WARN("Failed to get binding status from server");
+          }
+          free(response);
+      } else {
+          LOG_WARN("Failed to initialize 4G network for binding check");
+      }
+
+      if (is_bound) {
+          LOG_INFO("Device bound. Entering patrol sleep cycle.");
+          (void)shutdown_4g_network();
+          uint64_t patrol_sleep_us = (uint64_t)g_user_config.patrol * 60ULL * 1000000ULL;
+          if (patrol_sleep_us > 0) {
+              esp_sleep_enable_timer_wakeup(patrol_sleep_us);
+          }
+#if LIS2
+          wom_lis2dh12_enable_deep_sleep_wakeup();
+#endif
+          esp_deep_sleep_start();
+      } else {
+          LOG_INFO("Device still not bound. Entering long sleep...");
+          (void)shutdown_4g_network();
+#ifdef DEV_MODE
+#if DEV_MODE == 1
+          uint64_t long_sleep_us = 5ULL * 60ULL * 1000000ULL; // 5 minutes
+#else
+          uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
+#endif
+#else
+          uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
+#endif
+          esp_sleep_enable_timer_wakeup(long_sleep_us);
+          esp_deep_sleep_start();
+      }
+  }
+  // --- BINDING CHECK LOGIC END ---
 
   if (!has_report_work) {
     goto sleep_prepare;

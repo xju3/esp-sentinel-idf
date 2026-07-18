@@ -99,6 +99,11 @@ spiffs_create_partition_image(system ${SPIFFS_TEMP_DIR} FLASH_IN_PROJECT)
 if(NOT DEFINED SN OR SN STREQUAL "")
     message(FATAL_ERROR "SN is required to generate user.bin (example: -DSN=26SH00101)")
 endif()
+
+if(NOT DEFINED DEV)
+    set(DEV 0)
+endif()
+add_compile_definitions(DEV_MODE=${DEV})
 string(LENGTH "${SN}" SN_LENGTH)
 if(SN_LENGTH GREATER 63 OR NOT SN MATCHES "^[A-Za-z0-9_-]+$")
     message(FATAL_ERROR "Invalid sensor SN: ${SN}")
@@ -115,7 +120,8 @@ file(WRITE "${USER_SPIFFS_DIR}/device_profile.json"
      "{\n"
      "  \"sn\": \"${SN}\",\n"
      "  \"version\": \"${VERSION}\",\n"
-     "  \"generated_at\": \"${DEVICE_PROFILE_GENERATED_AT}\"\n"
+     "  \"generated_at\": \"${DEVICE_PROFILE_GENERATED_AT}\",\n"
+     "  \"device_id\": \"\"\n"
      "}\n")
 
 message(STATUS "Generating user.bin device profile: SN=${SN}, VERSION=${VERSION}, generated_at=${DEVICE_PROFILE_GENERATED_AT}")
