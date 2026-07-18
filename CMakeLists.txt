@@ -37,6 +37,12 @@ project(sentinel)
 idf_build_set_property(COMPILE_DEFINITIONS "-DLIS2=${LIS2}" APPEND)
 message(STATUS "LIS2DH12 support: LIS2=${LIS2}")
 
+if(NOT DEFINED DEV)
+    set(DEV 0)
+endif()
+idf_build_set_property(COMPILE_DEFINITIONS "-DDEV_MODE=${DEV}" APPEND)
+message(STATUS "DEV mode: DEV_MODE=${DEV}")
+
 # 在创建SPIFFS镜像前的预处理
 set(RESOURCES_SYSTEM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/resources/system")
 
@@ -100,10 +106,6 @@ if(NOT DEFINED SN OR SN STREQUAL "")
     message(FATAL_ERROR "SN is required to generate user.bin (example: -DSN=26SH00101)")
 endif()
 
-if(NOT DEFINED DEV)
-    set(DEV 0)
-endif()
-add_compile_definitions(DEV_MODE=${DEV})
 string(LENGTH "${SN}" SN_LENGTH)
 if(SN_LENGTH GREATER 63 OR NOT SN MATCHES "^[A-Za-z0-9_-]+$")
     message(FATAL_ERROR "Invalid sensor SN: ${SN}")

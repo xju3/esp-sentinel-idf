@@ -9,20 +9,20 @@
 #include "bsp_board.h"
 #include "config_manager.h"
 
+#include "cJSON.h"
 #include "drv_4g.h" // 引入 4G 相关接口
 #include "drv_ds18b20.h"
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "init.h"
 #include "logger.h"
-#include "cJSON.h"
 
-#include "system_lock.h"
 #include "report_pipeline.h"
+#include "system_lock.h"
 #include "task_daq.h"
 
-#include "task_ota.h"
 #include "esp_ota_ops.h"
+#include "task_ota.h"
 
 #include "wom_lis2dh12.h" // 引入 WoM 接口
 
@@ -67,10 +67,6 @@ void app_main(void) {
   init_system_lock();
   deisolate_gpio_pins();
 
-  // 先启动 DS18B20 转换；后续本地传感器初始化、配置加载和缓冲区准备
-  // 都与转换等待重叠，正式 IIS3DWB 采样仍在温度结果读取之后开始。
-  ESP_ERROR_CHECK(start_local_services());
-
   esp_err_t cfg_err = config_manager_load(&g_user_config);
   if (cfg_err != ESP_OK) {
     LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
@@ -99,68 +95,80 @@ void app_main(void) {
   }
 
   if (cfg_err != ESP_OK || g_user_config.sn[0] == '\0') {
-    LOG_ERROR("Device configuration or SN is unavailable. Skipping acquisition and upload.");
+    LOG_ERROR("Device configuration or SN is unavailable. Skipping acquisition "
+              "and upload.");
     goto sleep_prepare;
   }
 
   // --- BINDING CHECK LOGIC START ---
   if (g_user_config.device_id[0] == '\0') {
-      LOG_INFO("Device is not bound to any monitored device. Checking binding status via 4G...");
-      bool is_bound = false;
-      if (init_4g_network(NULL) == ESP_OK) {
-          char url[256];
-          snprintf(url, sizeof(url), "http://%s/api/v1/sensors/binding/%s", g_user_config.api_host, g_user_config.sn);
-          char *response = NULL;
-          if (bsp_4g_http_get(url, &response) == ESP_OK && response != NULL) {
-              cJSON *root = cJSON_Parse(response);
-              if (root) {
-                  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-                  if (cJSON_IsObject(data)) {
-                      cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
-                      if (cJSON_IsString(dev_id_item) && dev_id_item->valuestring[0] != '\0') {
-                          LOG_INFOF("Successfully retrieved binding info: device_id=%s", dev_id_item->valuestring);
-                          config_manager_save_device_id(dev_id_item->valuestring);
-                          is_bound = true;
-                      }
-                  }
-                  cJSON_Delete(root);
-              }
-          } else {
-              LOG_WARN("Failed to get binding status from server");
+    LOG_INFO("Device is not bound to any monitored device. Checking binding "
+             "status via 4G...");
+    bool is_bound = false;
+    if (init_4g_network(NULL) == ESP_OK) {
+      char url[256];
+      snprintf(url, sizeof(url), "http://%s/api/v1/sensors/binding/%s",
+               g_user_config.api_host, g_user_config.sn);
+      char *response = NULL;
+      if (bsp_4g_http_get(url, &response) == ESP_OK && response != NULL) {
+        cJSON *root = cJSON_Parse(response);
+        if (root) {
+          cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+          if (cJSON_IsObject(data)) {
+            cJSON *dev_id_item =
+                cJSON_GetObjectItemCaseSensitive(data, "device_id");
+            if (cJSON_IsString(dev_id_item) &&
+                dev_id_item->valuestring[0] != '\0') {
+              LOG_INFOF("Successfully retrieved binding info: device_id=%s",
+                        dev_id_item->valuestring);
+              config_manager_save_device_id(dev_id_item->valuestring);
+              is_bound = true;
+            }
           }
-          free(response);
+          cJSON_Delete(root);
+        }
       } else {
-          LOG_WARN("Failed to initialize 4G network for binding check");
+        LOG_WARN("Failed to get binding status from server");
       }
+      free(response);
+    } else {
+      LOG_WARN("Failed to initialize 4G network for binding check");
+    }
 
-      if (is_bound) {
-          LOG_INFO("Device bound. Entering patrol sleep cycle.");
-          (void)shutdown_4g_network();
-          uint64_t patrol_sleep_us = (uint64_t)g_user_config.patrol * 60ULL * 1000000ULL;
-          if (patrol_sleep_us > 0) {
-              esp_sleep_enable_timer_wakeup(patrol_sleep_us);
-          }
+    if (is_bound) {
+      LOG_INFO("Device bound. Entering patrol sleep cycle.");
+      (void)shutdown_4g_network();
+      uint64_t patrol_sleep_us =
+          (uint64_t)g_user_config.patrol * 60ULL * 1000000ULL;
+      if (patrol_sleep_us > 0) {
+        esp_sleep_enable_timer_wakeup(patrol_sleep_us);
+      }
 #if LIS2
-          wom_lis2dh12_enable_deep_sleep_wakeup();
+      wom_lis2dh12_enable_deep_sleep_wakeup();
 #endif
-          esp_deep_sleep_start();
-      } else {
-          LOG_INFO("Device still not bound. Entering long sleep...");
-          (void)shutdown_4g_network();
+      esp_deep_sleep_start();
+    } else {
 #ifdef DEV_MODE
 #if DEV_MODE == 1
-          uint64_t long_sleep_us = 5ULL * 60ULL * 1000000ULL; // 5 minutes
+      uint64_t long_sleep_us = 5ULL * 60ULL * 1000000ULL; // 5 minutes
 #else
-          uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
+      uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
 #endif
 #else
-          uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
+      uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
 #endif
-          esp_sleep_enable_timer_wakeup(long_sleep_us);
-          esp_deep_sleep_start();
-      }
+      LOG_INFOF("Device still not bound. Entering long sleep for %llu minutes...", long_sleep_us / (60ULL * 1000000ULL));
+      (void)shutdown_4g_network();
+      esp_sleep_enable_timer_wakeup(long_sleep_us);
+      esp_deep_sleep_start();
+    }
   }
   // --- BINDING CHECK LOGIC END ---
+
+  // 如果执行到这里，说明设备已经绑定，正式进入检测工作流程。
+  // 先启动 DS18B20 转换；后续任务与网络加载可与转换等待重叠，
+  // 正式 IIS3DWB 采样仍在温度结果读取之后开始。
+  ESP_ERROR_CHECK(start_local_services());
 
   if (!has_report_work) {
     goto sleep_prepare;
@@ -184,7 +192,7 @@ void app_main(void) {
 
 sleep_prepare:
   // 5. 统一释放本轮外部资源。
-  (void)shutdown_4g_network(); // 通知4G模块关机并释放串口
+  (void)shutdown_4g_network();       // 通知4G模块关机并释放串口
   (void)drv_iis3dwb_enter_standby(); // 传感器待机
   esp_err_t sensor_power_err = gpio_hold_dis(BOARD_GPIO_SENSOR_EN);
   if (sensor_power_err == ESP_OK) {
