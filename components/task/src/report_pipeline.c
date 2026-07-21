@@ -667,6 +667,7 @@ static char *build_report_json(float temperature_c,
 
     cJSON_AddNumberToObject(root, "schema_version", REPORT_SCHEMA_VERSION);
     cJSON_AddStringToObject(root, "sn", g_user_config.sn);
+    cJSON_AddStringToObject(root, "device_id", g_user_config.device_id);
     if (temperature_valid) {
         add_number_rounded(root, "temperature_c", temperature_c, 1);
     } else {
