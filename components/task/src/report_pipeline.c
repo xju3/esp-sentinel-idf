@@ -666,7 +666,7 @@ static char *build_report_json(float temperature_c,
     }
 
     cJSON_AddNumberToObject(root, "schema_version", REPORT_SCHEMA_VERSION);
-    cJSON_AddStringToObject(root, "sn", g_user_config.sn);
+    cJSON_AddStringToObject(root, "sensor_sn", g_user_config.sn);
     cJSON_AddStringToObject(root, "device_id", g_user_config.device_id);
     if (temperature_valid) {
         add_number_rounded(root, "temperature_c", temperature_c, 1);
@@ -743,9 +743,16 @@ static esp_err_t update_report_delay(char **json, uint32_t delay_s)
         return ESP_ERR_INVALID_RESPONSE;
     }
 
+    uint32_t total = report_upload_cache_get_count();
+
     cJSON_DeleteItemFromObjectCaseSensitive(root, "seq");
     cJSON_DeleteItemFromObjectCaseSensitive(root, "delay");
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "total");
     if (!cJSON_AddNumberToObject(root, "delay", delay_s)) {
+        cJSON_Delete(root);
+        return ESP_ERR_NO_MEM;
+    }
+    if (!cJSON_AddNumberToObject(root, "total", total)) {
         cJSON_Delete(root);
         return ESP_ERR_NO_MEM;
     }

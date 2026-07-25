@@ -78,7 +78,7 @@ static esp_err_t scan_cache(report_cache_index_t *index) {
   return ESP_OK;
 }
 
-static esp_err_t json_with_delay(const char *json, uint32_t delay_s,
+static esp_err_t json_with_delay_and_total(const char *json, uint32_t delay_s, uint32_t total,
                                  char **out_json) {
   if (!json || !out_json) {
     return ESP_ERR_INVALID_ARG;
@@ -93,7 +93,12 @@ static esp_err_t json_with_delay(const char *json, uint32_t delay_s,
 
   cJSON_DeleteItemFromObjectCaseSensitive(root, "seq");
   cJSON_DeleteItemFromObjectCaseSensitive(root, "delay");
+  cJSON_DeleteItemFromObjectCaseSensitive(root, "total");
   if (!cJSON_AddNumberToObject(root, "delay", delay_s)) {
+    cJSON_Delete(root);
+    return ESP_ERR_NO_MEM;
+  }
+  if (!cJSON_AddNumberToObject(root, "total", total)) {
     cJSON_Delete(root);
     return ESP_ERR_NO_MEM;
   }
@@ -178,6 +183,17 @@ esp_err_t report_upload_cache_store(const char *json, uint64_t *out_time_s) {
   return ESP_OK;
 }
 
+uint32_t report_upload_cache_get_count(void) {
+  if (!fsu_is_user_mounted()) {
+    return 0;
+  }
+  report_cache_index_t index = {0};
+  if (scan_cache(&index) == ESP_OK) {
+    return (uint32_t)index.count;
+  }
+  return 0;
+}
+
 esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender,
                                     void *ctx) {
   if (!sender) {
@@ -214,7 +230,8 @@ esp_err_t report_upload_cache_flush(report_upload_cache_sender_t sender,
         (now_s > index.min_time_s) ? (uint32_t)(now_s - index.min_time_s) : 0;
 
     char *upload_json = NULL;
-    err = json_with_delay(stored_json, delay_s, &upload_json);
+    uint32_t total = (index.count > 0) ? (index.count - 1) : 0;
+    err = json_with_delay_and_total(stored_json, delay_s, total, &upload_json);
     free(stored_json);
     if (err != ESP_OK) {
       return err;

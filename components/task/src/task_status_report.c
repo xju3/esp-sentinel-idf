@@ -47,7 +47,7 @@ void task_status_report_execute(const char *task_id)
     cJSON_AddNumberToObject(root, "temperature", temperature);
     cJSON_AddNumberToObject(root, "rssi", rssi);
     cJSON_AddNumberToObject(root, "voltage", voltage);
-    cJSON_AddStringToObject(root, "sn", g_user_config.sn);
+    cJSON_AddStringToObject(root, "sensor_sn", g_user_config.sn);
     cJSON_AddStringToObject(root, "device_id", g_user_config.device_id);
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
 

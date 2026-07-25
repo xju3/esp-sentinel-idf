@@ -34,6 +34,7 @@ static const char *task_val_to_string(const cJSON *val_item)
     return "";
 }
 
+// 获取传感器配置
 static esp_err_t execute_config_update_sync(const char *task_id)
 {
     char url[256];
