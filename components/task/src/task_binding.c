@@ -89,14 +89,25 @@ void task_binding_check_and_sleep(void)
                     cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
                     if (cJSON_IsString(dev_id_item) && dev_id_item->valuestring[0] != '\0') {
                         LOG_INFOF("Successfully retrieved binding info: device_id=%s", dev_id_item->valuestring);
-                        config_manager_save_device_id(dev_id_item->valuestring);
+                        
+                        int32_t new_rpm = g_user_config.rpm;
+                        cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
+                        if (cJSON_IsNumber(rpm_item)) {
+                            new_rpm = (int32_t)rpm_item->valueint;
+                            if (new_rpm != g_user_config.rpm) {
+                                LOG_INFOF("Successfully retrieved binding info: rpm=%ld", (long)new_rpm);
+                            }
+                        }
+                        
+                        config_manager_save_device_profile(dev_id_item->valuestring, new_rpm);
+
                         is_bound = true;
                     }
                 }
                 cJSON_Delete(root);
             }
         } else {
-            LOG_WARN("Failed to get binding status from server");
+            LOG_WARN("Failed to get binding status from server...");
         }
         free(response);
     } else {
@@ -160,9 +171,19 @@ void task_binding_execute(const char *task_id) {
   } else {
       LOG_INFO("device_id is missing or not a string. Treating as completely unbound.");
   }
+
   bool needs_factory_reset = (new_device_id[0] == '\0');
   bool binding_changed =
       (strncmp(g_user_config.device_id, new_device_id, LEN_MAX_DEVICE_ID) != 0);
+
+  int32_t new_rpm = g_user_config.rpm;
+  if (!needs_factory_reset) {
+      cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
+      if (cJSON_IsNumber(rpm_item)) {
+          new_rpm = (int32_t)rpm_item->valueint;
+      }
+  }
+  bool rpm_changed = (g_user_config.rpm != new_rpm);
 
   // If completely unbound, restore factory settings
   if (needs_factory_reset) {
@@ -172,11 +193,11 @@ void task_binding_execute(const char *task_id) {
     // Give 4G module some time to finish transmitting the HTTP POST completely
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // Clear the device ID from device profile
-    if (config_manager_save_device_id("") == ESP_OK) {
-      LOG_INFO("Successfully cleared device_id from device profile.");
+    // Clear the device ID and rpm from device profile
+    if (config_manager_save_device_profile("", 0) == ESP_OK) {
+      LOG_INFO("Successfully cleared device profile.");
     } else {
-      LOG_WARN("Failed to clear device_id from device profile.");
+      LOG_WARN("Failed to clear device profile.");
     }
 
     // Restore factory settings: delete user_config.json
@@ -192,10 +213,14 @@ void task_binding_execute(const char *task_id) {
 
     LOG_INFO("Restarting system...");
     esp_restart();
-  } else if (binding_changed) {
-    LOG_INFOF("Binding changed from %s to %s", g_user_config.device_id,
-              new_device_id);
-    config_manager_save_device_id(new_device_id);
+  } else if (binding_changed || rpm_changed) {
+    if (binding_changed) {
+        LOG_INFOF("Binding changed from %s to %s", g_user_config.device_id, new_device_id);
+    }
+    if (rpm_changed) {
+        LOG_INFOF("RPM changed from %ld to %ld", (long)g_user_config.rpm, (long)new_rpm);
+    }
+    config_manager_save_device_profile(new_device_id, new_rpm);
     report_task_complete(task_id, 1);
   } else {
     LOG_INFO("Binding relationship unchanged.");

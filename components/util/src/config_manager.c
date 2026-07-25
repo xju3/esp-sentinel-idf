@@ -252,6 +252,11 @@ static esp_err_t load_device_profile(user_config_t *cfg) {
     cfg->device_id[0] = '\0';
   }
 
+  const cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
+  if (cJSON_IsNumber(rpm_item)) {
+    cfg->rpm = (int32_t)rpm_item->valueint;
+  }
+
   cJSON_Delete(root);
   return ESP_OK;
 }
@@ -445,7 +450,6 @@ esp_err_t config_manager_save_user(const user_config_t *cfg) {
   cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
   cJSON_AddNumberToObject(root, "range_g", cfg->range_g);
   cJSON_AddNumberToObject(root, "battery", cfg->battery);
-  cJSON_AddNumberToObject(root, "rpm", cfg->rpm);
   cJSON_AddNumberToObject(root, "target_rev", cfg->target_rev);
   cJSON_AddNumberToObject(root, "network", cfg->network);
   cJSON_AddBoolToObject(root, "ble", cfg->ble);
@@ -483,7 +487,7 @@ esp_err_t config_manager_save_user(const user_config_t *cfg) {
   return err;
 }
 
-esp_err_t config_manager_save_device_id(const char* device_id) {
+esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm) {
   if (!fsu_is_user_mounted()) {
     return ESP_ERR_INVALID_STATE;
   }
@@ -509,6 +513,14 @@ esp_err_t config_manager_save_device_id(const char* device_id) {
     cJSON_AddStringToObject(root, "device_id", device_id);
   }
 
+  // Update or add rpm
+  cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
+  if (rpm_item) {
+    cJSON_ReplaceItemInObjectCaseSensitive(root, "rpm", cJSON_CreateNumber(rpm));
+  } else {
+    cJSON_AddNumberToObject(root, "rpm", rpm);
+  }
+
   char *new_json = cJSON_PrintUnformatted(root);
   cJSON_Delete(root);
 
@@ -521,6 +533,7 @@ esp_err_t config_manager_save_device_id(const char* device_id) {
 
   if (err == ESP_OK) {
     safe_copy(g_user_config.device_id, sizeof(g_user_config.device_id), device_id);
+    g_user_config.rpm = rpm;
   }
   return err;
 }

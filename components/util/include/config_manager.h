@@ -103,8 +103,8 @@ extern "C"
     // Save user config struct as JSON to user partition.
     esp_err_t config_manager_save_user(const user_config_t *cfg);
 
-    // Save device_id to device profile.
-    esp_err_t config_manager_save_device_id(const char* device_id);
+    // Save device_id and rpm to device profile.
+    esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm);
 
     // Log the default JSON config (used when user config is missing or invalid).
     esp_err_t config_manager_log_default_json(void);

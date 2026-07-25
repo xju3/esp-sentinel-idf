@@ -946,7 +946,10 @@ static esp_err_t modem_prepare_packet_service(ppp_4g_diag_result_t *result)
         modem_copy_cgpaddr_ip(response, result->ip_addr, sizeof(result->ip_addr));
     }
 
-    // LOG_DEBUGF("4G packet service is ready.");
+    // PDP 激活并拿到 IP 之后，给网络层额外 500ms 稳定时间，
+    // 避免立即发起 QHTTPGET 时底层 Socket 资源尚未完全就绪导致 715 错误。
+    vTaskDelay(pdMS_TO_TICKS(500));
+
     return ESP_OK;
 }
 
@@ -1166,6 +1169,29 @@ static void append_uart_response_until_line_end(char *response, size_t response_
     }
 }
 
+// 执行一次 QHTTPGET，成功返回 (qerr, qstatus, qlen) 填入出参，失败返回 ESP_FAIL。
+// 若 qerr == 715（Socket create error），调用方可在短暂延时后重试。
+static esp_err_t modem_http_get_once(char *response, size_t response_size,
+                                     int *out_qerr, int *out_qstatus, int *out_qlen)
+{
+    *out_qerr = -1;
+    *out_qstatus = -1;
+    *out_qlen = 0;
+
+    uart_write_bytes(UART_PORT_NUM, "AT+QHTTPGET=80\r\n", 16);
+    esp_err_t err = modem_read_until_pattern(response, response_size, "+QHTTPGET:", 40000);
+    if (err != ESP_OK)
+        return err;
+
+    append_uart_response_until_line_end(response, response_size, 1000);
+
+    const char *line = strstr(response, "+QHTTPGET:");
+    if (line && sscanf(line, "+QHTTPGET: %d,%d,%d", out_qerr, out_qstatus, out_qlen) >= 2)
+        return ESP_OK;
+
+    return ESP_FAIL;
+}
+
 static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
 {
     if (!url || !out_response)
@@ -1180,6 +1206,15 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
         return ESP_ERR_NO_MEM;
     int url_len = strlen(url);
     esp_err_t err = ESP_OK;
+
+    // ① 明确指定 HTTP 使用 context id=1，与 PDP 激活时保持一致
+    err = modem_send_command("AT+QHTTPCFG=\"contextid\",1", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
+    if (err != ESP_OK || !modem_response_is_ok(response))
+    {
+        LOG_WARNF("QHTTPCFG contextid set failed: %s", response);
+        err = err != ESP_OK ? err : ESP_FAIL;
+        goto cleanup;
+    }
 
     err = modem_send_command("AT+QHTTPCFG=\"requestheader\",0", response, MODEM_HTTP_RESP_BUF_SIZE, 2000);
     if (err != ESP_OK || !modem_response_is_ok(response))
@@ -1217,21 +1252,68 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
         goto cleanup;
     }
 
-    // 3. 触发模块发起底层 HTTP GET 请求
-    uart_write_bytes(UART_PORT_NUM, "AT+QHTTPGET=80\r\n", 16);
-    // 请求可能耗时很长，给 40 秒超时
-    err = modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "+QHTTPGET:", 40000);
-    if (err != ESP_OK)
+    // 3. 触发模块发起底层 HTTP GET 请求，针对 715 错误最多重试 3 次
     {
-        goto cleanup;
-    }
-    append_uart_response_until_line_end(response, MODEM_HTTP_RESP_BUF_SIZE, 1000);
+        int qerr = -1, qstatus = -1, qlen = 0;
+        const int max_retries = 3;
+        for (int attempt = 0; attempt <= max_retries; ++attempt)
+        {
+            if (attempt > 0)
+            {
+                // ③④ 上次失败，先查询 QIACT 诊断网络状态，再执行 QHTTPSTOP 清理 HTTP Session
+                LOG_WARNF("QHTTPGET 715 retry %d/%d: cleaning up HTTP session...", attempt, max_retries);
+                if (modem_send_command("AT+QIACT?", response, MODEM_HTTP_RESP_BUF_SIZE, 3000) == ESP_OK)
+                {
+                    LOG_DEBUGF("QIACT? result: %s", response);
+                }
+                // 发送 QHTTPSTOP 关闭残留 HTTP session
+                (void)modem_send_command("AT+QHTTPSTOP", response, MODEM_HTTP_RESP_BUF_SIZE, 3000);
+                vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // 解析 QHTTPGET: err, status, len
-    int qerr = -1, qstatus = -1, qlen = 0;
-    const char *httpget_line = strstr(response, "+QHTTPGET:");
-    if (httpget_line && sscanf(httpget_line, "+QHTTPGET: %d,%d,%d", &qerr, &qstatus, &qlen) == 3)
-    {
+                // 重新设置 URL，为下一次 QHTTPGET 做准备
+                snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%d,80\r\n", url_len);
+                uart_flush_input(UART_PORT_NUM);
+                uart_write_bytes(UART_PORT_NUM, cmd, strlen(cmd));
+                if (modem_read_until_pattern(response, MODEM_HTTP_RESP_BUF_SIZE, "CONNECT", 5000) != ESP_OK)
+                {
+                    err = ESP_FAIL;
+                    break;
+                }
+                uart_write_bytes(UART_PORT_NUM, url, url_len);
+                if (modem_read_response(response, MODEM_HTTP_RESP_BUF_SIZE, 5000) != ESP_OK ||
+                    !modem_response_is_ok(response))
+                {
+                    err = ESP_FAIL;
+                    break;
+                }
+            }
+
+            err = modem_http_get_once(response, MODEM_HTTP_RESP_BUF_SIZE, &qerr, &qstatus, &qlen);
+            if (err != ESP_OK)
+                break; // UART 超时等硬性错误，直接退出
+
+            // ④ 打印每次尝试的诊断日志
+            LOG_DEBUGF("QHTTPGET attempt=%d qerr=%d qstatus=%d qlen=%d",
+                       attempt, qerr, qstatus, qlen);
+
+            if (qerr == 715)
+            {
+                // Socket create error —— 进入下一次重试循环
+                if (attempt < max_retries)
+                    continue;
+                // 重试耗尽
+                LOG_WARNF("QHTTPGET 715 after %d retries, giving up.", max_retries);
+                err = ESP_FAIL;
+                break;
+            }
+
+            // qerr != 715，跳出重试循环进行正常处理
+            break;
+        }
+
+        if (err != ESP_OK)
+            goto cleanup;
+
         if (qerr == 0 && qlen > 0)
         {
             // 4. 从模块内部提取 JSON 数据 (即便不是 200 也要读出来看看报错详情)
@@ -1278,16 +1360,16 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
             // content_len == 0
             err = ESP_OK;
         }
-        else
+        else if (qerr != -1)
         {
             LOG_WARNF("HTTP GET failed: AT_err=%d, HTTP_status=%d, content_len=%d", qerr, qstatus, qlen);
             err = ESP_FAIL;
         }
-    }
-    else
-    {
-        LOG_WARNF("Unexpected QHTTPGET response: %s", response);
-        err = ESP_FAIL;
+        else
+        {
+            LOG_WARNF("Unexpected QHTTPGET response: %s", response);
+            err = ESP_FAIL;
+        }
     }
 
 cleanup:
