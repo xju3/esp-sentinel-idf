@@ -62,6 +62,7 @@
 static bool s_uart_driver_installed = false;
 static bool s_at_ready = false;
 static bool s_module_network_ready = false;
+static bool s_modem_power_on = false;
 static char s_modem_response[MODEM_RESP_BUF_SIZE];
 static volatile bool s_at_cmd_active = false;
 static SemaphoreHandle_t s_at_mutex = NULL;
@@ -388,6 +389,7 @@ static esp_err_t modem_power_enable(void)
     esp_err_t err = gpio_set_level(MODEM_PWR_EN_PIN, MODEM_POWER_ENABLE_LEVEL);
     if (err == ESP_OK)
     {
+        s_modem_power_on = true;
         vTaskDelay(pdMS_TO_TICKS(MODEM_POWER_SETTLE_MS));
     }
     return err;
@@ -395,7 +397,12 @@ static esp_err_t modem_power_enable(void)
 
 static esp_err_t modem_power_disable(void)
 {
-    return gpio_set_level(MODEM_PWR_EN_PIN, MODEM_POWER_DISABLE_LEVEL);
+    esp_err_t err = gpio_set_level(MODEM_PWR_EN_PIN, MODEM_POWER_DISABLE_LEVEL);
+    if (err == ESP_OK)
+    {
+        s_modem_power_on = false;
+    }
+    return err;
 }
 
 static int modem_status_level(void);
@@ -712,7 +719,7 @@ static esp_err_t modem_shutdown_gracefully(bool at_ready)
     if (at_ready)
     {
         (void)uart_flush_input(UART_PORT_NUM);
-        static const char shutdown_cmd[] = "AT+QPOWD=1\r\n";
+        static const char shutdown_cmd[] = "AT+QPOWD=0\r\n";
         int written = uart_write_bytes(UART_PORT_NUM, shutdown_cmd, sizeof(shutdown_cmd) - 1);
         if (written >= 0)
         {
@@ -1069,14 +1076,30 @@ esp_err_t init_4g_network(cb_communication_channel_established cb)
 static esp_err_t shutdown_4g_network_internal(void)
 {
     // The no-work wakeup path may reach shutdown without ever initializing the
-    // modem. Configure the power pin before forcing and holding the off level.
-    esp_err_t gpio_err = modem_gpio_init();
-    if (gpio_err != ESP_OK)
+    // modem. First, disable any deep sleep holds on the power pin.
+    gpio_hold_dis(MODEM_PWR_EN_PIN);
+
+    esp_err_t gpio_err = ESP_OK;
+    esp_err_t shutdown_err = ESP_OK;
+
+    if (s_modem_power_on)
     {
-        LOG_WARNF("4G GPIO preparation before shutdown failed: %s", esp_err_to_name(gpio_err));
+        // Only initialize GPIOs and perform graceful shutdown if the module is powered ON.
+        // Initializing GPIOs drives PWRKEY high, which causes back-powering leakage 
+        // through ESD diodes if the module's main VCC is unpowered.
+        gpio_err = modem_gpio_init();
+        if (gpio_err != ESP_OK)
+        {
+            LOG_WARNF("4G GPIO preparation before shutdown failed: %s", esp_err_to_name(gpio_err));
+        }
+
+        shutdown_err = modem_shutdown_gracefully(s_at_ready);
+    }
+    else
+    {
+        LOG_INFO("4G module already powered off. Skipping graceful shutdown sequence to prevent back-powering leakage.");
     }
 
-    esp_err_t shutdown_err = modem_shutdown_gracefully(s_at_ready);
     esp_err_t power_err = modem_cut_power_and_verify();
     modem_uart_deinit();
 
