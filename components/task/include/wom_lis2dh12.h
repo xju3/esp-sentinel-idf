@@ -25,14 +25,7 @@ esp_err_t start_wom_lis2dh12_listener();
 
 esp_err_t wom_lis2dh12_enable(void);
 esp_err_t wom_lis2dh12_disable(void);
-esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void);
 esp_err_t wom_lis2dh12_enable_deep_sleep_wakeup(void);
-
-/**
- * @brief Manual check for WoM triggers after sleep wakeup.
- * Call this immediately after esp_light_sleep_start() returns.
- */
-void wom_lis2dh12_on_wakeup(void);
 
 #ifdef __cplusplus
 }
@@ -43,9 +36,7 @@ void wom_lis2dh12_on_wakeup(void);
 static inline esp_err_t start_wom_lis2dh12_listener(void)            { return ESP_OK; }
 static inline esp_err_t wom_lis2dh12_enable(void)                    { return ESP_OK; }
 static inline esp_err_t wom_lis2dh12_disable(void)                   { return ESP_OK; }
-static inline esp_err_t wom_lis2dh12_enter_light_sleep_until_wakeup(void) { return ESP_OK; }
 static inline esp_err_t wom_lis2dh12_enable_deep_sleep_wakeup(void)  { return ESP_OK; }
-static inline void      wom_lis2dh12_on_wakeup(void)                 {}
 
 #endif // LIS2
 

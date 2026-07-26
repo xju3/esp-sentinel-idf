@@ -5,7 +5,7 @@
         "foundation": 1
     },
     "rpm": 1480,
-    "api_host": "api-server.icu",
+    "api_host": "118.195.147.221",
     "target_rev": 20,
     "patrol": 1,
     "range_g": 2,

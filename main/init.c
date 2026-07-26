@@ -6,7 +6,6 @@
 #include "drv_iis3dwb.h"
 #include "drv_lis2dh12.h"
 #include "logger.h"
-#include "off_sleep_manager.h"
 #include "task_daq.h"
 #include "wom_lis2dh12.h"
 
@@ -59,13 +58,6 @@ static void init_sensors() {
 }
 
 static esp_err_t enable_tasks() {
-#if LIS2
-  esp_err_t ret = start_off_sleep_manager();
-  if (ret != ESP_OK) {
-    return ret;
-  }
-#endif
-
   return ESP_OK;
 }
 

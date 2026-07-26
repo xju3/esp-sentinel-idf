@@ -9,9 +9,9 @@ set(TASK_SRCS
     "src/task_binding.c"
 )
 
-# wom_lis2dh12.c and off_sleep_manager.c are only compiled when LIS2DH12 is present (-DLIS2=1)
+# wom_lis2dh12.c is only compiled when LIS2DH12 is present (-DLIS2=1)
 if(LIS2)
-    list(APPEND TASK_SRCS "src/wom_lis2dh12.c" "src/off_sleep_manager.c")
+    list(APPEND TASK_SRCS "src/wom_lis2dh12.c")
 endif()
 
 idf_component_register(

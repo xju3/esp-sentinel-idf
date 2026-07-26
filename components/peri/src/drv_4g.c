@@ -1292,8 +1292,8 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
             if (err != ESP_OK)
                 break; // UART 超时等硬性错误，直接退出
 
-            // ④ 打印每次尝试的诊断日志
-            LOG_DEBUGF("QHTTPGET attempt=%d qerr=%d qstatus=%d qlen=%d",
+            // ④ 打印每次尝试的诊断日志（WARN 级别确保可见）
+            LOG_WARNF("QHTTPGET attempt=%d qerr=%d qstatus=%d qlen=%d",
                        attempt, qerr, qstatus, qlen);
 
             if (qerr == 715)
@@ -1341,6 +1341,7 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
                 }
                 else
                 {
+                    LOG_WARNF("QHTTPREAD body incomplete: expected=%d received=%d", qlen, received);
                     free(body);
                     err = ESP_FAIL;
                 }
@@ -1353,6 +1354,10 @@ static esp_err_t bsp_4g_http_get_internal(const char *url, char **out_response)
                     }
                     err = ESP_FAIL;
                 }
+            }
+            else
+            {
+                LOG_WARNF("QHTTPREAD CONNECT wait timeout (qlen=%d)", qlen);
             }
         }
         else if (qerr == 0 && qstatus == 200)
