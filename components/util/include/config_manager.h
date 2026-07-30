@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+struct cJSON;
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -57,6 +59,16 @@ extern "C"
 
     typedef struct
     {
+        bool configured;
+        float shaft_rpm;
+        float bpfo_order;
+        float bpfi_order;
+        float bsf_order;
+        float ftf_order;
+    } bearing_config_t;
+
+    typedef struct
+    {
         char ssid[LEN_MAX_WIFI_SSID];
         char pass[LEN_MAX_WIFI_PASS];
     } user_wifi_config_t;
@@ -69,15 +81,16 @@ extern "C"
         char device_type[LEN_MAX_DEVICE_TYPE]; // defined in iso standards.
         int8_t motor_type;                     // 1. fixed speed motor, 2. variable frequency device, 3. servo
         int16_t months;                        // ages of the device in months, used for consumption estimation
-        int32_t rpm;                           // geater than 600 and less than 10000
         user_wifi_config_t wifi;
         int8_t network;
         char api_host[LEN_MAX_HOST];           // HTTP API server name or IP
         int16_t battery;
         bool ble;
         iso_config_t iso;
+        bearing_config_t bearing;
         sensor_position_t pos; // 传感器安装方向配置
         int16_t patrol;        // minutes between patrols (0 to disable), max value 1440 (24h)
+        int16_t diagnosis;     // minutes between diagnosis, max value typically 1440 (24h)
 
         int16_t range_g;       // Range 2, 4, 8, 16
         int32_t target_rev;    // target revolutions for calculation
@@ -103,8 +116,10 @@ extern "C"
     // Save user config struct as JSON to user partition.
     esp_err_t config_manager_save_user(const user_config_t *cfg);
 
-    // Save device_id and rpm to device profile.
-    esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm);
+    int32_t config_manager_get_device_rpm(void);
+
+    // Save device_id, rpm, and bearing data to device profile.
+    esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm, const struct cJSON* bearing_item);
 
     // Log the default JSON config (used when user config is missing or invalid).
     esp_err_t config_manager_log_default_json(void);

@@ -42,6 +42,14 @@
 #define REPORT_FFT_PEAK_MAX_HZ 5000.0f
 #define REPORT_BAND_COUNT 5
 #define REPORT_CAPTURE_ATTEMPTS 4
+#define REPORT_BEARING_FAULT_COUNT 4
+#define REPORT_BEARING_MAX_HARMONICS 16
+#define REPORT_BEARING_HP_HZ 1000.0f
+#define REPORT_BEARING_LP_HZ 10000.0f
+#define REPORT_ENVELOPE_LP_HZ 1200.0f
+#define REPORT_BEARING_MAX_ANALYSIS_HZ 1000.0f
+#define REPORT_BEARING_MIN_SNR_DB 3.0f
+#define REPORT_BEARING_NOISE_RADIUS_BINS 24U
 
 static float *s_vib_buffer;
 static float *s_fft_scratch;
@@ -91,6 +99,27 @@ typedef struct {
     float rms_vel_mm_s;
     float band_ratio[REPORT_BAND_COUNT];
 } axis_freq_features_t;
+
+typedef struct {
+    uint8_t harmonic;
+    float observed_hz;
+    float snr_db;
+} bearing_candidate_t;
+
+typedef struct {
+    uint8_t count;
+    bearing_candidate_t items[REPORT_BEARING_MAX_HARMONICS];
+} bearing_fault_candidates_t;
+
+typedef struct {
+    uint8_t status; /* 0=complete, 1=insufficient data */
+    float envelope_kurtosis;
+    bearing_fault_candidates_t faults[REPORT_BEARING_FAULT_COUNT];
+} bearing_axis_features_t;
+
+static const char *s_bearing_fault_names[REPORT_BEARING_FAULT_COUNT] = {
+    "bpfo", "bpfi", "bsf", "ftf"
+};
 
 static const struct {
     const char *key;
@@ -552,6 +581,174 @@ static void remove_dc_to_buffer(const float *data, float *out, float *out_mean_g
     }
 }
 
+static float bearing_fault_order(size_t fault_index)
+{
+    switch (fault_index) {
+        case 0: return g_user_config.bearing.bpfo_order;
+        case 1: return g_user_config.bearing.bpfi_order;
+        case 2: return g_user_config.bearing.bsf_order;
+        case 3: return g_user_config.bearing.ftf_order;
+        default: return 0.0f;
+    }
+}
+
+static bool build_envelope_signal(const float *data, float *out_kurtosis)
+{
+    if (!data || !out_kurtosis || !s_fft_scratch || s_active_points < 8U) {
+        return false;
+    }
+
+    const float dt = 1.0f / REPORT_FS_HZ;
+    const float hp_rc = 1.0f / (2.0f * (float)M_PI * REPORT_BEARING_HP_HZ);
+    const float bp_rc = 1.0f / (2.0f * (float)M_PI * REPORT_BEARING_LP_HZ);
+    const float env_rc = 1.0f / (2.0f * (float)M_PI * REPORT_ENVELOPE_LP_HZ);
+    const float hp_alpha = hp_rc / (hp_rc + dt);
+    const float bp_alpha = dt / (bp_rc + dt);
+    const float env_alpha = dt / (env_rc + dt);
+
+    float previous_input = data[0];
+    float high_pass = 0.0f;
+    float band_pass = 0.0f;
+    float envelope = 0.0f;
+    double envelope_sum = 0.0;
+    for (uint32_t i = 0; i < s_active_points; ++i) {
+        const float input = data[i];
+        high_pass = hp_alpha * (high_pass + input - previous_input);
+        previous_input = input;
+        band_pass += bp_alpha * (high_pass - band_pass);
+        envelope += env_alpha * (fabsf(band_pass) - envelope);
+        s_fft_scratch[i] = envelope;
+        envelope_sum += envelope;
+    }
+
+    const float mean = (float)(envelope_sum / (double)s_active_points);
+    double m2 = 0.0;
+    double m4 = 0.0;
+    for (uint32_t i = 0; i < s_active_points; ++i) {
+        const float centered = s_fft_scratch[i] - mean;
+        const double squared = (double)centered * (double)centered;
+        s_fft_scratch[i] = centered;
+        m2 += squared;
+        m4 += squared * squared;
+    }
+    m2 /= (double)s_active_points;
+    m4 /= (double)s_active_points;
+    if (m2 <= 1e-18 || !isfinite(m2) || !isfinite(m4)) {
+        return false;
+    }
+
+    *out_kurtosis = (float)(m4 / (m2 * m2));
+    return isfinite(*out_kurtosis);
+}
+
+static float local_noise_rms(uint32_t peak_bin,
+                             uint32_t search_start,
+                             uint32_t search_end,
+                             uint32_t half)
+{
+    const uint32_t noise_start =
+        peak_bin > REPORT_BEARING_NOISE_RADIUS_BINS
+            ? peak_bin - REPORT_BEARING_NOISE_RADIUS_BINS
+            : 1U;
+    uint32_t noise_end = peak_bin + REPORT_BEARING_NOISE_RADIUS_BINS;
+    if (noise_end >= half) {
+        noise_end = half - 1U;
+    }
+
+    double sum_sq = 0.0;
+    uint32_t count = 0;
+    for (uint32_t bin = noise_start; bin <= noise_end; ++bin) {
+        if (bin >= search_start && bin <= search_end) {
+            continue;
+        }
+        const double amplitude = s_fft_mag[bin];
+        sum_sq += amplitude * amplitude;
+        count++;
+    }
+    return count > 0U ? (float)sqrt(sum_sq / (double)count) : 0.0f;
+}
+
+static void extract_bearing_candidates(bearing_axis_features_t *out)
+{
+    const uint32_t half = s_active_points / 2U;
+    const float bin_hz = REPORT_FS_HZ / (float)s_active_points;
+    const float shaft_hz = g_user_config.bearing.shaft_rpm / 60.0f;
+    const float max_hz = fminf(REPORT_BEARING_MAX_ANALYSIS_HZ,
+                              REPORT_FS_HZ * 0.5f - bin_hz);
+
+    for (size_t fault = 0; fault < REPORT_BEARING_FAULT_COUNT; ++fault) {
+        const float base_hz = shaft_hz * bearing_fault_order(fault);
+        bearing_fault_candidates_t *fault_out = &out->faults[fault];
+        if (!(base_hz > 0.0f) || !isfinite(base_hz)) {
+            continue;
+        }
+
+        for (uint8_t harmonic = 1; harmonic <= REPORT_BEARING_MAX_HARMONICS; ++harmonic) {
+            const float expected_hz = base_hz * (float)harmonic;
+            if (expected_hz > max_hz) {
+                break;
+            }
+
+            const float tolerance_hz = fmaxf(2.0f * bin_hz, expected_hz * 0.02f);
+            const float lower_hz = fmaxf(0.0f, expected_hz - tolerance_hz);
+            uint32_t start = (uint32_t)floorf(lower_hz / bin_hz);
+            uint32_t end = (uint32_t)ceilf((expected_hz + tolerance_hz) / bin_hz);
+            if (start < 1U) start = 1U;
+            if (end >= half) end = half - 1U;
+            if (start > end) continue;
+
+            uint32_t peak_bin = start;
+            for (uint32_t bin = start + 1U; bin <= end; ++bin) {
+                if (s_fft_mag[bin] > s_fft_mag[peak_bin]) {
+                    peak_bin = bin;
+                }
+            }
+
+            const float peak_amplitude = s_fft_mag[peak_bin];
+            const float noise_rms = local_noise_rms(peak_bin, start, end, half);
+            if (!(peak_amplitude > 0.0f) || !(noise_rms > 0.0f)) {
+                continue;
+            }
+
+            const float snr_db = 20.0f * log10f(peak_amplitude / noise_rms);
+            if (!isfinite(snr_db) || snr_db < REPORT_BEARING_MIN_SNR_DB) {
+                continue;
+            }
+
+            bearing_candidate_t *candidate = &fault_out->items[fault_out->count++];
+            candidate->harmonic = harmonic;
+            candidate->observed_hz = (float)peak_bin * bin_hz;
+            candidate->snr_db = snr_db;
+        }
+    }
+}
+
+static esp_err_t compute_bearing_features(const float *data,
+                                          bearing_axis_features_t *out)
+{
+    if (!data || !out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out, 0, sizeof(*out));
+    out->status = 1;
+
+    if (!build_envelope_signal(data, &out->envelope_kurtosis)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = algo_fft_calculate(s_fft_scratch,
+                                       s_fft_mag,
+                                       s_fft_work_buf,
+                                       s_active_points);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    extract_bearing_candidates(out);
+    out->status = 0;
+    return ESP_OK;
+}
+
 static cJSON *add_quality(const capture_attempt_t *attempts, size_t attempt_count, bool accepted)
 {
     cJSON *quality = cJSON_CreateObject();
@@ -622,12 +819,50 @@ static void add_freq_features(cJSON *axis, const axis_freq_features_t *f)
     }
 }
 
+static void add_bearing_axis_features(cJSON *axis,
+                                      const bearing_axis_features_t *features)
+{
+    cJSON_AddNumberToObject(axis, "status", features->status);
+    if (features->status == 0U) {
+        add_number_rounded(axis, "envelope_kurtosis", features->envelope_kurtosis, 2);
+    } else {
+        cJSON_AddNullToObject(axis, "envelope_kurtosis");
+    }
+
+    cJSON *faults = cJSON_AddObjectToObject(axis, "fault_candidates");
+    if (features->status != 0U || !faults) {
+        return;
+    }
+    for (size_t fault = 0; fault < REPORT_BEARING_FAULT_COUNT; ++fault) {
+        const bearing_fault_candidates_t *candidates = &features->faults[fault];
+        if (candidates->count == 0U) {
+            continue;
+        }
+        cJSON *array = cJSON_AddArrayToObject(faults, s_bearing_fault_names[fault]);
+        for (uint8_t i = 0; i < candidates->count; ++i) {
+            const bearing_candidate_t *candidate = &candidates->items[i];
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "harmonic", candidate->harmonic);
+            add_number_rounded(item, "observed_hz", candidate->observed_hz, 2);
+            add_number_rounded(item, "snr_db", candidate->snr_db, 2);
+            cJSON_AddItemToArray(array, item);
+        }
+    }
+}
+
 static esp_err_t add_axis_features(cJSON *root)
 {
     static const char *axis_names[3] = {"X", "Y", "Z"};
     cJSON *axes = cJSON_AddObjectToObject(root, "axis_features");
     if (!axes) {
         return ESP_ERR_NO_MEM;
+    }
+    cJSON *bearing_axes = NULL;
+    if (g_user_config.bearing.configured) {
+        bearing_axes = cJSON_AddObjectToObject(root, "bearing_features");
+        if (!bearing_axes) {
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     for (int axis = 0; axis < 3; ++axis) {
@@ -646,6 +881,17 @@ static esp_err_t add_axis_features(cJSON *root)
         cJSON *axis_obj = cJSON_AddObjectToObject(axes, axis_names[axis]);
         add_time_features(axis_obj, &time_features);
         add_freq_features(axis_obj, &freq_features);
+
+        if (bearing_axes) {
+            bearing_axis_features_t bearing_features = {0};
+            esp_err_t bearing_err = compute_bearing_features(raw_data, &bearing_features);
+            if (bearing_err != ESP_OK) {
+                LOG_WARNF("Bearing feature extraction failed for %s: %s",
+                          axis_names[axis], esp_err_to_name(bearing_err));
+            }
+            cJSON *bearing_axis = cJSON_AddObjectToObject(bearing_axes, axis_names[axis]);
+            add_bearing_axis_features(bearing_axis, &bearing_features);
+        }
     }
 
     return ESP_OK;
@@ -668,6 +914,7 @@ static char *build_report_json(float temperature_c,
     cJSON_AddNumberToObject(root, "schema_version", REPORT_SCHEMA_VERSION);
     cJSON_AddStringToObject(root, "sensor_sn", g_user_config.sn);
     cJSON_AddStringToObject(root, "device_id", g_user_config.device_id);
+    cJSON_AddNumberToObject(root, "period", g_user_config.patrol);
     if (temperature_valid) {
         add_number_rounded(root, "temperature_c", temperature_c, 1);
     } else {

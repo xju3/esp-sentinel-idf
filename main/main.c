@@ -81,6 +81,28 @@ void app_main(void) {
               esp_err_to_name(ota_finalize_err));
   }
 
+  // Binding is checked before DAQ scheduling. A factory-new device normally
+  // has device_id="" and rpm=0; neither is a configuration-load failure.
+  if (g_user_config.sn[0] == '\0') {
+    LOG_ERROR("Device SN is unavailable. Skipping binding check and acquisition.");
+    goto sleep_prepare;
+  }
+  if (g_user_config.device_id[0] == '\0') {
+    task_binding_check_and_sleep();
+
+    // A newly discovered binding has just been persisted. Reload it now so
+    // this same boot obtains the RPM and DSP buffers required for acquisition.
+    cfg_err = config_manager_load(&g_user_config);
+    if (cfg_err != ESP_OK || g_user_config.device_id[0] == '\0') {
+      LOG_ERRORF("Failed to activate retrieved binding: 0x%X", cfg_err);
+      goto sleep_prepare;
+    }
+  }
+  if (cfg_err != ESP_OK) {
+    LOG_ERROR("Runtime configuration is unavailable. Skipping acquisition and upload.");
+    goto sleep_prepare;
+  }
+
   // 2. 统一评估本次启动需要完成的工作，不按启动来源拆分业务流程。
 #if LIS2
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1) {
@@ -94,18 +116,6 @@ void app_main(void) {
     LOG_WARNF("DAQ schedule evaluation failed: %s", esp_err_to_name(err));
     goto sleep_prepare;
   }
-
-  if (cfg_err != ESP_OK || g_user_config.sn[0] == '\0') {
-    LOG_ERROR("Device configuration or SN is unavailable. Skipping acquisition "
-              "and upload.");
-    goto sleep_prepare;
-  }
-
-  // --- BINDING CHECK LOGIC START ---
-  if (g_user_config.device_id[0] == '\0') {
-    task_binding_check_and_sleep();
-  }
-  // --- BINDING CHECK LOGIC END ---
 
   // 如果执行到这里，说明设备已经绑定，正式进入检测工作流程。
   // 先启动 DS18B20 转换；后续任务与网络加载可与转换等待重叠，

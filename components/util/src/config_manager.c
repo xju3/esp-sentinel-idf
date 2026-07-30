@@ -18,6 +18,51 @@
 #define CONFIG_LOG_CHUNK 192
 
 user_config_t g_user_config;
+static int32_t s_device_rpm = 0;
+
+int32_t config_manager_get_device_rpm(void) {
+  return s_device_rpm;
+}
+
+static bool json_positive_finite_number(const cJSON *item, float *out) {
+  if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0) {
+    return false;
+  }
+  if (out) {
+    *out = (float)item->valuedouble;
+  }
+  return true;
+}
+
+static bool apply_bearing_profile(user_config_t *cfg, const cJSON *bearing) {
+  if (!cfg) {
+    return false;
+  }
+
+  memset(&cfg->bearing, 0, sizeof(cfg->bearing));
+  if (!cJSON_IsObject(bearing)) {
+    return false;
+  }
+
+  const cJSON *orders = cJSON_GetObjectItemCaseSensitive(bearing, "fault_orders");
+  if (!cJSON_IsObject(orders) ||
+      !json_positive_finite_number(cJSON_GetObjectItemCaseSensitive(bearing, "shaft_rpm"),
+                                   &cfg->bearing.shaft_rpm) ||
+      !json_positive_finite_number(cJSON_GetObjectItemCaseSensitive(orders, "bpfo"),
+                                   &cfg->bearing.bpfo_order) ||
+      !json_positive_finite_number(cJSON_GetObjectItemCaseSensitive(orders, "bpfi"),
+                                   &cfg->bearing.bpfi_order) ||
+      !json_positive_finite_number(cJSON_GetObjectItemCaseSensitive(orders, "bsf"),
+                                   &cfg->bearing.bsf_order) ||
+      !json_positive_finite_number(cJSON_GetObjectItemCaseSensitive(orders, "ftf"),
+                                   &cfg->bearing.ftf_order)) {
+    memset(&cfg->bearing, 0, sizeof(cfg->bearing));
+    return false;
+  }
+
+  cfg->bearing.configured = true;
+  return true;
+}
 
 // 安全拷贝字符串，保证结尾有 '\0' 且不溢出。
 static void safe_copy(char *dst, size_t dst_size, const char *src) {
@@ -96,11 +141,6 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root) {
     safe_copy(cfg->api_host, sizeof(cfg->api_host), item->valuestring);
   }
 
-  item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
-  if (cJSON_IsNumber(item)) {
-    cfg->rpm = (int32_t)item->valueint;
-  }
-
   item = cJSON_GetObjectItemCaseSensitive(root, "target_rev");
   if (cJSON_IsNumber(item)) {
     cfg->target_rev = (int32_t)item->valueint;
@@ -110,7 +150,12 @@ static void apply_json_to_config(user_config_t *cfg, const cJSON *root) {
 
   item = cJSON_GetObjectItemCaseSensitive(root, "patrol");
   if (cJSON_IsNumber(item)) {
-    cfg->patrol = item->valuedouble;
+    cfg->patrol = (int16_t)item->valuedouble;
+  }
+
+  item = cJSON_GetObjectItemCaseSensitive(root, "diagnosis");
+  if (cJSON_IsNumber(item)) {
+    cfg->diagnosis = (int16_t)item->valuedouble;
   }
 
   item = cJSON_GetObjectItemCaseSensitive(root, "range_g");
@@ -254,7 +299,14 @@ static esp_err_t load_device_profile(user_config_t *cfg) {
 
   const cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
   if (cJSON_IsNumber(rpm_item)) {
-    cfg->rpm = (int32_t)rpm_item->valueint;
+    s_device_rpm = (int32_t)rpm_item->valueint;
+  }
+
+  const cJSON *bearing = cJSON_GetObjectItemCaseSensitive(root, "bearing");
+  if (apply_bearing_profile(cfg, bearing)) {
+    LOG_INFOF("Bearing profile loaded: shaft_rpm=%.1f", cfg->bearing.shaft_rpm);
+  } else if (cJSON_IsObject(bearing)) {
+    LOG_WARN("Bearing profile is incomplete; bearing feature extraction disabled");
   }
 
   cJSON_Delete(root);
@@ -359,25 +411,31 @@ esp_err_t config_manager_load(user_config_t *out_cfg) {
     heap_caps_free(g_user_config.vib_buf);
     g_user_config.vib_buf = NULL;
   }
+
   if (g_user_config.fft_scratch) {
     heap_caps_free(g_user_config.fft_scratch);
     g_user_config.fft_scratch = NULL;
   }
+
   if (g_user_config.fft_mag) {
     heap_caps_free(g_user_config.fft_mag);
     g_user_config.fft_mag = NULL;
   }
+
   if (g_user_config.fft_work_buf) {
     heap_caps_free(g_user_config.fft_work_buf);
     g_user_config.fft_work_buf = NULL;
   }
 
-  if (out_cfg->rpm < MIN_SUPPORTED_RPM) {
-    LOG_ERRORF("RPM %ld < %d - unsupported", out_cfg->rpm, MIN_SUPPORTED_RPM);
-    return ERR_RPM_UNSUPPORTED;
+  // A factory-new device has no RPM until the server binding is retrieved.
+  // Binding does not need DSP memory, so defer all RPM-dependent allocation.
+  if (out_cfg->device_id[0] == '\0') {
+    out_cfg->fft_points = 0;
+    LOG_INFO("Device is not bound; deferring DSP buffer allocation");
+    return ESP_OK;
   }
 
-  uint32_t fft_points = calc_fft_points(out_cfg->rpm, out_cfg->target_rev);
+  uint32_t fft_points = calc_fft_points(s_device_rpm, out_cfg->target_rev);
   out_cfg->fft_points = fft_points;
 
   out_cfg->vib_buf = heap_caps_calloc(fft_points * 3, sizeof(float),
@@ -448,6 +506,7 @@ esp_err_t config_manager_save_user(const user_config_t *cfg) {
   cJSON_AddNumberToObject(root, "months", cfg->months);
   cJSON_AddStringToObject(root, "api_host", cfg->api_host);
   cJSON_AddNumberToObject(root, "patrol", cfg->patrol);
+  cJSON_AddNumberToObject(root, "diagnosis", cfg->diagnosis);
   cJSON_AddNumberToObject(root, "range_g", cfg->range_g);
   cJSON_AddNumberToObject(root, "battery", cfg->battery);
   cJSON_AddNumberToObject(root, "target_rev", cfg->target_rev);
@@ -487,7 +546,7 @@ esp_err_t config_manager_save_user(const user_config_t *cfg) {
   return err;
 }
 
-esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm) {
+esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm, const cJSON* bearing_item) {
   if (!fsu_is_user_mounted()) {
     return ESP_ERR_INVALID_STATE;
   }
@@ -514,11 +573,25 @@ esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm)
   }
 
   // Update or add rpm
-  cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
-  if (rpm_item) {
+  cJSON *rpm_item_local = cJSON_GetObjectItemCaseSensitive(root, "rpm");
+  if (rpm_item_local) {
     cJSON_ReplaceItemInObjectCaseSensitive(root, "rpm", cJSON_CreateNumber(rpm));
   } else {
     cJSON_AddNumberToObject(root, "rpm", rpm);
+  }
+
+  // Update or add bearing
+  if (bearing_item && cJSON_IsObject(bearing_item)) {
+    cJSON *bearing_dup = cJSON_Duplicate(bearing_item, true);
+    if (bearing_dup) {
+      if (cJSON_GetObjectItemCaseSensitive(root, "bearing")) {
+        cJSON_ReplaceItemInObjectCaseSensitive(root, "bearing", bearing_dup);
+      } else {
+        cJSON_AddItemToObject(root, "bearing", bearing_dup);
+      }
+    }
+  } else {
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "bearing");
   }
 
   char *new_json = cJSON_PrintUnformatted(root);
@@ -533,7 +606,8 @@ esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm)
 
   if (err == ESP_OK) {
     safe_copy(g_user_config.device_id, sizeof(g_user_config.device_id), device_id);
-    g_user_config.rpm = rpm;
+    s_device_rpm = rpm;
+    (void)apply_bearing_profile(&g_user_config, bearing_item);
   }
   return err;
 }

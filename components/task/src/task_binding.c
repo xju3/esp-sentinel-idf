@@ -74,7 +74,7 @@ static void binding_sleep_prepare_and_sleep(uint64_t sleep_us)
 
 void task_binding_check_and_sleep(void)
 {
-    LOG_INFO("Device is not bound to any monitored device. Checking binding status via 4G...");
+    LOG_INFO("Checking device binding status via 4G...");
     bool is_bound = false;
     if (init_4g_network(NULL) == ESP_OK) {
         char url[256];
@@ -89,19 +89,23 @@ void task_binding_check_and_sleep(void)
                     cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
                     if (cJSON_IsString(dev_id_item) && dev_id_item->valuestring[0] != '\0') {
                         LOG_INFOF("Successfully retrieved binding info: device_id=%s", dev_id_item->valuestring);
-                        
-                        int32_t new_rpm = g_user_config.rpm;
+                        int32_t new_rpm = config_manager_get_device_rpm();
                         cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
                         if (cJSON_IsNumber(rpm_item)) {
                             new_rpm = (int32_t)rpm_item->valueint;
-                            if (new_rpm != g_user_config.rpm) {
+                            if (new_rpm != config_manager_get_device_rpm()) {
                                 LOG_INFOF("Successfully retrieved binding info: rpm=%ld", (long)new_rpm);
                             }
                         }
-                        
-                        config_manager_save_device_profile(dev_id_item->valuestring, new_rpm);
-
-                        is_bound = true;
+                        cJSON *bearing_item = cJSON_GetObjectItemCaseSensitive(data, "bearing");
+                        esp_err_t save_err = config_manager_save_device_profile(
+                            dev_id_item->valuestring, new_rpm, bearing_item);
+                        if (save_err == ESP_OK) {
+                            is_bound = true;
+                        } else {
+                            LOG_ERRORF("Failed to cache binding profile: %s",
+                                       esp_err_to_name(save_err));
+                        }
                     }
                 }
                 cJSON_Delete(root);
@@ -115,18 +119,18 @@ void task_binding_check_and_sleep(void)
     }
 
     if (is_bound) {
-        LOG_INFO("Device bound. Entering patrol sleep cycle without WoM.");
-        uint64_t patrol_sleep_us = (uint64_t)g_user_config.patrol * 60ULL * 1000000ULL;
-        binding_sleep_prepare_and_sleep(patrol_sleep_us);
+        LOG_INFO("Device binding confirmed. Continuing current work cycle.");
+        (void)shutdown_4g_network();
+        return;
     } else {
 #ifdef DEV_MODE
 #if DEV_MODE == 1
         uint64_t long_sleep_us = 1ULL * 60ULL * 1000000ULL; // 1 minute in dev mode
 #else
-        uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
+        uint64_t long_sleep_us = 8ULL * 60ULL * 60ULL * 1000000ULL; // 8 hours
 #endif
 #else
-        uint64_t long_sleep_us = 12ULL * 60ULL * 60ULL * 1000000ULL; // 12 hours
+        uint64_t long_sleep_us = 8ULL * 60ULL * 60ULL * 1000000ULL; // 8 hours
 #endif
         LOG_INFOF("Device still not bound. Entering long sleep for %llu minutes...", long_sleep_us / (60ULL * 1000000ULL));
         binding_sleep_prepare_and_sleep(long_sleep_us);
@@ -176,14 +180,17 @@ void task_binding_execute(const char *task_id) {
   bool binding_changed =
       (strncmp(g_user_config.device_id, new_device_id, LEN_MAX_DEVICE_ID) != 0);
 
-  int32_t new_rpm = g_user_config.rpm;
+  int32_t new_rpm = config_manager_get_device_rpm();
+  cJSON *bearing_item = NULL;
   if (!needs_factory_reset) {
       cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
       if (cJSON_IsNumber(rpm_item)) {
           new_rpm = (int32_t)rpm_item->valueint;
       }
+      bearing_item = cJSON_GetObjectItemCaseSensitive(data, "bearing");
   }
-  bool rpm_changed = (g_user_config.rpm != new_rpm);
+  bool rpm_changed = (config_manager_get_device_rpm() != new_rpm);
+  bool bearing_present = (bearing_item != NULL && cJSON_IsObject(bearing_item));
 
   // If completely unbound, restore factory settings
   if (needs_factory_reset) {
@@ -194,7 +201,7 @@ void task_binding_execute(const char *task_id) {
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     // Clear the device ID and rpm from device profile
-    if (config_manager_save_device_profile("", 0) == ESP_OK) {
+    if (config_manager_save_device_profile("", 0, NULL) == ESP_OK) {
       LOG_INFO("Successfully cleared device profile.");
     } else {
       LOG_WARN("Failed to clear device profile.");
@@ -213,18 +220,26 @@ void task_binding_execute(const char *task_id) {
 
     LOG_INFO("Restarting system...");
     esp_restart();
-  } else if (binding_changed || rpm_changed) {
+  } else {
     if (binding_changed) {
         LOG_INFOF("Binding changed from %s to %s", g_user_config.device_id, new_device_id);
     }
     if (rpm_changed) {
-        LOG_INFOF("RPM changed from %ld to %ld", (long)g_user_config.rpm, (long)new_rpm);
+        LOG_INFOF("RPM changed from %ld to %ld", (long)config_manager_get_device_rpm(), (long)new_rpm);
     }
-    config_manager_save_device_profile(new_device_id, new_rpm);
-    report_task_complete(task_id, 1);
-  } else {
-    LOG_INFO("Binding relationship unchanged.");
-    report_task_complete(task_id, 1);
+    if (bearing_present) {
+        LOG_INFO("Bearing data present, updating profile.");
+    }
+    esp_err_t save_err = config_manager_save_device_profile(new_device_id, new_rpm, bearing_item);
+    if (save_err == ESP_OK) {
+      if (!binding_changed && !rpm_changed && !bearing_present) {
+        LOG_INFO("Binding unchanged; cached bearing configuration cleared.");
+      }
+      report_task_complete(task_id, 1);
+    } else {
+      LOG_ERRORF("Failed to save binding profile: %s", esp_err_to_name(save_err));
+      report_task_complete(task_id, 0);
+    }
   }
 
   cJSON_Delete(root);

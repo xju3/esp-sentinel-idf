@@ -9,8 +9,8 @@ extern "C" {
  * @brief Boot-time check for device binding status.
  *
  * If the device_id is empty, it queries the server. If successfully bound,
- * it saves the new device_id and goes to normal patrol sleep. If still unbound,
- * it enters a long sleep without WoM.
+ * it saves the profile and returns so the current work cycle can continue.
+ * If still unbound, it enters a long sleep without WoM.
  */
 void task_binding_check_and_sleep(void);
 
