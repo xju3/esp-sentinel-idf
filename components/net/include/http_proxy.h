@@ -2,6 +2,7 @@
 #define HTTP_PROXY_H_
 
 #include "esp_err.h"
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,6 +22,10 @@ esp_err_t http_proxy_get(const char *url, char **out_response);
  * @param out_response 输出指针，成功后需手动 free(*out_response)
  */
 esp_err_t http_proxy_post_json(const char *url, const char *payload, char **out_response);
+
+/** Upload an application/octet-stream request body through 4G. */
+esp_err_t http_proxy_post_binary(const char *url, const void *payload,
+                                 size_t payload_len, char **out_response);
 
 #ifdef __cplusplus
 }

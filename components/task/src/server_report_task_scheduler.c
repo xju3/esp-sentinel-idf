@@ -12,6 +12,7 @@
 
 RTC_DATA_ATTR static bool s_task_active = false;
 RTC_DATA_ATTR static char s_task_id[SERVER_REPORT_TASK_ID_MAX] = {0};
+RTC_DATA_ATTR static int s_task_action = 0;
 RTC_DATA_ATTR static int64_t s_task_interval_us = 0;
 RTC_DATA_ATTR static int64_t s_task_left_us = 0;
 RTC_DATA_ATTR static int s_task_remaining = 0;
@@ -35,6 +36,15 @@ static bool parse_task_request(const char *task_id,
 {
     if (!task_id || task_id[0] == '\0') {
         return false;
+    }
+    if (action == 99) {
+        if (val != 0) {
+            return false;
+        }
+        if (out_interval_min) {
+            *out_interval_min = 0;
+        }
+        return true;
     }
     if (action < SERVER_REPORT_TASK_MIN_ACTION || val <= 0) {
         return false;
@@ -82,6 +92,7 @@ void server_report_task_clear(const char *reason)
     }
     s_task_active = false;
     s_task_id[0] = '\0';
+    s_task_action = 0;
     s_task_interval_us = 0;
     s_task_left_us = 0;
     s_task_remaining = 0;
@@ -105,6 +116,11 @@ bool server_report_task_copy_due_id(char *out_task_id, size_t out_len)
     }
     strlcpy(out_task_id, s_task_id, out_len);
     return true;
+}
+
+int server_report_task_due_action(void)
+{
+    return server_report_task_is_due() ? s_task_action : 0;
 }
 
 void server_report_task_mark_attempted(const char *task_id)
@@ -147,9 +163,10 @@ bool server_report_task_schedule(const char *task_id, int action, int val)
     }
 
     strlcpy(s_task_id, task_id, sizeof(s_task_id));
+    s_task_action = action;
     s_task_interval_us = (int64_t)interval_min * 60000000LL;
-    s_task_left_us = s_task_interval_us;
-    s_task_remaining = val;
+    s_task_left_us = action == 99 ? 0 : s_task_interval_us;
+    s_task_remaining = action == 99 ? 1 : val;
     s_task_active = true;
     s_task_scheduled_this_run = true;
 

@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 typedef struct report_payload report_payload_t;
+typedef struct report_fft_payload report_fft_payload_t;
 typedef void (*report_sample_complete_fn)(void *ctx);
 
 /** Capture sensor data, calculate features, and retain the report JSON. */
@@ -35,6 +36,19 @@ esp_err_t report_pipeline_flush_cache(void);
 
 /** Release a captured payload without uploading it. */
 void report_pipeline_discard(report_payload_t *payload);
+
+/** Capture one task-driven three-axis magnitude spectrum in FFT binary v1. */
+esp_err_t report_pipeline_capture_fft(
+    const char *task_id,
+    report_sample_complete_fn sample_complete,
+    void *sample_complete_ctx,
+    report_fft_payload_t **out_payload);
+
+/** Upload and release one action=99 FFT binary payload. */
+esp_err_t report_pipeline_upload_fft(report_fft_payload_t *payload);
+
+/** Release an FFT payload without uploading it. */
+void report_pipeline_discard_fft(report_fft_payload_t *payload);
 
 #ifdef __cplusplus
 }

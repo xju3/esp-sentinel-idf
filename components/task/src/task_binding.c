@@ -72,48 +72,99 @@ static void binding_sleep_prepare_and_sleep(uint64_t sleep_us)
     esp_deep_sleep_start();
 }
 
+static esp_err_t refresh_binding_profile_from_server(bool *out_unbound)
+{
+    if (!out_unbound || g_user_config.sn[0] == '\0' ||
+        g_user_config.api_host[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_unbound = false;
+
+    char url[256];
+    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/binding/%s",
+             g_user_config.api_host, g_user_config.sn);
+
+    char *response = NULL;
+    esp_err_t err = bsp_4g_http_get(url, &response);
+    if (err != ESP_OK || !response) {
+        LOG_ERROR("Failed to get binding status from server");
+        free(response);
+        return err != ESP_OK ? err : ESP_ERR_INVALID_RESPONSE;
+    }
+
+    cJSON *root = cJSON_Parse(response);
+    free(response);
+    if (!root) {
+        LOG_ERROR("Failed to parse binding JSON response");
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (!cJSON_IsObject(data)) {
+        LOG_ERROR("Invalid binding data format");
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    const cJSON *device_id =
+        cJSON_GetObjectItemCaseSensitive(data, "device_id");
+    if (!cJSON_IsString(device_id) || !device_id->valuestring ||
+        device_id->valuestring[0] == '\0') {
+        *out_unbound = true;
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    const int32_t old_rpm = config_manager_get_device_rpm();
+    const cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
+    const int32_t new_rpm =
+        cJSON_IsNumber(rpm_item) ? (int32_t)rpm_item->valueint : 0;
+    const cJSON *bearing_item =
+        cJSON_GetObjectItemCaseSensitive(data, "bearing");
+
+    if (strncmp(g_user_config.device_id, device_id->valuestring,
+                LEN_MAX_DEVICE_ID) != 0) {
+        LOG_INFOF("Binding changed from %s to %s", g_user_config.device_id,
+                  device_id->valuestring);
+    }
+    if (old_rpm != new_rpm) {
+        LOG_INFOF("RPM changed from %ld to %ld", (long)old_rpm,
+                  (long)new_rpm);
+    }
+    if (cJSON_IsObject(bearing_item)) {
+        LOG_INFO("Bearing data present, updating profile.");
+    }
+
+    err = config_manager_save_binding_profile(data);
+    cJSON_Delete(root);
+    if (err != ESP_OK) {
+        LOG_ERRORF("Failed to save binding profile: %s",
+                   esp_err_to_name(err));
+    }
+    return err;
+}
+
+esp_err_t task_binding_refresh_profile(void)
+{
+    bool unbound = false;
+    esp_err_t err = refresh_binding_profile_from_server(&unbound);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (unbound) {
+        LOG_WARN("Server reports that the sensor is not bound");
+        return ESP_ERR_INVALID_STATE;
+    }
+    LOG_INFO("Latest binding profile persisted successfully");
+    return ESP_OK;
+}
+
 void task_binding_check_and_sleep(void)
 {
     LOG_INFO("Checking device binding status via 4G...");
     bool is_bound = false;
     if (init_4g_network(NULL) == ESP_OK) {
-        char url[256];
-        snprintf(url, sizeof(url), "http://%s/api/v1/sensors/binding/%s",
-                 g_user_config.api_host, g_user_config.sn);
-        char *response = NULL;
-        if (bsp_4g_http_get(url, &response) == ESP_OK && response != NULL) {
-            cJSON *root = cJSON_Parse(response);
-            if (root) {
-                cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-                if (cJSON_IsObject(data)) {
-                    cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
-                    if (cJSON_IsString(dev_id_item) && dev_id_item->valuestring[0] != '\0') {
-                        LOG_INFOF("Successfully retrieved binding info: device_id=%s", dev_id_item->valuestring);
-                        int32_t new_rpm = config_manager_get_device_rpm();
-                        cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
-                        if (cJSON_IsNumber(rpm_item)) {
-                            new_rpm = (int32_t)rpm_item->valueint;
-                            if (new_rpm != config_manager_get_device_rpm()) {
-                                LOG_INFOF("Successfully retrieved binding info: rpm=%ld", (long)new_rpm);
-                            }
-                        }
-                        cJSON *bearing_item = cJSON_GetObjectItemCaseSensitive(data, "bearing");
-                        esp_err_t save_err = config_manager_save_device_profile(
-                            dev_id_item->valuestring, new_rpm, bearing_item);
-                        if (save_err == ESP_OK) {
-                            is_bound = true;
-                        } else {
-                            LOG_ERRORF("Failed to cache binding profile: %s",
-                                       esp_err_to_name(save_err));
-                        }
-                    }
-                }
-                cJSON_Delete(root);
-            }
-        } else {
-            LOG_WARN("Failed to get binding status from server...");
-        }
-        free(response);
+        is_bound = task_binding_refresh_profile() == ESP_OK;
     } else {
         LOG_WARN("Failed to initialize 4G network for binding check");
     }
@@ -141,56 +192,12 @@ void task_binding_execute(const char *task_id) {
   LOG_INFOF("Executing Device Binding Update Task: %s",
             task_id ? task_id : "NULL");
 
-  char url[256];
-  snprintf(url, sizeof(url), "http://%s/api/v1/sensors/binding/%s",
-           g_user_config.api_host, g_user_config.sn);
-
-  char *response = NULL;
-  esp_err_t err = bsp_4g_http_get(url, &response);
-  if (err != ESP_OK || response == NULL) {
-    LOG_ERROR("Failed to get binding status from server");
-    free(response);
+  bool needs_factory_reset = false;
+  esp_err_t refresh_err =
+      refresh_binding_profile_from_server(&needs_factory_reset);
+  if (refresh_err != ESP_OK) {
     return;
   }
-
-  cJSON *root = cJSON_Parse(response);
-  if (!root) {
-    LOG_ERROR("Failed to parse binding JSON response");
-    free(response);
-    return;
-  }
-
-  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
-  if (!cJSON_IsObject(data)) {
-    LOG_ERROR("Invalid binding data format");
-    cJSON_Delete(root);
-    free(response);
-    return;
-  }
-
-  const char *new_device_id = "";
-  cJSON *dev_id_item = cJSON_GetObjectItemCaseSensitive(data, "device_id");
-  if (cJSON_IsString(dev_id_item)) {
-      new_device_id = dev_id_item->valuestring;
-  } else {
-      LOG_INFO("device_id is missing or not a string. Treating as completely unbound.");
-  }
-
-  bool needs_factory_reset = (new_device_id[0] == '\0');
-  bool binding_changed =
-      (strncmp(g_user_config.device_id, new_device_id, LEN_MAX_DEVICE_ID) != 0);
-
-  int32_t new_rpm = config_manager_get_device_rpm();
-  cJSON *bearing_item = NULL;
-  if (!needs_factory_reset) {
-      cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(data, "rpm");
-      if (cJSON_IsNumber(rpm_item)) {
-          new_rpm = (int32_t)rpm_item->valueint;
-      }
-      bearing_item = cJSON_GetObjectItemCaseSensitive(data, "bearing");
-  }
-  bool rpm_changed = (config_manager_get_device_rpm() != new_rpm);
-  bool bearing_present = (bearing_item != NULL && cJSON_IsObject(bearing_item));
 
   // If completely unbound, restore factory settings
   if (needs_factory_reset) {
@@ -221,27 +228,6 @@ void task_binding_execute(const char *task_id) {
     LOG_INFO("Restarting system...");
     esp_restart();
   } else {
-    if (binding_changed) {
-        LOG_INFOF("Binding changed from %s to %s", g_user_config.device_id, new_device_id);
-    }
-    if (rpm_changed) {
-        LOG_INFOF("RPM changed from %ld to %ld", (long)config_manager_get_device_rpm(), (long)new_rpm);
-    }
-    if (bearing_present) {
-        LOG_INFO("Bearing data present, updating profile.");
-    }
-    esp_err_t save_err = config_manager_save_device_profile(new_device_id, new_rpm, bearing_item);
-    if (save_err == ESP_OK) {
-      if (!binding_changed && !rpm_changed && !bearing_present) {
-        LOG_INFO("Binding unchanged; cached bearing configuration cleared.");
-      }
-      report_task_complete(task_id, 1);
-    } else {
-      LOG_ERRORF("Failed to save binding profile: %s", esp_err_to_name(save_err));
-      report_task_complete(task_id, 0);
-    }
+    report_task_complete(task_id, 1);
   }
-
-  cJSON_Delete(root);
-  free(response);
 }

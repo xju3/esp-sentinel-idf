@@ -27,6 +27,8 @@ esp_err_t shutdown_4g_network(void);
 esp_err_t bsp_4g_http_get(const char *url, char **out_response);
 
 esp_err_t bsp_4g_http_post_json(const char *url, const char *payload, char **out_response);
+esp_err_t bsp_4g_http_post_binary(const char *url, const void *payload,
+                                  size_t payload_len, char **out_response);
 esp_err_t bsp_4g_http_put(const char *url, const char *payload);
 esp_err_t bsp_4g_get_rssi(int *out_rssi);
 

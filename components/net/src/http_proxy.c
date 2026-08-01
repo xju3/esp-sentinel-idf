@@ -23,3 +23,17 @@ esp_err_t http_proxy_post_json(const char *url,
     }
     return bsp_4g_http_post_json(url, payload, out_response);
 }
+
+esp_err_t http_proxy_post_binary(const char *url,
+                                 const void *payload,
+                                 size_t payload_len,
+                                 char **out_response)
+{
+    if (!url || (!payload && payload_len > 0)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (out_response) {
+        *out_response = NULL;
+    }
+    return bsp_4g_http_post_binary(url, payload, payload_len, out_response);
+}

@@ -17,6 +17,7 @@ void server_report_task_clear(const char *reason);
 bool server_report_task_is_active(void);
 bool server_report_task_is_due(void);
 bool server_report_task_copy_due_id(char *out_task_id, size_t out_len);
+int server_report_task_due_action(void);
 void server_report_task_mark_attempted(const char *task_id);
 int64_t server_report_task_left_us(void);
 bool server_report_task_schedule(const char *task_id, int action, int val);

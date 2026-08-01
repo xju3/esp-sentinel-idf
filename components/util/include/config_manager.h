@@ -13,12 +13,9 @@ extern "C"
 {
 #endif
 
-#define MIN_SUPPORTED_RPM 600
 #include "sdkconfig.h"
 #define MAX_ALLOWED_POINTS CONFIG_DSP_MAX_FFT_SIZE
-
-#define ERR_RPM_UNSUPPORTED 0x1001
-#define ERR_FFT_OVERFLOW 0x1002
+#define DEFAULT_CAPTURE_POINTS 4096U
 
 #define LEN_MAX_DEVICE_ID 64
 #define LEN_MAX_DEVICE_NAME 64
@@ -117,6 +114,10 @@ extern "C"
     esp_err_t config_manager_save_user(const user_config_t *cfg);
 
     int32_t config_manager_get_device_rpm(void);
+
+    // Replace the persisted server-owned binding snapshot while preserving
+    // immutable local device identity and manufacturing metadata.
+    esp_err_t config_manager_save_binding_profile(const struct cJSON* binding_data);
 
     // Save device_id, rpm, and bearing data to device profile.
     esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm, const struct cJSON* bearing_item);

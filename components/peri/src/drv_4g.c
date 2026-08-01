@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "config_manager.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -1676,12 +1677,14 @@ cleanup:
     return (err == ESP_OK && is_eof && offset > 0) ? ESP_OK : ESP_FAIL;
 }
 
-static esp_err_t bsp_4g_http_write_json_internal(const char *method,
-                                                 const char *url,
-                                                 const char *payload,
-                                                 char **out_response)
+static esp_err_t bsp_4g_http_write_internal(const char *method,
+                                            const char *url,
+                                            const void *payload,
+                                            size_t payload_len,
+                                            const char *content_type,
+                                            char **out_response)
 {
-    if (!method || !url || !payload)
+    if (!method || !url || (!payload && payload_len > 0) || !content_type)
         return ESP_ERR_INVALID_ARG;
     if (out_response)
         *out_response = NULL;
@@ -1753,23 +1756,28 @@ static esp_err_t bsp_4g_http_write_json_internal(const char *method,
         goto cleanup;
     }
 
-    int payload_len = strlen(payload);
     int req_len = snprintf(req_header, 512,
                            "%s %s HTTP/1.1\r\n"
                            "Host: %s\r\n"
                            "User-Agent: Sentinel/1.0\r\n"
                            "Accept: */*\r\n"
-                           "Content-Type: application/json\r\n"
-                           "Content-Length: %d\r\n"
+                           "Content-Type: %s\r\n"
+                           "Content-Length: %u\r\n"
                            "Connection: close\r\n\r\n",
-                           method, path, host, payload_len);
+                           method, path, host, content_type,
+                           (unsigned)payload_len);
     if (req_len < 0 || req_len >= 512)
     {
         err = ESP_ERR_INVALID_SIZE;
         goto cleanup;
     }
 
-    int total_len = req_len + payload_len;
+    if (payload_len > (size_t)(INT_MAX - req_len))
+    {
+        err = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+    int total_len = req_len + (int)payload_len;
     snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=%d,%u,%u\r\n", total_len,
              (unsigned)MODEM_HTTP_POST_INPUT_TIMEOUT_S,
              (unsigned)MODEM_HTTP_POST_RESPONSE_TIMEOUT_S);
@@ -1904,12 +1912,23 @@ cleanup:
 
 static esp_err_t bsp_4g_http_post_json_internal(const char *url, const char *payload, char **out_response)
 {
-    return bsp_4g_http_write_json_internal("POST", url, payload, out_response);
+    return bsp_4g_http_write_internal("POST", url, payload, strlen(payload),
+                                      "application/json", out_response);
+}
+
+static esp_err_t bsp_4g_http_post_binary_internal(const char *url,
+                                                  const void *payload,
+                                                  size_t payload_len,
+                                                  char **out_response)
+{
+    return bsp_4g_http_write_internal("POST", url, payload, payload_len,
+                                      "application/octet-stream", out_response);
 }
 
 static esp_err_t bsp_4g_http_put_internal(const char *url, const char *payload)
 {
-    return bsp_4g_http_write_json_internal("PUT", url, payload, NULL);
+    return bsp_4g_http_write_internal("PUT", url, payload, strlen(payload),
+                                      "application/json", NULL);
 }
 
 esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, const char *access_key, esp_ota_handle_t update_handle)
@@ -1942,6 +1961,23 @@ esp_err_t bsp_4g_http_post_json(const char *url, const char *payload, char **out
     if (err == ESP_OK)
     {
         err = bsp_4g_http_post_json_internal(url, payload, out_response);
+    }
+    xSemaphoreGive(s_at_mutex);
+    return err;
+}
+
+esp_err_t bsp_4g_http_post_binary(const char *url,
+                                  const void *payload,
+                                  size_t payload_len,
+                                  char **out_response)
+{
+    ensure_at_mutex();
+    xSemaphoreTake(s_at_mutex, portMAX_DELAY);
+    esp_err_t err = init_4g_network_internal(NULL);
+    if (err == ESP_OK)
+    {
+        err = bsp_4g_http_post_binary_internal(url, payload, payload_len,
+                                               out_response);
     }
     xSemaphoreGive(s_at_mutex);
     return err;

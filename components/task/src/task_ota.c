@@ -2,6 +2,7 @@
 #include "config_manager.h"
 #include "logger.h"
 #include "system_lock.h"
+#include "task_binding.h"
 
 
 #include "http_proxy.h"
@@ -22,6 +23,19 @@ extern esp_err_t bsp_4g_ota_download_and_write(const char *url, int fw_size, con
 #define OTA_STATE_KEY_TASK_ID "task_id"
 #define OTA_STATE_KEY_RESULT "result"
 #define OTA_STATE_KEY_TARGET_ADDR "target_addr"
+
+static bool refresh_binding_before_ota(const char *task_id)
+{
+    LOG_INFOF("Refreshing binding profile before OTA task %s",
+              task_id ? task_id : "");
+    esp_err_t err = task_binding_refresh_profile();
+    if (err != ESP_OK) {
+        LOG_WARNF("OTA postponed because binding refresh failed: %s",
+                  esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
 
 // 内部方法：上报 OTA 结果 (HTTP PUT)
 static esp_err_t report_ota_result(const char *task_id, int result_code)
@@ -335,6 +349,10 @@ void execute_ota_update_sync(const char *task_id)
 {
     LOG_INFOF("=== Starting OTA Update Process for Task: %s ===", task_id);
 
+    if (!refresh_binding_before_ota(task_id)) {
+        return;
+    }
+
     // 1. 停止触发新任务，准备等待流水线排空
     LOG_INFO("1. Waiting for pipeline drain (skipped, synchronous scheduling in use).");
 
@@ -423,6 +441,10 @@ void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url)
     if (!fw_url || fw_url[0] == '\0') {
         LOG_ERROR("OTA URL is empty.");
         report_ota_result(task_id ? task_id : "", 3);
+        return;
+    }
+
+    if (!refresh_binding_before_ota(task_id)) {
         return;
     }
 

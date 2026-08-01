@@ -167,7 +167,9 @@ esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload,
 
   typedef struct {
     report_payload_t *payload;
+    report_fft_payload_t *fft_payload;
     bool server_task;
+    bool fft_task;
     char task_id[64];
   } pending_report_t;
 
@@ -211,13 +213,27 @@ esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload,
     pending_report_t *report = &reports[report_count];
     if (server_report_task_copy_due_id(report->task_id,
                                        sizeof(report->task_id))) {
-      LOG_INFOF("Executing scheduled server report task: id=%s",
-                report->task_id);
-      err = report_pipeline_capture_with_sample_complete(
-          report->task_id, start_network_after_sampling, &network_prepare,
-          &report->payload);
-      if (err != ESP_OK)
+      const int action = server_report_task_due_action();
+      LOG_INFOF("Executing scheduled server task: id=%s, action=%d",
+                report->task_id, action);
+      if (action == 99) {
+        err = report_pipeline_capture_fft(
+            report->task_id, start_network_after_sampling, &network_prepare,
+            &report->fft_payload);
+        report->fft_task = true;
+      } else {
+        err = report_pipeline_capture_with_sample_complete(
+            report->task_id, start_network_after_sampling, &network_prepare,
+            &report->payload);
+      }
+      if (err != ESP_OK) {
+        if (action == 99) {
+          // Do not create a dedicated sleep/retry loop for FFT. The server
+          // keeps the task open and may dispatch it again on a later report.
+          server_report_task_mark_attempted(report->task_id);
+        }
         goto cleanup;
+      }
       report->server_task = true;
       ++report_count;
     }
@@ -238,13 +254,43 @@ esp_err_t daq_scheduler_execute(daq_before_upload_fn prepare_upload,
     goto cleanup;
 
   for (size_t i = 0; i < report_count; ++i) {
-    err = report_pipeline_upload(reports[i].payload);
-    reports[i].payload = NULL;
+    if (reports[i].fft_task) {
+      err = report_pipeline_upload_fft(reports[i].fft_payload);
+      reports[i].fft_payload = NULL;
+    } else {
+      err = report_pipeline_upload(reports[i].payload);
+      reports[i].payload = NULL;
+    }
     if (reports[i].server_task) {
       server_report_task_mark_attempted(reports[i].task_id);
     }
     if (err != ESP_OK)
       goto cleanup;
+  }
+
+  // A regular/resampling upload may return action=99. Execute it immediately
+  // in this same work cycle and keep the already-connected 4G link available
+  // for the following binary upload.
+  if (server_report_task_is_due() && server_report_task_due_action() == 99) {
+    char fft_task_id[64] = {0};
+    report_fft_payload_t *fft_payload = NULL;
+    if (!server_report_task_copy_due_id(fft_task_id, sizeof(fft_task_id))) {
+      err = ESP_ERR_INVALID_STATE;
+      goto cleanup;
+    }
+
+    err = report_pipeline_capture_fft(fft_task_id, NULL, NULL, &fft_payload);
+    if (err == ESP_OK) {
+      err = report_pipeline_upload_fft(fft_payload);
+      fft_payload = NULL;
+    }
+    report_pipeline_discard_fft(fft_payload);
+    // Whether this local attempt succeeds or fails, do not enter a special
+    // FFT sleep loop. An unsuccessful server task remains open for redispatch.
+    server_report_task_mark_attempted(fft_task_id);
+    if (err != ESP_OK) {
+      goto cleanup;
+    }
   }
 
 cleanup:
@@ -256,7 +302,7 @@ cleanup:
   }
 
   for (size_t i = 0; i < report_count; ++i) {
-    if (err != ESP_OK && reports[i].payload) {
+    if (err != ESP_OK && reports[i].payload && !reports[i].fft_task) {
       esp_err_t cache_err = report_pipeline_cache(reports[i].payload);
       if (cache_err == ESP_OK && reports[i].server_task) {
         server_report_task_mark_attempted(reports[i].task_id);
@@ -266,6 +312,7 @@ cleanup:
       }
     }
     report_pipeline_discard(reports[i].payload);
+    report_pipeline_discard_fft(reports[i].fft_payload);
   }
   return err;
 }

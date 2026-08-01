@@ -297,6 +297,7 @@ static esp_err_t load_device_profile(user_config_t *cfg) {
     cfg->device_id[0] = '\0';
   }
 
+  s_device_rpm = 0;
   const cJSON *rpm_item = cJSON_GetObjectItemCaseSensitive(root, "rpm");
   if (cJSON_IsNumber(rpm_item)) {
     s_device_rpm = (int32_t)rpm_item->valueint;
@@ -406,7 +407,8 @@ esp_err_t config_manager_load(user_config_t *out_cfg) {
     return err;
   }
 
-  // 第四步：验证 RPM，并动态分配内存
+  // 第四步：根据检测配置动态分配内存。RPM 不参与启动有效性判断；
+  // RPM 缺失时仍为基础检测分配固定长度缓冲区。
   if (g_user_config.vib_buf) {
     heap_caps_free(g_user_config.vib_buf);
     g_user_config.vib_buf = NULL;
@@ -427,15 +429,23 @@ esp_err_t config_manager_load(user_config_t *out_cfg) {
     g_user_config.fft_work_buf = NULL;
   }
 
-  // A factory-new device has no RPM until the server binding is retrieved.
-  // Binding does not need DSP memory, so defer all RPM-dependent allocation.
+  // A factory-new device does not run detection before binding, so it does not
+  // need capture or DSP buffers yet.
   if (out_cfg->device_id[0] == '\0') {
     out_cfg->fft_points = 0;
-    LOG_INFO("Device is not bound; deferring DSP buffer allocation");
+    LOG_INFO("Device is not bound; deferring detection buffer allocation");
     return ESP_OK;
   }
 
-  uint32_t fft_points = calc_fft_points(s_device_rpm, out_cfg->target_rev);
+  uint32_t fft_points = DEFAULT_CAPTURE_POINTS;
+  if (s_device_rpm > 0) {
+    fft_points = calc_fft_points((uint32_t)s_device_rpm,
+                                 (uint32_t)out_cfg->target_rev);
+  } else {
+    LOG_WARNF("RPM is %ld; using %u capture points. RPM-dependent features "
+              "will be skipped during detection",
+              (long)s_device_rpm, DEFAULT_CAPTURE_POINTS);
+  }
   out_cfg->fft_points = fft_points;
 
   out_cfg->vib_buf = heap_caps_calloc(fft_points * 3, sizeof(float),
@@ -610,4 +620,99 @@ esp_err_t config_manager_save_device_profile(const char* device_id, int32_t rpm,
     (void)apply_bearing_profile(&g_user_config, bearing_item);
   }
   return err;
+}
+
+esp_err_t config_manager_save_binding_profile(const cJSON* binding_data) {
+  if (!cJSON_IsObject(binding_data)) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (!fsu_is_user_mounted()) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  char *json = fsu_read_file_alloc(FILE_PATH_DEVICE_PROFILE, NULL);
+  if (!json) {
+    LOG_ERRORF("Device profile not found: %s", FILE_PATH_DEVICE_PROFILE);
+    return ESP_ERR_NOT_FOUND;
+  }
+
+  cJSON *current = cJSON_Parse(json);
+  free(json);
+  if (!cJSON_IsObject(current)) {
+    cJSON_Delete(current);
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+
+  const cJSON *sn = cJSON_GetObjectItemCaseSensitive(current, "sn");
+  if (!cJSON_IsString(sn) || !device_sn_is_valid(sn->valuestring)) {
+    cJSON_Delete(current);
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+
+  cJSON *updated = cJSON_CreateObject();
+  if (!updated) {
+    cJSON_Delete(current);
+    return ESP_ERR_NO_MEM;
+  }
+
+  static const char *local_fields[] = {"sn", "version", "generated_at"};
+  for (size_t i = 0; i < sizeof(local_fields) / sizeof(local_fields[0]); ++i) {
+    const cJSON *item =
+        cJSON_GetObjectItemCaseSensitive(current, local_fields[i]);
+    if (!item) {
+      continue;
+    }
+    cJSON *copy = cJSON_Duplicate(item, true);
+    if (!copy) {
+      cJSON_Delete(updated);
+      cJSON_Delete(current);
+      return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddItemToObject(updated, local_fields[i], copy);
+  }
+
+  const cJSON *item = NULL;
+  cJSON_ArrayForEach(item, binding_data) {
+    if (!item->string ||
+        strcmp(item->string, "sn") == 0 ||
+        strcmp(item->string, "version") == 0 ||
+        strcmp(item->string, "generated_at") == 0) {
+      continue;
+    }
+    cJSON *copy = cJSON_Duplicate(item, true);
+    if (!copy) {
+      cJSON_Delete(updated);
+      cJSON_Delete(current);
+      return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddItemToObject(updated, item->string, copy);
+  }
+
+  char *new_json = cJSON_PrintUnformatted(updated);
+  cJSON_Delete(updated);
+  cJSON_Delete(current);
+  if (!new_json) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  esp_err_t err =
+      fsu_write_file(FILE_PATH_DEVICE_PROFILE, new_json, strlen(new_json));
+  free(new_json);
+  if (err != ESP_OK) {
+    return err;
+  }
+
+  const cJSON *device_id =
+      cJSON_GetObjectItemCaseSensitive(binding_data, "device_id");
+  safe_copy(g_user_config.device_id, sizeof(g_user_config.device_id),
+            cJSON_IsString(device_id) ? device_id->valuestring : "");
+
+  const cJSON *rpm_item =
+      cJSON_GetObjectItemCaseSensitive(binding_data, "rpm");
+  s_device_rpm =
+      cJSON_IsNumber(rpm_item) ? (int32_t)rpm_item->valueint : 0;
+  const cJSON *bearing =
+      cJSON_GetObjectItemCaseSensitive(binding_data, "bearing");
+  (void)apply_bearing_profile(&g_user_config, bearing);
+  return ESP_OK;
 }

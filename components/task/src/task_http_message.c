@@ -100,7 +100,7 @@ http_pending_tasks_result_t http_message_process_task_array(const cJSON *task_ar
 
             const bool is_repeated_report_action =
                 (action >= 10 && action < 100) || (action >= 1000 && action < 3000);
-            if (action < 10)
+            if (action < 10 || action == 99)
             {
                 keep_4g_required = true;
             }

@@ -70,7 +70,7 @@ void app_main(void) {
 
   esp_err_t cfg_err = config_manager_load(&g_user_config);
   if (cfg_err != ESP_OK) {
-    LOG_ERRORF("Config load failed or RPM unsupported: 0x%X", cfg_err);
+    LOG_ERRORF("Config load failed: 0x%X", cfg_err);
   }
 
   // OTA镜像的本地确认不能依赖服务器。先取消回滚并持久化结果，
@@ -81,8 +81,8 @@ void app_main(void) {
               esp_err_to_name(ota_finalize_err));
   }
 
-  // Binding is checked before DAQ scheduling. A factory-new device normally
-  // has device_id="" and rpm=0; neither is a configuration-load failure.
+  // Binding is checked before DAQ scheduling. RPM is evaluated later by the
+  // detection pipeline and never determines whether startup may continue.
   if (g_user_config.sn[0] == '\0') {
     LOG_ERROR("Device SN is unavailable. Skipping binding check and acquisition.");
     goto sleep_prepare;
@@ -91,7 +91,7 @@ void app_main(void) {
     task_binding_check_and_sleep();
 
     // A newly discovered binding has just been persisted. Reload it now so
-    // this same boot obtains the RPM and DSP buffers required for acquisition.
+    // this same boot obtains the current profile and detection buffers.
     cfg_err = config_manager_load(&g_user_config);
     if (cfg_err != ESP_OK || g_user_config.device_id[0] == '\0') {
       LOG_ERRORF("Failed to activate retrieved binding: 0x%X", cfg_err);

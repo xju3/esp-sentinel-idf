@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -55,7 +56,7 @@ static float *s_vib_buffer;
 static float *s_fft_scratch;
 static float *s_fft_mag;
 static float *s_fft_work_buf;
-static uint32_t s_active_points = 4096;
+static uint32_t s_active_points = DEFAULT_CAPTURE_POINTS;
 static uint16_t s_active_range_g = 2;
 
 typedef struct {
@@ -142,6 +143,12 @@ struct report_payload {
     char *json;
 };
 
+struct report_fft_payload {
+    char task_id[64];
+    uint8_t *data;
+    size_t length;
+};
+
 static double round_to_decimals(double value, int decimals)
 {
     double scale = 1.0;
@@ -199,7 +206,9 @@ static bool report_range_valid(uint16_t range_g)
 
 static uint32_t configured_report_points(void)
 {
-    return g_user_config.fft_points > 0 ? g_user_config.fft_points : 4096;
+    return g_user_config.fft_points > 0
+               ? g_user_config.fft_points
+               : DEFAULT_CAPTURE_POINTS;
 }
 
 static uint16_t configured_report_range_g(void)
@@ -858,11 +867,16 @@ static esp_err_t add_axis_features(cJSON *root)
         return ESP_ERR_NO_MEM;
     }
     cJSON *bearing_axes = NULL;
-    if (g_user_config.bearing.configured) {
+    const bool rpm_features_enabled =
+        config_manager_get_device_rpm() > 0;
+    if (g_user_config.bearing.configured && rpm_features_enabled) {
         bearing_axes = cJSON_AddObjectToObject(root, "bearing_features");
         if (!bearing_axes) {
             return ESP_ERR_NO_MEM;
         }
+    } else if (g_user_config.bearing.configured) {
+        LOG_WARNF("RPM is %ld; skipping RPM-dependent bearing features",
+                  (long)config_manager_get_device_rpm());
     }
 
     for (int axis = 0; axis < 3; ++axis) {
@@ -1110,6 +1124,146 @@ static esp_err_t post_report_json(const char *json, bool accept_server_tasks)
         .accept_server_tasks = accept_server_tasks,
     };
     return send_report_json_once(json, &upload_ctx);
+}
+
+esp_err_t report_pipeline_capture_fft(
+    const char *task_id,
+    report_sample_complete_fn sample_complete,
+    void *sample_complete_ctx,
+    report_fft_payload_t **out_payload)
+{
+    if (!task_id || task_id[0] == '\0' || !out_payload) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_payload = NULL;
+
+    esp_err_t err = apply_report_configuration();
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = ensure_buffers();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    capture_attempt_t attempts[REPORT_CAPTURE_ATTEMPTS] = {0};
+    size_t attempt_count = 0;
+    uint16_t final_range_g = s_active_range_g;
+    bool accepted = false;
+    LOG_INFOF("Executing action=99 FFT capture: task_id=%s, points=%lu",
+              task_id, (unsigned long)s_active_points);
+    err = capture_with_auto_range(attempts,
+                                  REPORT_CAPTURE_ATTEMPTS,
+                                  &attempt_count,
+                                  &final_range_g,
+                                  &accepted);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (!accepted) {
+        LOG_ERROR("FFT capture remained clipped at maximum range; not uploading spectrum");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (sample_complete) {
+        sample_complete(sample_complete_ctx);
+    }
+
+    const uint32_t bins = s_active_points / 2U;
+    const size_t axis_bytes = (size_t)bins * sizeof(float);
+    const size_t payload_length = 32U + axis_bytes * 3U;
+    report_fft_payload_t *payload = calloc(1, sizeof(*payload));
+    if (!payload) {
+        return ESP_ERR_NO_MEM;
+    }
+    payload->data = heap_caps_calloc(1, payload_length,
+                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!payload->data) {
+        free(payload);
+        return ESP_ERR_NO_MEM;
+    }
+    payload->length = payload_length;
+    snprintf(payload->task_id, sizeof(payload->task_id), "%s", task_id);
+
+    const size_t sn_len = strnlen(g_user_config.sn, 16U);
+    memcpy(payload->data, g_user_config.sn, sn_len);
+    time_t now = time(NULL);
+    uint32_t timestamp_s = now > 0 && (uint64_t)now <= UINT32_MAX
+                               ? (uint32_t)now
+                               : 0U;
+    uint32_t range_g = final_range_g;
+    memcpy(payload->data + 16U, &timestamp_s, sizeof(timestamp_s));
+    memcpy(payload->data + 20U, &s_active_points, sizeof(s_active_points));
+    const float fs_hz = REPORT_FS_HZ;
+    memcpy(payload->data + 24U, &fs_hz, sizeof(fs_hz));
+    memcpy(payload->data + 28U, &range_g, sizeof(range_g));
+
+    uint8_t *axis_output = payload->data + 32U;
+    for (uint32_t axis = 0; axis < 3U; ++axis) {
+        const float *raw = s_vib_buffer + s_active_points * axis;
+        remove_dc_to_buffer(raw, s_fft_scratch, NULL);
+        err = algo_fft_calculate(s_fft_scratch,
+                                 s_fft_mag,
+                                 s_fft_work_buf,
+                                 s_active_points);
+        if (err != ESP_OK) {
+            report_pipeline_discard_fft(payload);
+            return err;
+        }
+        memcpy(axis_output + axis_bytes * axis, s_fft_mag, axis_bytes);
+    }
+
+    *out_payload = payload;
+    return ESP_OK;
+}
+
+esp_err_t report_pipeline_upload_fft(report_fft_payload_t *payload)
+{
+    if (!payload || !payload->data || payload->length == 0U ||
+        payload->task_id[0] == '\0') {
+        report_pipeline_discard_fft(payload);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), "http://%s/api/v1/sensors/tasks/%s/fft",
+             g_user_config.api_host, payload->task_id);
+    char *response = NULL;
+    esp_err_t err = http_proxy_post_binary(url,
+                                           payload->data,
+                                           payload->length,
+                                           &response);
+    if (err == ESP_OK) {
+        cJSON *root = response ? cJSON_Parse(response) : NULL;
+        const cJSON *code = root
+                                ? cJSON_GetObjectItemCaseSensitive(root, "code")
+                                : NULL;
+        if (!cJSON_IsNumber(code) || code->valueint != 0) {
+            LOG_WARN("FFT binary upload returned an invalid server response");
+            err = ESP_FAIL;
+        }
+        cJSON_Delete(root);
+    }
+    if (err != ESP_OK) {
+        LOG_WARNF("FFT binary upload failed: task_id=%s, err=%s",
+                  payload->task_id, esp_err_to_name(err));
+    } else {
+        LOG_INFOF("FFT binary uploaded: task_id=%s, bytes=%u",
+                  payload->task_id, (unsigned)payload->length);
+    }
+    free(response);
+    report_pipeline_discard_fft(payload);
+    return err;
+}
+
+void report_pipeline_discard_fft(report_fft_payload_t *payload)
+{
+    if (!payload) {
+        return;
+    }
+    heap_caps_free(payload->data);
+    payload->data = NULL;
+    free(payload);
 }
 
 esp_err_t report_pipeline_capture_with_sample_complete(
