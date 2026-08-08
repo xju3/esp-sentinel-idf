@@ -627,10 +627,14 @@ static void drv_internal_dma_callback(const imu_raw_data_t *data, size_t count,
 }
 
 static esp_err_t drv_iis3dwb_prepare_sensor_session(void) {
+#ifndef CONFIG_SENTINEL_IIS3DWB_COMPARE_MODE
   gpio_set_level(BOARD_GPIO_SENSOR_EN, 0);
+#endif
   esp_err_t err = drv_iis3dwb_init();
   if (err != ESP_OK) {
+#ifndef CONFIG_SENTINEL_IIS3DWB_COMPARE_MODE
     gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
+#endif
     return err;
   }
   return ESP_OK;
@@ -642,7 +646,9 @@ static void drv_iis3dwb_finish_sensor_session(void) {
     LOG_WARN("Failed to place IIS3DWB into standby before power-off");
   }
 
+#ifndef CONFIG_SENTINEL_IIS3DWB_COMPARE_MODE
   gpio_set_level(BOARD_GPIO_SENSOR_EN, 1);
+#endif
 }
 
 esp_err_t drv_iis3dwb_capture(iis3dwb_cfg_t *cfg, uint32_t duration_ms,

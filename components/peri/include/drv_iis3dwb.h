@@ -14,10 +14,10 @@ extern "C" {
 // 业务层用来接收数据的回调合同
 #define IIS3DWB_PIN_NUM_INT1 GPIO_NUM_15
 #define IIS3DWB_PIN_NUM_INT2 GPIO_NUM_38
-#define IIS3DWB_PIN_NUM_SCL GPIO_NUM_6
-#define IIS3DWB_PIN_NUM_CS GPIO_NUM_7
-#define IIS3DWB_PIN_NUM_SDA GPIO_NUM_5
-#define IIS3DWB_PIN_NUM_SDO GPIO_NUM_4
+#define IIS3DWB_PIN_NUM_CS GPIO_NUM_4
+#define IIS3DWB_PIN_NUM_SCL GPIO_NUM_5
+#define IIS3DWB_PIN_NUM_SDA GPIO_NUM_6
+#define IIS3DWB_PIN_NUM_SDO GPIO_NUM_7
 
 // Pins to isolate (drive to 0V) when IIS3DWB is powered off to prevent backpowering
 #define IIS3DWB_ISOLATE_PINS                                                   \

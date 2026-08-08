@@ -22,10 +22,14 @@
 #include "task_daq.h"
 
 #include "esp_ota_ops.h"
+#include "esp_heap_caps.h"
 #include "task_ota.h"
 #include "task_binding.h"
 
 #include "wom_lis2dh12.h" // 引入 WoM 接口
+
+#include <stdio.h>
+#include <string.h>
 
 // === 密集诊断模式状态 (存储在 RTC 内存，深睡掉电不丢失) ===
 RTC_DATA_ATTR int g_dense_diag_remaining = 0; // 剩余密集诊断次数
@@ -37,6 +41,8 @@ void enable_dense_diagnostic(int times, int interval_seconds) {
   g_dense_diag_remaining = times;
   g_dense_diag_interval_s = interval_seconds;
 }
+
+#ifndef CONFIG_SENTINEL_IIS3DWB_COMPARE_MODE
 
 static esp_err_t prepare_4g_network(void *ctx) {
   (void)ctx;
@@ -53,12 +59,102 @@ static void deisolate_gpio_pins() {
   deisolate_ds18b20_pin();
 }
 
+#endif
+
+#ifdef CONFIG_SENTINEL_IIS3DWB_COMPARE_MODE
+
+#define IIS3DWB_COMPARE_POINTS 16384U
+
+static void free_compare_buffers(void) {
+  heap_caps_free(g_user_config.vib_buf);
+  heap_caps_free(g_user_config.fft_scratch);
+  heap_caps_free(g_user_config.fft_mag);
+  heap_caps_free(g_user_config.fft_work_buf);
+  g_user_config.vib_buf = NULL;
+  g_user_config.fft_scratch = NULL;
+  g_user_config.fft_mag = NULL;
+  g_user_config.fft_work_buf = NULL;
+}
+
+static esp_err_t prepare_compare_buffers(void) {
+  memset(&g_user_config, 0, sizeof(g_user_config));
+  snprintf(g_user_config.sn, sizeof(g_user_config.sn), "STEVAL-MKI208V1K");
+  g_user_config.fft_points = IIS3DWB_COMPARE_POINTS;
+  g_user_config.range_g = 2;
+
+  g_user_config.vib_buf = heap_caps_calloc(
+      IIS3DWB_COMPARE_POINTS * 3U, sizeof(float),
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  g_user_config.fft_scratch = heap_caps_malloc(
+      IIS3DWB_COMPARE_POINTS * sizeof(float),
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  g_user_config.fft_mag = heap_caps_calloc(
+      IIS3DWB_COMPARE_POINTS / 2U, sizeof(float),
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  g_user_config.fft_work_buf = heap_caps_calloc(
+      IIS3DWB_COMPARE_POINTS, sizeof(float),
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+  if (!g_user_config.vib_buf || !g_user_config.fft_scratch ||
+      !g_user_config.fft_mag || !g_user_config.fft_work_buf) {
+    free_compare_buffers();
+    return ESP_ERR_NO_MEM;
+  }
+  return ESP_OK;
+}
+
+void app_main(void) {
+  const esp_app_desc_t *app_desc = esp_app_get_description();
+  LOG_INFOF("Firmware Version: %s", app_desc->version);
+  LOG_INFO("STEVAL-MKI208V1K comparison mode");
+  LOG_INFOF("SPI pins: CS=%d SCL=%d SDA/MOSI=%d SDO/MISO=%d",
+            IIS3DWB_PIN_NUM_CS, IIS3DWB_PIN_NUM_SCL,
+            IIS3DWB_PIN_NUM_SDA, IIS3DWB_PIN_NUM_SDO);
+  LOG_INFOF("Capture settings: fs=26667 Hz, points=%u, requested_range=2g",
+            IIS3DWB_COMPARE_POINTS);
+
+  esp_err_t err = prepare_compare_buffers();
+  if (err == ESP_OK) {
+    report_payload_t *payload = NULL;
+    err = report_pipeline_capture_vibration_only(NULL, &payload);
+    if (err == ESP_OK) {
+      const char *json = report_pipeline_payload_json(payload);
+      printf("\nIIS3DWB_COMPARE_JSON_BEGIN\n%s\nIIS3DWB_COMPARE_JSON_END\n",
+             json ? json : "");
+      fflush(stdout);
+    }
+    report_pipeline_discard(payload);
+    if (!heap_caps_check_integrity_all(true)) {
+      LOG_ERROR("Heap integrity check failed after comparison capture");
+      err = ESP_FAIL;
+    } else {
+      LOG_INFO("Heap integrity check passed after comparison capture");
+    }
+  }
+
+  if (err != ESP_OK) {
+    LOG_ERRORF("IIS3DWB comparison capture failed: %s",
+               esp_err_to_name(err));
+  } else {
+    LOG_INFO("IIS3DWB comparison capture complete; reset to capture again");
+  }
+  // This is a one-shot comparison firmware. Keep the large acquisition
+  // buffers alive while the board idles; freeing them here previously caused
+  // the post-report reboot seen on ESP32-S3/PSRAM.
+
+  while (true) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
+}
+
+#else
+
 //
 void app_main(void) {
   esp_err_t err = ESP_OK;
   bool has_report_work = false;
 
-  const esp_app_desc_t *app_desc = esp_ota_get_app_description();
+  const esp_app_desc_t *app_desc = esp_app_get_description();
   LOG_INFOF("========================================");
   LOG_INFOF("Firmware Version: %s", app_desc->version);
   LOG_INFOF("========================================");
@@ -196,3 +292,5 @@ sleep_prepare:
 
   esp_deep_sleep_start();
 }
+
+#endif

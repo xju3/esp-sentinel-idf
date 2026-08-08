@@ -1,5 +1,16 @@
 menu "App Config"
 
+config SENTINEL_IIS3DWB_COMPARE_MODE
+    bool "Run one local STEVAL-MKI208V1K comparison capture"
+    default y
+    help
+      Build a local-only IIS3DWB comparison firmware for the
+      STEVAL-MKI208V1K adapter. It captures 16384 samples at 26667 Hz,
+      reuses the production auto-range and feature pipeline, prints the
+      complete report JSON to the serial console, and does not start 4G or
+      upload data. The adapter is assumed to be powered directly, so the
+      target board's GPIO2 sensor power gate is bypassed.
+
 config DEV_MODE
     bool "Enable developer mode"
     default y

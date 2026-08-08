@@ -15,6 +15,11 @@ typedef void (*report_sample_complete_fn)(void *ctx);
 esp_err_t report_pipeline_capture(const char *task_id,
                                   report_payload_t **out_payload);
 
+/** Capture vibration only, without accessing the DS18B20 temperature sensor. */
+esp_err_t report_pipeline_capture_vibration_only(
+    const char *task_id,
+    report_payload_t **out_payload);
+
 /**
  * Capture a report and invoke a hook after the final raw sample has been
  * accepted, before FFT/feature calculation and JSON construction begin.
@@ -30,6 +35,9 @@ esp_err_t report_pipeline_upload(report_payload_t *payload);
 
 /** Persist one payload for ordered retry without releasing it. */
 esp_err_t report_pipeline_cache(report_payload_t *payload);
+
+/** Borrow the generated JSON until report_pipeline_discard() is called. */
+const char *report_pipeline_payload_json(const report_payload_t *payload);
 
 /** Retry persisted reports after all current reports uploaded successfully. */
 esp_err_t report_pipeline_flush_cache(void);
