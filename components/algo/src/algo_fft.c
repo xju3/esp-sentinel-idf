@@ -13,6 +13,7 @@
 #include "logger.h"
 
 static bool s_fft_initialized = false;
+static uint32_t s_fft_complex_points = 0;
 static StaticSemaphore_t s_fft_lock_buf;
 static SemaphoreHandle_t s_fft_lock = NULL;
 
@@ -92,19 +93,35 @@ esp_err_t algo_fft_init(void)
         }
     }
 
-    if (s_fft_initialized) {
+    // The ESP-DSP twiddle table must match the complex FFT length exactly.
+    // It is therefore initialized lazily inside algo_fft_calculate(), where
+    // the real-input length is known.
+    return ESP_OK;
+}
+
+static esp_err_t prepare_fft_table_locked(uint32_t complex_points)
+{
+    if (s_fft_initialized && s_fft_complex_points == complex_points) {
         return ESP_OK;
     }
-    
-    // 初始化 FFT 查找表 (Bit-reverse table 和 Sin/Cos table)
-    esp_err_t ret = dsps_fft2r_init_fc32(NULL, CONFIG_DSP_MAX_FFT_SIZE);
-    if (ret == ESP_OK) {
-        s_fft_initialized = true;
-        // LOG_DEBUG("FFT tables initialized");
-    } else {
-        LOG_ERRORF("Failed to init FFT tables: %d", ret);
+
+    if (s_fft_initialized) {
+        dsps_fft2r_deinit_fc32();
+        s_fft_initialized = false;
+        s_fft_complex_points = 0;
     }
-    return ret;
+
+    esp_err_t err = dsps_fft2r_init_fc32(NULL, complex_points);
+    if (err != ESP_OK) {
+        LOG_ERRORF("Failed to initialize %lu-point complex FFT table: %s",
+                   (unsigned long)complex_points,
+                   esp_err_to_name(err));
+        return err;
+    }
+
+    s_fft_initialized = true;
+    s_fft_complex_points = complex_points;
+    return ESP_OK;
 }
 
 esp_err_t algo_fft_extract_peaks(
@@ -198,14 +215,19 @@ esp_err_t algo_fft_calculate(const float *input, float *output, float *work_buf,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_fft_initialized) {
-        esp_err_t err = algo_fft_init();
-        if (err != ESP_OK) return err;
-    }
+    esp_err_t err = algo_fft_init();
+    if (err != ESP_OK) return err;
 
     if (xSemaphoreTake(s_fft_lock, portMAX_DELAY) != pdTRUE) {
         LOG_ERROR("Failed to take FFT mutex");
         return ESP_ERR_TIMEOUT;
+    }
+
+    const uint32_t n_complex = n / 2U;
+    err = prepare_fft_table_locked(n_complex);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_fft_lock);
+        return err;
     }
 
     // === 实数 FFT 优化 (N/2 Trick) ===
@@ -223,13 +245,17 @@ esp_err_t algo_fft_calculate(const float *input, float *output, float *work_buf,
 
     // 3. 执行 N/2 点复数 FFT
     // 此时 y_cf 中存储了 N 个实数，被视为 N/2 个复数 (Re, Im, Re, Im...)
-    uint32_t n_complex = n / 2;
-
-    // 位反转 (Bit Reverse)
-    dsps_bit_rev_fc32(y_cf, n_complex);
-
-    // FFT (基2, 复数)
-    dsps_fft2r_fc32(y_cf, n_complex);
+    // ESP-DSP performs the FFT first and converts its decimation-in-frequency
+    // output to natural order afterwards. Reversing before the FFT corrupts
+    // the spectrum and does not follow the library contract.
+    err = dsps_fft2r_fc32(y_cf, n_complex);
+    if (err == ESP_OK) {
+        err = dsps_bit_rev_fc32(y_cf, n_complex);
+    }
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_fft_lock);
+        return err;
+    }
 
     // 4. 拆包 (Unpack) 与 幅值计算
     // 利用共轭对称性从 N/2 点复数 FFT 结果中恢复 N 点实数 FFT 结果
@@ -309,5 +335,4 @@ esp_err_t algo_fft_calculate(const float *input, float *output, float *work_buf,
     xSemaphoreGive(s_fft_lock);
     return ESP_OK;
 }
-
 

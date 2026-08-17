@@ -29,7 +29,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define REPORT_SCHEMA_VERSION 2
+#define REPORT_SCHEMA_VERSION 3
 #define REPORT_SAMPLE_TYPE "normal"
 #define REPORT_FS_HZ 26667.0f
 #define REPORT_MAX_POINTS MAX_ALLOWED_POINTS
@@ -37,7 +37,6 @@
 #define REPORT_CAPTURE_GUARD_MS 250U
 #define REPORT_DMA_CHUNK_SIZE 512
 #define REPORT_CLIP_THRESHOLD_RATIO 0.98f
-#define REPORT_CLIP_TOLERANCE_RATIO 0.001f
 #define REPORT_FFT_PEAK_COUNT 5
 #define REPORT_FFT_PEAK_MIN_HZ 0.0f
 #define REPORT_FFT_PEAK_MAX_HZ 5000.0f
@@ -51,6 +50,10 @@
 #define REPORT_BEARING_MAX_ANALYSIS_HZ 1000.0f
 #define REPORT_BEARING_MIN_SNR_DB 3.0f
 #define REPORT_BEARING_NOISE_RADIUS_BINS 24U
+#define REPORT_VELOCITY_MIN_HZ 10.0f
+#define REPORT_VELOCITY_MAX_HZ 1000.0f
+#define REPORT_HANN_POWER_CORRECTION (2.0 / 3.0)
+#define REPORT_VELOCITY_BAND_COUNT 3
 
 static float *s_vib_buffer;
 static float *s_fft_scratch;
@@ -89,6 +92,7 @@ typedef struct {
     float peak_acc_g;
     float peak_to_peak_acc_g;
     float rms_vel_mm_s;
+    float rms_vel_legacy_mm_s;
     float crest_factor;
     float kurtosis;
 } axis_time_features_t;
@@ -98,6 +102,8 @@ typedef struct {
     float spectral_centroid_hz;
     float spectral_entropy;
     float rms_vel_mm_s;
+    float rms_vel_legacy_mm_s;
+    float velocity_band_rms_mm_s[REPORT_VELOCITY_BAND_COUNT];
     float band_ratio[REPORT_BAND_COUNT];
 } axis_freq_features_t;
 
@@ -132,6 +138,16 @@ static const struct {
     {"500_1000", 500.0f, 1000.0f},
     {"1000_2000", 1000.0f, 2000.0f},
     {"2000_5000", 2000.0f, 5000.0f},
+};
+
+static const struct {
+    const char *key;
+    float min_hz;
+    float max_hz;
+} s_velocity_bands[] = {
+    {"10_100", 10.0f, 100.0f},
+    {"100_500", 100.0f, 500.0f},
+    {"500_1000", 500.0f, 1000.0f},
 };
 
 typedef struct {
@@ -346,7 +362,7 @@ static void evaluate_clip_quality(uint16_t range_g, capture_attempt_t *attempt)
         }
 
         q->clip_ratio = (float)q->clip_count / (float)s_active_points;
-        if (q->clip_ratio > REPORT_CLIP_TOLERANCE_RATIO) {
+        if (q->clip_count > 0U) {
             attempt->clipped = true;
         }
     }
@@ -511,7 +527,8 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     double amp_sum = 0.0;
     double weighted_freq_sum = 0.0;
     double energy_sum = 0.0;
-    double vel_rms_sq_sum = 0.0;
+    double legacy_vel_rms_sq_sum = 0.0;
+    double velocity_band_rms_sq[REPORT_VELOCITY_BAND_COUNT] = {0};
     double band_energy[REPORT_BAND_COUNT] = {0};
 
     for (uint32_t i = 1; i < half; ++i) {
@@ -530,7 +547,25 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
         amp_sum += amp;
         weighted_freq_sum += (double)freq_hz * (double)amp;
         energy_sum += energy;
-        vel_rms_sq_sum += (vel_peak_m_s * vel_peak_m_s) * 0.5;
+        legacy_vel_rms_sq_sum += (vel_peak_m_s * vel_peak_m_s) * 0.5;
+
+        if (freq_hz >= REPORT_VELOCITY_MIN_HZ &&
+            freq_hz <= REPORT_VELOCITY_MAX_HZ) {
+            const double corrected_velocity_power =
+                (vel_peak_m_s * vel_peak_m_s) * 0.5 *
+                REPORT_HANN_POWER_CORRECTION;
+            for (size_t b = 0; b < REPORT_VELOCITY_BAND_COUNT; ++b) {
+                const bool in_last = b == REPORT_VELOCITY_BAND_COUNT - 1U &&
+                                     freq_hz >= s_velocity_bands[b].min_hz &&
+                                     freq_hz <= s_velocity_bands[b].max_hz;
+                if (in_last ||
+                    (freq_hz >= s_velocity_bands[b].min_hz &&
+                     freq_hz < s_velocity_bands[b].max_hz)) {
+                    velocity_band_rms_sq[b] += corrected_velocity_power;
+                    break;
+                }
+            }
+        }
 
         for (size_t b = 0; b < sizeof(s_bands) / sizeof(s_bands[0]); ++b) {
             const bool in_last = (b == (sizeof(s_bands) / sizeof(s_bands[0])) - 1U) &&
@@ -548,7 +583,16 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     }
 
     out->spectral_centroid_hz = (amp_sum > 0.0) ? (float)(weighted_freq_sum / amp_sum) : 0.0f;
-    out->rms_vel_mm_s = (float)(sqrt(vel_rms_sq_sum) * 1000.0);
+    double corrected_velocity_power_sum = 0.0;
+    for (size_t b = 0; b < REPORT_VELOCITY_BAND_COUNT; ++b) {
+        corrected_velocity_power_sum += velocity_band_rms_sq[b];
+        out->velocity_band_rms_mm_s[b] =
+            (float)(sqrt(velocity_band_rms_sq[b]) * 1000.0);
+    }
+    out->rms_vel_mm_s =
+        (float)(sqrt(corrected_velocity_power_sum) * 1000.0);
+    out->rms_vel_legacy_mm_s =
+        (float)(sqrt(legacy_vel_rms_sq_sum) * 1000.0);
     if (energy_sum > 0.0) {
         double entropy = 0.0;
         uint32_t bins = 0;
@@ -805,6 +849,8 @@ static void add_time_features(cJSON *axis, const axis_time_features_t *f)
     add_number_rounded(time, "peak_acc_g", f->peak_acc_g, 3);
     add_number_rounded(time, "peak_to_peak_acc_g", f->peak_to_peak_acc_g, 3);
     add_number_rounded(time, "rms_vel_mm_s", f->rms_vel_mm_s, 2);
+    add_number_rounded(time, "rms_vel_legacy_mm_s",
+                       f->rms_vel_legacy_mm_s, 2);
     add_number_rounded(time, "crest_factor", f->crest_factor, 2);
     add_number_rounded(time, "kurtosis", f->kurtosis, 2);
 }
@@ -825,6 +871,15 @@ static void add_freq_features(cJSON *axis, const axis_freq_features_t *f)
     cJSON *bands = cJSON_AddObjectToObject(axis, "band_energy_ratio");
     for (size_t i = 0; i < sizeof(s_bands) / sizeof(s_bands[0]); ++i) {
         add_number_rounded(bands, s_bands[i].key, f->band_ratio[i], 3);
+    }
+
+    cJSON *velocity_bands =
+        cJSON_AddObjectToObject(axis, "band_rms_vel_mm_s");
+    for (size_t i = 0; i < REPORT_VELOCITY_BAND_COUNT; ++i) {
+        add_number_rounded(velocity_bands,
+                           s_velocity_bands[i].key,
+                           f->velocity_band_rms_mm_s[i],
+                           2);
     }
 }
 
@@ -891,6 +946,8 @@ static esp_err_t add_axis_features(cJSON *root)
             return err;
         }
         time_features.rms_vel_mm_s = freq_features.rms_vel_mm_s;
+        time_features.rms_vel_legacy_mm_s =
+            freq_features.rms_vel_legacy_mm_s;
 
         cJSON *axis_obj = cJSON_AddObjectToObject(axes, axis_names[axis]);
         add_time_features(axis_obj, &time_features);
@@ -941,6 +998,20 @@ static char *build_report_json(float temperature_c,
     cJSON_AddStringToObject(root, "task_id", task_id ? task_id : "");
     cJSON_AddStringToObject(root, "sample_type", REPORT_SAMPLE_TYPE);
     cJSON_AddNumberToObject(root, "duration_ms", duration_ms);
+
+    cJSON *velocity_band =
+        cJSON_AddObjectToObject(root, "velocity_rms_band_hz");
+    if (!velocity_band) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    cJSON_AddNumberToObject(velocity_band, "min", REPORT_VELOCITY_MIN_HZ);
+    cJSON_AddNumberToObject(velocity_band, "max", REPORT_VELOCITY_MAX_HZ);
+    cJSON_AddStringToObject(velocity_band, "window", "hann");
+    add_number_rounded(velocity_band,
+                       "power_correction",
+                       REPORT_HANN_POWER_CORRECTION,
+                       6);
 
     cJSON *quality = add_quality(attempts, attempt_count, accepted);
     if (!quality) {

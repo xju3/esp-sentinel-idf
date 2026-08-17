@@ -32,7 +32,7 @@ typedef struct __attribute__((packed)) {
 
 /**
  * @brief 初始化 FFT 查找表
- * 在首次调用计算前会自动调用，也可以手动调用以预分配内存
+ * 在首次调用计算前会自动调用。FFT 表按实际点数延迟初始化。
  */
 esp_err_t algo_fft_init(void);
 
