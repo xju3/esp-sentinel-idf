@@ -93,6 +93,7 @@ typedef struct {
     float peak_to_peak_acc_g;
     float rms_vel_mm_s;
     float rms_vel_legacy_mm_s;
+    float peak_to_peak_disp_um;
     float crest_factor;
     float kurtosis;
 } axis_time_features_t;
@@ -103,6 +104,7 @@ typedef struct {
     float spectral_entropy;
     float rms_vel_mm_s;
     float rms_vel_legacy_mm_s;
+    float peak_to_peak_disp_um;
     float velocity_band_rms_mm_s[REPORT_VELOCITY_BAND_COUNT];
     float band_ratio[REPORT_BAND_COUNT];
 } axis_freq_features_t;
@@ -528,6 +530,7 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
     double weighted_freq_sum = 0.0;
     double energy_sum = 0.0;
     double legacy_vel_rms_sq_sum = 0.0;
+    double displacement_rms_sq_sum = 0.0;
     double velocity_band_rms_sq[REPORT_VELOCITY_BAND_COUNT] = {0};
     double band_energy[REPORT_BAND_COUNT] = {0};
 
@@ -553,6 +556,12 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
             freq_hz <= REPORT_VELOCITY_MAX_HZ) {
             const double corrected_velocity_power =
                 (vel_peak_m_s * vel_peak_m_s) * 0.5 *
+                REPORT_HANN_POWER_CORRECTION;
+            const double angular_freq = 2.0 * M_PI * (double)freq_hz;
+            const double disp_peak_m = accel_peak_m_s2 /
+                                       (angular_freq * angular_freq);
+            displacement_rms_sq_sum +=
+                (disp_peak_m * disp_peak_m) * 0.5 *
                 REPORT_HANN_POWER_CORRECTION;
             for (size_t b = 0; b < REPORT_VELOCITY_BAND_COUNT; ++b) {
                 const bool in_last = b == REPORT_VELOCITY_BAND_COUNT - 1U &&
@@ -593,6 +602,10 @@ static esp_err_t compute_freq_features(const float *data, axis_freq_features_t *
         (float)(sqrt(corrected_velocity_power_sum) * 1000.0);
     out->rms_vel_legacy_mm_s =
         (float)(sqrt(legacy_vel_rms_sq_sum) * 1000.0);
+    // The magnitude spectrum does not retain component phase, so report the
+    // equivalent sinusoidal peak-to-peak value derived from band-limited RMS.
+    out->peak_to_peak_disp_um =
+        (float)(2.0 * sqrt(2.0) * sqrt(displacement_rms_sq_sum) * 1000000.0);
     if (energy_sum > 0.0) {
         double entropy = 0.0;
         uint32_t bins = 0;
@@ -851,6 +864,8 @@ static void add_time_features(cJSON *axis, const axis_time_features_t *f)
     add_number_rounded(time, "rms_vel_mm_s", f->rms_vel_mm_s, 2);
     add_number_rounded(time, "rms_vel_legacy_mm_s",
                        f->rms_vel_legacy_mm_s, 2);
+    add_number_rounded(time, "peak_to_peak_disp_um",
+                       f->peak_to_peak_disp_um, 3);
     add_number_rounded(time, "crest_factor", f->crest_factor, 2);
     add_number_rounded(time, "kurtosis", f->kurtosis, 2);
 }
@@ -948,6 +963,8 @@ static esp_err_t add_axis_features(cJSON *root)
         time_features.rms_vel_mm_s = freq_features.rms_vel_mm_s;
         time_features.rms_vel_legacy_mm_s =
             freq_features.rms_vel_legacy_mm_s;
+        time_features.peak_to_peak_disp_um =
+            freq_features.peak_to_peak_disp_um;
 
         cJSON *axis_obj = cJSON_AddObjectToObject(axes, axis_names[axis]);
         add_time_features(axis_obj, &time_features);
@@ -1012,6 +1029,23 @@ static char *build_report_json(float temperature_c,
                        "power_correction",
                        REPORT_HANN_POWER_CORRECTION,
                        6);
+
+    cJSON *displacement_band =
+        cJSON_AddObjectToObject(root, "displacement_peak_to_peak_band_hz");
+    if (!displacement_band) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    cJSON_AddNumberToObject(displacement_band, "min", REPORT_VELOCITY_MIN_HZ);
+    cJSON_AddNumberToObject(displacement_band, "max", REPORT_VELOCITY_MAX_HZ);
+    cJSON_AddStringToObject(displacement_band, "window", "hann");
+    add_number_rounded(displacement_band,
+                       "power_correction",
+                       REPORT_HANN_POWER_CORRECTION,
+                       6);
+    cJSON_AddStringToObject(displacement_band,
+                            "calculation",
+                            "equivalent_sine_from_rms");
 
     cJSON *quality = add_quality(attempts, attempt_count, accepted);
     if (!quality) {
