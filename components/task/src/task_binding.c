@@ -3,6 +3,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -21,11 +22,12 @@
 #include "wom_lis2dh12.h"
 #endif
 
-// Report task complete result (HTTP POST /complete/<result>)
-static esp_err_t report_task_complete(const char *task_id, int result_code) {
+// Report task completion using the server contract: 9=success, -1=failure.
+static esp_err_t report_task_complete(const char *task_id, bool success) {
   if (!task_id || task_id[0] == '\0') {
     return ESP_OK;
   }
+  const int result_code = success ? 9 : -1;
   char url[256];
   snprintf(url, sizeof(url), "http://%s/sensors/%s/complete/%d",
            g_user_config.api_host, task_id, result_code);
@@ -202,7 +204,7 @@ void task_binding_execute(const char *task_id) {
   // If completely unbound, restore factory settings
   if (needs_factory_reset) {
     LOG_INFO("Device completely unbound. Restoring factory settings...");
-    report_task_complete(task_id, 1); // 1 means success
+    report_task_complete(task_id, true);
 
     // Give 4G module some time to finish transmitting the HTTP POST completely
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -228,6 +230,6 @@ void task_binding_execute(const char *task_id) {
     LOG_INFO("Restarting system...");
     esp_restart();
   } else {
-    report_task_complete(task_id, 1);
+    report_task_complete(task_id, true);
   }
 }

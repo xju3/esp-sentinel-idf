@@ -57,9 +57,11 @@ static esp_err_t report_ota_result(const char *task_id, int result_code)
     return err;
 }
 
-// 内部方法：上报 OTA 最终完成结果 (HTTP POST /complete)
-static esp_err_t report_ota_complete(const char *task_id, int result_code)
+// 上报 OTA 最终完成结果。设备任务完成回调固定为 9=成功、-1=失败；
+// OTA 在 NVS 中保留原有的 0=成功、非 0=失败内部状态。
+static esp_err_t report_ota_complete(const char *task_id, bool success)
 {
+    const int result_code = success ? 9 : -1;
     char url[256];
     snprintf(url, sizeof(url), "http://%s/sensors/%s/complete/%d", g_user_config.api_host, task_id, result_code);
     
@@ -287,7 +289,7 @@ void task_ota_report_pending_completion(void)
         return;
     }
     err = nvs_get_str(handle, OTA_STATE_KEY_TASK_ID, task_id, &required_size);
-    if (err == ESP_OK && report_ota_complete(task_id, result_code) == ESP_OK) {
+    if (err == ESP_OK && report_ota_complete(task_id, result_code == 0) == ESP_OK) {
         (void)nvs_erase_key(handle, OTA_STATE_KEY_TASK_ID);
         (void)nvs_erase_key(handle, OTA_STATE_KEY_RESULT);
         (void)nvs_erase_key(handle, OTA_STATE_KEY_TARGET_ADDR);
@@ -471,7 +473,7 @@ void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url)
             if (running) {
                 (void)esp_ota_set_boot_partition(running);
             }
-            (void)report_ota_complete(task_id ? task_id : "", 1);
+            (void)report_ota_complete(task_id ? task_id : "", false);
             unlock_system_task();
             return;
         }
@@ -480,7 +482,7 @@ void execute_ota_update_from_url_sync(const char *task_id, const char *fw_url)
         esp_restart();
     } else {
         LOG_ERROR("OTA Update failed during download.");
-        report_ota_complete(task_id ? task_id : "", 1);
+        report_ota_complete(task_id ? task_id : "", false);
         unlock_system_task();
 
     }
